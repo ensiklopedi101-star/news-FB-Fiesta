@@ -13,17 +13,20 @@ export const revalidate = 0;
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
-  const [article] = await getDb().select({ title: articles.title, category: articles.category, sourceName: articles.sourceName, imageUrl: articles.imageUrl })
+  const [article] = await getDb().select({ title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl })
     .from(articles)
     .where(eq(articles.id, id))
     .limit(1);
   if (!article) return new Response("Not found", { status: 404 });
 
-  const brand = (process.env.PAGE_BRAND || "Kabar Nusra").slice(0, 40);
+  const pageBrand = article.pageKey === "entertainment" ? process.env.PAGE_BRAND_ENTERTAINMENT : process.env.PAGE_BRAND_NEWS;
+  const brand = (pageBrand || process.env.PAGE_BRAND || "Kabar Nusra").slice(0, 40);
   const category = article.category.toUpperCase().slice(0, 24);
   const title = article.title.slice(0, 130);
   const image = isSafePublicImageUrl(article.imageUrl) ? article.imageUrl : null;
-  const logo = isSafePublicImageUrl(process.env.PAGE_LOGO_URL) ? process.env.PAGE_LOGO_URL : null;
+  const pageLogo = article.pageKey === "entertainment" ? process.env.PAGE_LOGO_ENTERTAINMENT_URL : process.env.PAGE_LOGO_NEWS_URL;
+  const logoUrl = pageLogo || process.env.PAGE_LOGO_URL;
+  const logo = isSafePublicImageUrl(logoUrl) ? logoUrl : null;
 
   return new ImageResponse(
     (

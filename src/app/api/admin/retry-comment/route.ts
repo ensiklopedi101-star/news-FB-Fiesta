@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "ID artikel tidak valid." }, { status: 400 });
   }
 
-  const [article] = await getDb().select({ id: articles.id, postId: articles.facebookPostId, sourceUrl: articles.sourceUrl })
+  const [article] = await getDb().select({ id: articles.id, pageKey: articles.pageKey, postId: articles.facebookPostId, sourceUrl: articles.sourceUrl })
     .from(articles)
     .where(and(
       eq(articles.id, id),
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   if (!article?.postId) return NextResponse.json({ error: "Tidak ada komentar sumber yang gagal untuk artikel ini." }, { status: 404 });
 
   try {
-    await addSourceComment(article.postId, article.sourceUrl);
+    await addSourceComment(article.pageKey, article.postId, article.sourceUrl);
     await getDb().update(articles).set({ errorMessage: null, updatedAt: new Date() }).where(eq(articles.id, id));
     return NextResponse.json({ ok: true, id });
   } catch (error) {

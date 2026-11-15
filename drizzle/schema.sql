@@ -1,9 +1,11 @@
 CREATE TYPE "public"."article_status" AS ENUM ('queued', 'processing', 'ready', 'published', 'failed');
+CREATE TYPE "public"."article_page_key" AS ENUM ('news', 'entertainment');
 
 CREATE TABLE "articles" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "source_name" text NOT NULL,
   "category" text NOT NULL,
+  "page_key" "article_page_key" DEFAULT 'news' NOT NULL,
   "source_url" text NOT NULL,
   "url_hash" text NOT NULL,
   "title" text NOT NULL,
@@ -22,4 +24,5 @@ CREATE TABLE "articles" (
 
 CREATE UNIQUE INDEX "articles_url_hash_unique" ON "articles" USING btree ("url_hash");
 CREATE INDEX "articles_status_created_idx" ON "articles" USING btree ("status", "created_at");
+CREATE INDEX "articles_page_status_created_idx" ON "articles" USING btree ("page_key", "status", "created_at");
 CREATE INDEX "articles_published_at_idx" ON "articles" USING btree ("published_at");

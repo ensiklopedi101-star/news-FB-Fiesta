@@ -13,7 +13,8 @@ export async function GET() {
       database: "connected",
       integrations: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
-        facebook: Boolean(process.env.FB_PAGE_ID && process.env.FB_PAGE_ACCESS_TOKEN),
+        facebookNews: Boolean((process.env.FB_NEWS_PAGE_ID && process.env.FB_NEWS_PAGE_ACCESS_TOKEN) || (process.env.FB_PAGE_ID && process.env.FB_PAGE_ACCESS_TOKEN)),
+        facebookEntertainment: Boolean(process.env.FB_ENTERTAINMENT_PAGE_ID && process.env.FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN),
         feeds: Boolean(process.env.NEWS_FEEDS),
       },
     });

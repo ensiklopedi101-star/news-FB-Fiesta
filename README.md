@@ -1,16 +1,16 @@
 # News FB Fiesta
 
-Backend Next.js untuk alur **RSS → ringkasan Gemini → news card 1080×1350 → Facebook Page**. Database memakai **Neon Postgres** melalui `DATABASE_URL`; Supabase tidak dibutuhkan. Aplikasi ini tidak membuat video Reels.
+Backend Next.js untuk alur **RSS → ringkasan Gemini → news card 1080×1350 → Facebook Page**. Satu database **Neon Postgres** melalui `DATABASE_URL` melayani dua channel publikasi: `news` dan `entertainment`. Supabase tidak dibutuhkan. Aplikasi ini tidak membuat video Reels.
 
-> Ini adalah kerangka aplikasi yang perlu dikonfigurasi dengan akun dan kredensial milikmu. Belum ada feed, token Meta, API key Gemini, atau database yang terpasang di repository.
+> Repository tidak menyimpan kredensial. Hubungkan Neon lewat `DATABASE_URL`; feed RSS dan API Gemini/Meta dikonfigurasi sebagai environment variables di Vercel.
 
 ## Yang sudah dibuat
 
-- RSS reader dengan daftar feed/kategori yang bisa diatur lewat `NEWS_FEEDS`.
-- Deduplicasi URL sumber dengan SHA-256 dan unique index di Neon.
+- RSS reader dengan daftar feed/kategori yang bisa diatur lewat `NEWS_FEEDS`; tiap feed diarahkan ke channel `news` atau `entertainment`.
+- Deduplicasi URL sumber dengan SHA-256 dan unique index di Neon; setiap artikel menyimpan `page_key` tujuan.
 - Ringkasan bahasa Indonesia menggunakan Gemini: judul, tepat tiga paragraf pendek, dan pertanyaan penutup.
 - Kartu berita dinamis vertikal 1080×1350 pada `/api/og/{articleId}`; memakai gambar RSS jika tersedia.
-- Unggah foto + caption ke Facebook Page, lalu komentar berisi URL sumber.
+- Unggah foto + caption ke Facebook Page yang sesuai dengan `page_key`, lalu komentar berisi URL sumber.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
 - GitHub Actions workflow untuk pemanggilan terjadwal setiap dua jam selama jam aktif WITA.
 
@@ -20,10 +20,11 @@ Pipeline memproses **maksimal satu berita per pemanggilan** agar eksekusi tetap 
 
 1. Buat database PostgreSQL di Neon atau melalui Vercel Marketplace.
 2. Ambil **pooled connection string** Neon (`postgresql://...`, SSL aktif).
-3. Buat tabel dengan salah satu cara berikut:
+3. Jika tabel `articles` belum ada, buat skema awal dengan salah satu cara berikut:
    - Jalankan `npm install`, isi `DATABASE_URL` di `.env.local`, lalu jalankan `npm run db:push`; atau
    - Buka Neon SQL Editor dan jalankan isi file [`drizzle/schema.sql`](./drizzle/schema.sql).
-4. Pastikan `DATABASE_URL` yang sama sudah ditambahkan di Vercel untuk Production (dan Preview jika diperlukan).
+4. Jika tabel `articles` sudah ada dari skema versi sebelumnya, jalankan sekali file [`drizzle/0001_multi_page.sql`](./drizzle/0001_multi_page.sql) di Neon SQL Editor. Kolom baru `page_key` untuk artikel lama otomatis bernilai `news`.
+5. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -34,21 +35,24 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
 - `GEMINI_API_KEY`: API key Google AI Studio; `GEMINI_MODEL` opsional (default `gemini-2.5-flash`).
-- `FB_PAGE_ID`, `FB_PAGE_ACCESS_TOKEN`: identitas dan Page Access Token Facebook Page.
+- `FB_NEWS_PAGE_ID`, `FB_NEWS_PAGE_ACCESS_TOKEN`: kredensial Page berita.
+- `FB_ENTERTAINMENT_PAGE_ID`, `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN`: kredensial Page hiburan.
 - `FB_GRAPH_VERSION`: versi Graph API yang didukung akun Meta-mu, format `vNN.0`.
 - `APP_URL`: URL HTTPS deployment publik tanpa slash di akhir. Dipakai Facebook untuk mengambil gambar.
-- `PAGE_BRAND`: nama halaman yang dicetak di kartu.
-- `PAGE_LOGO_URL`: opsional, URL HTTPS publik untuk logo. Jika kosong, kartu menampilkan monogram.
-- `NEWS_FEEDS`: JSON array konfigurasi RSS, contohnya:
+- `PAGE_BRAND_NEWS`, `PAGE_BRAND_ENTERTAINMENT`: nama yang dicetak pada kartu masing-masing Page.
+- `PAGE_LOGO_NEWS_URL`, `PAGE_LOGO_ENTERTAINMENT_URL`: opsional, logo HTTPS per Page; `PAGE_LOGO_URL` bisa menjadi fallback bersama.
+- `NEWS_FEEDS`: JSON array konfigurasi RSS. Setiap sumber perlu diarahkan dengan `pageKey` (`news` atau `entertainment`); jika tidak dicantumkan, default-nya `news`. Contoh:
 
 ```json
 [
-  {"name":"Nama Sumber Bali","category":"BALI","url":"https://domain-sumber.example/rss.xml","language":"id"},
-  {"name":"Nama Sumber Drakor","category":"DRAKOR","url":"https://domain-sumber.example/feed.xml","language":"en"}
+  {"name":"Nama Sumber Bali","category":"BALI","pageKey":"news","url":"https://domain-sumber.example/rss.xml","language":"id"},
+  {"name":"Nama Sumber Drakor","category":"DRAKOR","pageKey":"entertainment","url":"https://domain-sumber.example/feed.xml","language":"en"}
 ]
 ```
 
-Ganti URL contoh dengan endpoint RSS yang benar dan diizinkan oleh masing-masing penerbit. Kategori bebas, misalnya `BALI`, `NTB`, `NTT`, `DRAKOR`, `DRACIN`. `MAX_ITEMS_PER_FEED` opsional (default 8, maksimal 20).
+Ganti URL contoh dengan endpoint RSS yang benar dan diizinkan oleh masing-masing penerbit. Arahkan berita Bali/NTB/NTT ke `pageKey: "news"`; arahkan Drakor, Dracin, Donghua, Manga, Webtoon, anime, dan topik sejenis ke `pageKey: "entertainment"`. Kategori bebas, misalnya `BALI`, `NTB`, `NTT`, `DRAKOR`, `DRACIN`, `DONGHUA`, `MANGA`, dan `WEBTOON`. `MAX_ITEMS_PER_FEED` opsional (default 8, maksimal 20).
+
+ID dan access token kedua Page **disimpan terpisah sebagai environment variables Vercel, bukan di Neon**. Satu database menyimpan semua artikel beserta `page_key`; tidak perlu membuat database kedua.
 
 Untuk Facebook, pastikan Meta App/Page memiliki izin yang diperlukan untuk memublikasikan foto dan membuat komentar (umumnya `pages_manage_posts` dan `pages_manage_engagement`; proses mendapatkan Page token dapat memerlukan izin tambahan). Uji dengan Page yang kamu kelola. Token yang tidak punya izin atau kedaluwarsa akan membuat proses gagal.
 

@@ -5,6 +5,7 @@ import { z } from "zod";
 const feedSchema = z.object({
   name: z.string().min(1).max(80),
   category: z.string().min(1).max(24).transform((value) => value.toUpperCase()),
+  pageKey: z.enum(["news", "entertainment"]).default("news"),
   url: z.string().url(),
   language: z.string().default("id"),
 });
@@ -13,6 +14,7 @@ export type FeedConfig = z.infer<typeof feedSchema>;
 export type FeedStory = {
   sourceName: string;
   category: string;
+  pageKey: "news" | "entertainment";
   sourceUrl: string;
   urlHash: string;
   title: string;
@@ -114,6 +116,7 @@ export async function fetchRecentStories(): Promise<FeedStory[]> {
         stories.push({
           sourceName: feed.name,
           category: feed.category,
+          pageKey: feed.pageKey,
           sourceUrl,
           urlHash: createHash("sha256").update(sourceUrl).digest("hex"),
           title,
