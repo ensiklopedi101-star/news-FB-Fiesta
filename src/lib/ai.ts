@@ -40,7 +40,62 @@ export class AiGenerationError extends Error {
 type GeneratedDraft = { title?: unknown; paragraphs?: unknown; question?: unknown; hashtags?: unknown };
 
 const AI_TOTAL_TIMEOUT_MS = 30_000;
-const AI_PROVIDER_TIMEOUT_MS = 12_000;
+const AI_PROVIDER_TIMEOUT_MS = 8_000;
+const GROQ_MODEL_PREFERENCES = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
+const GEMINI_MODEL_PREFERENCES = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"];
+
+function modelCostRank(model: string): number {
+  const id = model.toLowerCase();
+  if (/lite|instant|8b/.test(id)) return 0;
+  if (/flash|small|mini|7b|9b/.test(id)) return 1;
+  return 2;
+}
+
+type AvailableModels = { data?: Array<{ id?: string }> };
+type GeminiModels = { models?: Array<{ name?: string; supportedGenerationMethods?: string[] }> };
+
+async function selectGroqModel(apiKey: string, timeoutMs: number): Promise<string[]> {
+  const preferred = process.env.GROQ_MODEL?.trim();
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(timeoutMs),
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Groq model list HTTP ${response.status}.`);
+    const result = await response.json() as AvailableModels;
+    const available = new Set((result.data || []).map((model) => model.id).filter((id): id is string => Boolean(id)));
+    const discovered = [...available]
+      .filter((model) => /^(?:llama|qwen|gemma|deepseek)/i.test(model) && !/(?:guard|embed|whisper|preview)/i.test(model))
+      .sort((left, right) => modelCostRank(left) - modelCostRank(right));
+    return [...new Set([preferred, ...GROQ_MODEL_PREFERENCES, ...discovered].filter((model): model is string => Boolean(model)))].filter((model) => available.has(model));
+  } catch {
+    return [...new Set([preferred, ...GROQ_MODEL_PREFERENCES].filter((model): model is string => Boolean(model)))];
+  }
+}
+
+async function selectGeminiModel(apiKey: string, timeoutMs: number): Promise<string[]> {
+  const preferred = process.env.GEMINI_MODEL?.trim();
+  try {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+      headers: { "x-goog-api-key": apiKey },
+      signal: AbortSignal.timeout(timeoutMs),
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Gemini model list HTTP ${response.status}.`);
+    const result = await response.json() as GeminiModels;
+    const available = new Set((result.models || [])
+      .filter((model) => model.supportedGenerationMethods?.includes("generateContent"))
+      .map((model) => model.name?.replace(/^models\//, ""))
+      .filter((name): name is string => Boolean(name)));
+    const discovered = [...available]
+      .filter((model) => /^gemini-.*(?:flash|lite)/i.test(model) && !/(?:preview|latest)/i.test(model))
+      .sort((left, right) => modelCostRank(left) - modelCostRank(right));
+    return [...new Set([preferred, ...GEMINI_MODEL_PREFERENCES, ...discovered].filter((model): model is string => Boolean(model)))].filter((model) => available.has(model));
+  } catch {
+    return [...new Set([preferred, ...GEMINI_MODEL_PREFERENCES].filter((model): model is string => Boolean(model)))];
+  }
+}
 
 function buildPrompt(input: {
   title: string;
@@ -99,9 +154,11 @@ function validateDraft(raw: string): GeneratedText {
   return { title: title.slice(0, 180), caption };
 }
 
-async function generateWithGemini(apiKey: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
-  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs } });
+async function generateWithGemini(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
+  });
   const result = await ai.models.generateContent({
     model,
     contents: prompt,
@@ -117,8 +174,7 @@ async function generateWithGemini(apiKey: string, prompt: string, timeoutMs: num
   return validateDraft(result.text);
 }
 
-async function generateWithGroq(apiKey: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
-  const model = process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
+async function generateWithGroq(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -166,10 +222,6 @@ export async function writeNewsCopy(input: {
     throw new Error("Atur minimal GROQ_API_KEY, GEMINI_API_KEY, atau GEMINI_API_KEY_FALLBACK.");
   }
 
-  const models = {
-    groq: process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile",
-    gemini: process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash",
-  };
   const prompt = buildPrompt(input);
   const attempts: AiProviderAttempt[] = [];
   const startedAt = Date.now();
@@ -213,8 +265,17 @@ export async function writeNewsCopy(input: {
   }
 
   if (groqKey) {
-    const result = await tryProvider("Groq", models.groq, (timeoutMs) => generateWithGroq(groqKey, prompt, timeoutMs));
-    if (result) return result;
+    const timeoutMs = providerTimeout();
+    const models = timeoutMs > 0 ? await selectGroqModel(groqKey, Math.min(2_000, timeoutMs)) : [];
+    for (const model of models) {
+      const result = await tryProvider("Groq", model, (attemptTimeout) => generateWithGroq(groqKey, model, prompt, attemptTimeout));
+      if (result) return result;
+      if (/HTTP (?:401|403)|unauthorized|permission denied/i.test(attempts.at(-1)?.error || "") || Date.now() >= deadline) break;
+    }
+    if (models.length === 0) {
+      const attempt: AiProviderAttempt = { provider: "Groq", model: process.env.GROQ_MODEL?.trim() || "otomatis", outcome: "skipped", elapsedMs: 0, error: "Tidak ada model teks yang cocok tersedia untuk akun ini." };
+      attempts.push(attempt);
+    }
   }
 
   const geminiProviders: Array<{ provider: "Gemini" | "Gemini cadangan"; key: string }> = [];
@@ -222,9 +283,18 @@ export async function writeNewsCopy(input: {
   if (fallbackKey && fallbackKey !== primaryKey) geminiProviders.push({ provider: "Gemini cadangan", key: fallbackKey });
 
   for (const provider of geminiProviders) {
-    const result = await tryProvider(provider.provider, models.gemini, (timeoutMs) => generateWithGemini(provider.key, prompt, timeoutMs));
-    if (result) return result;
-    if (Date.now() >= deadline) break;
+    const timeoutMs = providerTimeout();
+    if (timeoutMs <= 0) break;
+    const models = await selectGeminiModel(provider.key, Math.min(2_000, timeoutMs));
+    for (const model of models) {
+      const result = await tryProvider(provider.provider, model, (attemptTimeout) => generateWithGemini(provider.key, model, prompt, attemptTimeout));
+      if (result) return result;
+      if (/HTTP (?:401|403)|unauthorized|permission denied/i.test(attempts.at(-1)?.error || "") || Date.now() >= deadline) break;
+    }
+    if (models.length === 0) {
+      const attempt: AiProviderAttempt = { provider: provider.provider, model: process.env.GEMINI_MODEL?.trim() || "otomatis", outcome: "skipped", elapsedMs: 0, error: "Tidak ada model teks yang cocok tersedia untuk akun ini." };
+      attempts.push(attempt);
+    }
   }
 
   const detail = attempts.map((attempt) => `${attempt.provider} model=${attempt.model} outcome=${attempt.outcome} duration=${attempt.elapsedMs}ms${attempt.error ? ` error=${attempt.error}` : ""}`).join(" | ");

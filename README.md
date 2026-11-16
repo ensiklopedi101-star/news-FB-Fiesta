@@ -40,12 +40,12 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
 - `GROQ_API_KEY`: opsional, penyedia AI pertama yang dicoba.
-- `GROQ_MODEL`: opsional, model Groq (default `llama-3.3-70b-versatile`); pastikan model tersebut tersedia untuk akunmu.
+- `GROQ_MODEL`: opsional, preferensi model Groq. Aplikasi memeriksa katalog model akun secara otomatis, mengutamakan model ekonomis seperti `llama-3.1-8b-instant`, dan beralih jika model tidak tersedia.
 - `GEMINI_API_KEY`: key Gemini utama, dicoba jika Groq gagal.
 - `GEMINI_API_KEY_FALLBACK`: key Gemini cadangan, dicoba jika key Gemini utama gagal.
-- `GEMINI_MODEL`: model untuk kedua key Gemini (default `gemini-3.8-flash`).
+- `GEMINI_MODEL`: opsional, preferensi model Gemini. Aplikasi hanya memakai model yang terdaftar dan mendukung `generateContent`, lalu mencoba kandidat Flash/Flash-Lite yang hemat.
 
-Model harus tersedia dan diizinkan untuk API key pada provider terkait. Jika muncul HTTP 404/403 atau “model does not exist / no access”, periksa ID model aktif di katalog akun provider dan perbarui `GROQ_MODEL` atau `GEMINI_MODEL` di Vercel; jangan menebak ID model. Dashboard menampilkan model konfigurasi yang sedang dipakai, bukan nilai API key. Kegagalan provider atau format hasil mengaktifkan provider berikutnya; log diagnostik menampilkan provider, model, waktu, status HTTP dan pesan aman tanpa nilai API key.
+Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kandidat yang terdaftar, dan mencoba model berikutnya jika model gagal. Pilihan awal memprioritaskan model kecil berbiaya rendah; keluaran dibatasi 350 token. `GROQ_MODEL` dan `GEMINI_MODEL` tetap opsional sebagai preferensi yang hanya dipakai jika tersedia. Dashboard menampilkan model konfigurasi dan status percobaan AI; log diagnostik menampilkan provider, model, waktu, status HTTP dan pesan aman tanpa nilai API key. Kegagalan provider atau format hasil mengaktifkan provider berikutnya.
 - `BUFFER_API_KEY`: API key Buffer (Bearer token), simpan hanya sebagai environment variable Vercel.
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
