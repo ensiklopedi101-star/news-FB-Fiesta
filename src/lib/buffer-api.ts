@@ -143,7 +143,6 @@ export async function enqueueBufferFacebookPost(input: {
   pageKey: PageKey;
   imageUrl: string;
   caption: string;
-  sourceUrl: string;
 }): Promise<string> {
   const mutation = `mutation CreatePost($input: CreatePostInput!) {
     createPost(input: $input) {
@@ -163,12 +162,7 @@ export async function enqueueBufferFacebookPost(input: {
       schedulingType: "automatic",
       text: input.caption,
       assets: [{ image: { url: input.imageUrl } }],
-      metadata: {
-        facebook: {
-          type: "post",
-          firstComment: `Sumber berita: ${input.sourceUrl}`,
-        },
-      },
+      metadata: { facebook: { type: "post" } },
     },
   }, true);
   const result = data.createPost;
