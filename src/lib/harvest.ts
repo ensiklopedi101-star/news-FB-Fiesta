@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { fetchRecentStories } from "@/lib/feeds";
 import { PUBLISH_POLICY } from "@/lib/schedule";
+import { storeArticleImageInBlob } from "@/lib/blob-image";
 
 const MAX_ARTICLES_PER_HARVEST = PUBLISH_POLICY.maxArticlesPerHarvest;
 
@@ -27,7 +28,7 @@ export async function harvestLatestStories() {
     createdAt: story.feedPublishedAt ?? new Date(),
   })))
     .onConflictDoNothing({ target: articles.urlHash })
-    .returning({ id: articles.id });
+    .returning({ id: articles.id, urlHash: articles.urlHash });
 
   const enrichedStories = candidates.filter((story) => story.enriched);
   const enriched = await Promise.all(enrichedStories.map((story) => db.update(articles)
@@ -37,7 +38,39 @@ export async function harvestLatestStories() {
       updatedAt: new Date(),
     })
     .where(and(eq(articles.urlHash, story.urlHash), eq(articles.status, "queued")))
-    .returning({ id: articles.id })));
+    .returning({ id: articles.id, urlHash: articles.urlHash })));
+
+  const storiesByHash = new Map(candidates.map((story) => [story.urlHash, story]));
+  const imageTargets = new Map<string, { id: string; story: (typeof candidates)[number] }>();
+  for (const row of inserted) {
+    const story = storiesByHash.get(row.urlHash);
+    if (story?.imageUrl) imageTargets.set(row.id, { id: row.id, story });
+  }
+  for (const rows of enriched) {
+    for (const row of rows) {
+      const story = storiesByHash.get(row.urlHash);
+      if (story?.imageUrl) imageTargets.set(row.id, { id: row.id, story });
+    }
+  }
+
+  if (imageTargets.size && !process.env.BLOB_READ_WRITE_TOKEN) {
+    console.warn("[harvest] BLOB_READ_WRITE_TOKEN is missing; source image URLs will remain unchanged.");
+  } else {
+    const targets = [...imageTargets.values()];
+    for (let offset = 0; offset < targets.length; offset += 10) {
+      await Promise.all(targets.slice(offset, offset + 10).map(async ({ id, story }) => {
+        const blobUrl = await storeArticleImageInBlob(id, story.imageUrl, story.sourceUrl);
+        if (!blobUrl || !story.imageUrl) return;
+        try {
+          await db.update(articles)
+            .set({ imageUrl: blobUrl, updatedAt: new Date() })
+            .where(and(eq(articles.id, id), eq(articles.imageUrl, story.imageUrl), eq(articles.status, "queued")));
+        } catch {
+          console.error(`[harvest] Blob image uploaded but Neon URL update failed for article ${id}.`);
+        }
+      }));
+    }
+  }
 
   return {
     scanned: stories.length,

@@ -1,5 +1,3 @@
-import { Buffer } from "node:buffer";
-import { put } from "@vercel/blob";
 import { isSafePublicImageUrl } from "./safe-url";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -7,8 +5,6 @@ const MAX_REDIRECTS = 3;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type Fetcher = typeof fetch;
-type BlobWriter = typeof put;
-
 type FetchedImage = { bytes: Uint8Array; contentType: string };
 
 function toDataUrl(bytes: Uint8Array, contentType: string): string {
@@ -66,7 +62,7 @@ export function isVercelBlobImageUrl(raw: string | null | undefined): raw is str
   }
 }
 
-/** Fetch a safe, bounded raster image and return its bytes for the OG renderer/storage. */
+/** Fetch a safe, bounded raster image for an Edge-compatible OG renderer. */
 export async function fetchOgImage(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
@@ -127,36 +123,12 @@ export async function fetchOgImage(
   return null;
 }
 
-/** Store a fetched image in public Vercel Blob; still render it if storage is not configured/available. */
-export async function fetchAndStoreOgImage(
-  articleId: string,
+/** Inline validated image bytes into the OG payload; no Node-only dependencies, so this runs on Edge. */
+export async function fetchOgImageDataUrl(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
-  options: { fetcher?: Fetcher; blobWriter?: BlobWriter; token?: string } = {},
-): Promise<{ dataUrl: string; blobUrl: string | null } | null> {
-  const image = await fetchOgImage(rawImageUrl, sourceUrl, options.fetcher);
-  if (!image) return null;
-
-  let blobUrl: string | null = null;
-  const token = options.token ?? process.env.BLOB_READ_WRITE_TOKEN;
-  if (!isVercelBlobImageUrl(rawImageUrl) && !token) {
-    console.warn(`[og-image] BLOB_READ_WRITE_TOKEN is missing for article ${articleId}; image is rendered but not persisted.`);
-  }
-  if (token && !isVercelBlobImageUrl(rawImageUrl)) {
-    const extension = image.contentType === "image/jpeg" ? "jpg" : image.contentType.slice("image/".length);
-    try {
-      const blob = await (options.blobWriter ?? put)(`article-images/${articleId}.${extension}`, Buffer.from(image.bytes), {
-        access: "public",
-        addRandomSuffix: false,
-        allowOverwrite: true,
-        contentType: image.contentType,
-        token,
-      });
-      blobUrl = blob.url;
-    } catch {
-      console.error(`[og-image] Blob upload failed for article ${articleId}; image is rendered but not persisted.`);
-    }
-  }
-
-  return { dataUrl: toDataUrl(image.bytes, image.contentType), blobUrl };
+  fetcher: Fetcher = fetch,
+): Promise<string | null> {
+  const image = await fetchOgImage(rawImageUrl, sourceUrl, fetcher);
+  return image ? toDataUrl(image.bytes, image.contentType) : null;
 }
