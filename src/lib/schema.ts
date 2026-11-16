@@ -1,7 +1,28 @@
-import { pgEnum, pgTable, text, timestamp, uuid, integer, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed"]);
 export const articlePageKey = pgEnum("article_page_key", ["news", "entertainment"]);
+
+export const rssSources = pgTable(
+  "rss_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    category: text("category").notNull(),
+    pageKey: articlePageKey("page_key").notNull().default("news"),
+    feedUrl: text("feed_url").notNull(),
+    language: text("language").notNull().default("id"),
+    active: boolean("active").notNull().default(true),
+    lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("rss_sources_feed_url_unique").on(table.feedUrl),
+    index("rss_sources_active_page_idx").on(table.active, table.pageKey),
+  ],
+);
 
 export const articles = pgTable(
   "articles",
@@ -33,5 +54,6 @@ export const articles = pgTable(
   ],
 );
 
+export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;

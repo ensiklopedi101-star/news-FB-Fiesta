@@ -1,6 +1,23 @@
 CREATE TYPE "public"."article_status" AS ENUM ('queued', 'processing', 'ready', 'published', 'failed');
 CREATE TYPE "public"."article_page_key" AS ENUM ('news', 'entertainment');
 
+CREATE TABLE "rss_sources" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "name" text NOT NULL,
+  "category" text NOT NULL,
+  "page_key" "article_page_key" DEFAULT 'news' NOT NULL,
+  "feed_url" text NOT NULL,
+  "language" text DEFAULT 'id' NOT NULL,
+  "active" boolean DEFAULT true NOT NULL,
+  "last_fetched_at" timestamp with time zone,
+  "last_error" text,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE UNIQUE INDEX "rss_sources_feed_url_unique" ON "rss_sources" USING btree ("feed_url");
+CREATE INDEX "rss_sources_active_page_idx" ON "rss_sources" USING btree ("active", "page_key");
+
 CREATE TABLE "articles" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "source_name" text NOT NULL,

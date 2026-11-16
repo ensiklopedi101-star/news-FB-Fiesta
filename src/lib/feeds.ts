@@ -1,16 +1,9 @@
 import Parser from "rss-parser";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/lib/db";
+import { rssSources, type RssSource } from "@/lib/schema";
 
-const feedSchema = z.object({
-  name: z.string().min(1).max(80),
-  category: z.string().min(1).max(24).transform((value) => value.toUpperCase()),
-  pageKey: z.enum(["news", "entertainment"]).default("news"),
-  url: z.string().url(),
-  language: z.string().default("id"),
-});
-
-export type FeedConfig = z.infer<typeof feedSchema>;
 export type FeedStory = {
   sourceName: string;
   category: string;
@@ -29,18 +22,6 @@ const parser = new Parser({
     item: [["content:encoded", "contentEncoded"], ["media:content", "mediaContent"], ["media:thumbnail", "mediaThumbnail"]],
   },
 });
-
-export function getFeeds(): FeedConfig[] {
-  const raw = process.env.NEWS_FEEDS;
-  if (!raw) throw new Error("NEWS_FEEDS belum diatur. Isi dengan JSON array feed RSS.");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("NEWS_FEEDS bukan JSON yang valid.");
-  }
-  return z.array(feedSchema).min(1).parse(parsed);
-}
 
 function cleanText(value: string): string {
   return value
@@ -89,46 +70,57 @@ function canonicalize(rawUrl: string): string {
   return url.toString();
 }
 
-export async function fetchRecentStories(): Promise<FeedStory[]> {
-  const feeds = getFeeds();
-  const perFeed = Math.min(20, Math.max(1, Number(process.env.MAX_ITEMS_PER_FEED ?? 8) || 8));
-  const cutoff = Date.now() - 72 * 60 * 60 * 1000;
-  const results = await Promise.all(feeds.map(async (feed): Promise<FeedStory[]> => {
-    try {
-      const response = await fetch(feed.url, {
-        headers: { "user-agent": "NewsFiestaBot/1.0 (+RSS news summarizer)", accept: "application/rss+xml, application/atom+xml, application/xml, text/xml" },
-        signal: AbortSignal.timeout(12_000),
-        cache: "no-store",
+async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number): Promise<FeedStory[]> {
+  const db = getDb();
+  try {
+    const response = await fetch(source.feedUrl, {
+      headers: { "user-agent": "NewsFiestaBot/1.0 (+RSS news summarizer)", accept: "application/rss+xml, application/atom+xml, application/xml, text/xml" },
+      signal: AbortSignal.timeout(12_000),
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Feed membalas HTTP ${response.status}.`);
+    const parsed = await parser.parseString(await response.text());
+    await db.update(rssSources)
+      .set({ lastFetchedAt: new Date(), lastError: null, updatedAt: new Date() })
+      .where(eq(rssSources.id, source.id));
+
+    const stories: FeedStory[] = [];
+    for (const entry of (parsed.items ?? []).slice(0, perFeed)) {
+      const item = entry as unknown as Record<string, unknown>;
+      const title = cleanText(String(item.title ?? ""));
+      const rawLink = usableUrl(item.link, source.feedUrl);
+      if (!title || !rawLink) continue;
+      const published = Date.parse(String(item.isoDate ?? item.pubDate ?? ""));
+      if (Number.isFinite(published) && published < cutoff) continue;
+      const sourceUrl = canonicalize(rawLink);
+      const content = cleanText(String(item.contentEncoded ?? item.contentSnippet ?? item.content ?? item.summary ?? ""));
+      const rawText = [title, content].filter(Boolean).join("\n\n").slice(0, 14_000);
+      stories.push({
+        sourceName: source.name,
+        category: source.category,
+        pageKey: source.pageKey,
+        sourceUrl,
+        urlHash: createHash("sha256").update(sourceUrl).digest("hex"),
+        title,
+        rawText,
+        imageUrl: getImage(item, sourceUrl),
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const parsed = await parser.parseString(await response.text());
-      const stories: FeedStory[] = [];
-      for (const entry of (parsed.items ?? []).slice(0, perFeed)) {
-        const item = entry as unknown as Record<string, unknown>;
-        const title = cleanText(String(item.title ?? ""));
-        const rawLink = usableUrl(item.link, feed.url);
-        if (!title || !rawLink) continue;
-        const published = Date.parse(String(item.isoDate ?? item.pubDate ?? ""));
-        if (Number.isFinite(published) && published < cutoff) continue;
-        const sourceUrl = canonicalize(rawLink);
-        const content = cleanText(String(item.contentEncoded ?? item.contentSnippet ?? item.content ?? item.summary ?? ""));
-        const rawText = [title, content].filter(Boolean).join("\n\n").slice(0, 14_000);
-        stories.push({
-          sourceName: feed.name,
-          category: feed.category,
-          pageKey: feed.pageKey,
-          sourceUrl,
-          urlHash: createHash("sha256").update(sourceUrl).digest("hex"),
-          title,
-          rawText,
-          imageUrl: getImage(item, sourceUrl),
-        });
-      }
-      return stories;
-    } catch (error) {
-      console.error(`[rss] ${feed.name}:`, error instanceof Error ? error.message : error);
-      return [];
     }
-  }));
+    return stories;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "RSS fetch gagal.";
+    console.error(`[rss] ${source.name}:`, message);
+    await db.update(rssSources)
+      .set({ lastFetchedAt: new Date(), lastError: message.slice(0, 500), updatedAt: new Date() })
+      .where(eq(rssSources.id, source.id));
+    return [];
+  }
+}
+
+export async function fetchRecentStories(): Promise<FeedStory[]> {
+  const feeds = await getDb().select().from(rssSources).where(eq(rssSources.active, true));
+  const perFeed = 8;
+  const cutoff = Date.now() - 72 * 60 * 60 * 1000;
+  const results = await Promise.all(feeds.map((feed) => fetchOneSource(feed, perFeed, cutoff)));
   return results.flat();
 }

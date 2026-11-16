@@ -2,11 +2,12 @@
 
 Backend Next.js untuk alur **RSS → ringkasan Gemini → news card 1080×1350 → Facebook Page**. Satu database **Neon Postgres** melalui `DATABASE_URL` melayani dua channel publikasi: `news` dan `entertainment`. Supabase tidak dibutuhkan. Aplikasi ini tidak membuat video Reels.
 
-> Repository tidak menyimpan kredensial. Hubungkan Neon lewat `DATABASE_URL`; feed RSS dan API Gemini/Meta dikonfigurasi sebagai environment variables di Vercel.
+> Repository tidak menyimpan kredensial. Hubungkan Neon lewat `DATABASE_URL`; daftar RSS dikelola dari Dashboard aplikasi dan disimpan di Neon. API Gemini dan Meta tetap di Vercel Environment Variables.
 
 ## Yang sudah dibuat
 
-- RSS reader dengan daftar feed/kategori yang bisa diatur lewat `NEWS_FEEDS`; tiap feed diarahkan ke channel `news` atau `entertainment`.
+- Dashboard admin untuk mengelola feed RSS langsung di aplikasi; tiap feed diarahkan ke channel `news` atau `entertainment` dan disimpan di tabel `rss_sources`.
+- Dashboard menampilkan kesiapan integrasi, jumlah artikel, artikel terbaru, riwayat pengecekan feed, dan error RSS.
 - Deduplicasi URL sumber dengan SHA-256 dan unique index di Neon; setiap artikel menyimpan `page_key` tujuan.
 - Ringkasan bahasa Indonesia menggunakan Gemini: judul, tepat tiga paragraf pendek, dan pertanyaan penutup.
 - Kartu berita dinamis vertikal 1080×1350 pada `/api/og/{articleId}`; memakai gambar RSS jika tersedia.
@@ -24,7 +25,8 @@ Pipeline memproses **maksimal satu berita per pemanggilan** agar eksekusi tetap 
    - Jalankan `npm install`, isi `DATABASE_URL` di `.env.local`, lalu jalankan `npm run db:push`; atau
    - Buka Neon SQL Editor dan jalankan isi file [`drizzle/schema.sql`](./drizzle/schema.sql).
 4. Jika tabel `articles` sudah ada dari skema versi sebelumnya, jalankan sekali file [`drizzle/0001_multi_page.sql`](./drizzle/0001_multi_page.sql) di Neon SQL Editor. Kolom baru `page_key` untuk artikel lama otomatis bernilai `news`.
-5. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
+5. Jalankan file [`drizzle/0002_rss_sources.sql`](./drizzle/0002_rss_sources.sql) untuk membuat tabel feed RSS yang dikelola dari Dashboard. Jika database belum memiliki tabel `articles`, gunakan `drizzle/schema.sql` yang sudah mencakup kedua tabel.
+6. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -41,16 +43,7 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 - `APP_URL`: URL HTTPS deployment publik tanpa slash di akhir. Dipakai Facebook untuk mengambil gambar.
 - `PAGE_BRAND_NEWS`, `PAGE_BRAND_ENTERTAINMENT`: nama yang dicetak pada kartu masing-masing Page.
 - `PAGE_LOGO_NEWS_URL`, `PAGE_LOGO_ENTERTAINMENT_URL`: opsional, logo HTTPS per Page; `PAGE_LOGO_URL` bisa menjadi fallback bersama.
-- `NEWS_FEEDS`: JSON array konfigurasi RSS. Setiap sumber perlu diarahkan dengan `pageKey` (`news` atau `entertainment`); jika tidak dicantumkan, default-nya `news`. Contoh:
-
-```json
-[
-  {"name":"Nama Sumber Bali","category":"BALI","pageKey":"news","url":"https://domain-sumber.example/rss.xml","language":"id"},
-  {"name":"Nama Sumber Drakor","category":"DRAKOR","pageKey":"entertainment","url":"https://domain-sumber.example/feed.xml","language":"en"}
-]
-```
-
-Ganti URL contoh dengan endpoint RSS yang benar dan diizinkan oleh masing-masing penerbit. Arahkan berita Bali/NTB/NTT ke `pageKey: "news"`; arahkan Drakor, Dracin, Donghua, Manga, Webtoon, anime, dan topik sejenis ke `pageKey: "entertainment"`. Kategori bebas, misalnya `BALI`, `NTB`, `NTT`, `DRAKOR`, `DRACIN`, `DONGHUA`, `MANGA`, dan `WEBTOON`. `MAX_ITEMS_PER_FEED` opsional (default 8, maksimal 20).
+Daftar RSS tidak perlu dimasukkan ke environment variables. Buka halaman utama aplikasi, masuk memakai `CRON_SECRET`, lalu tambahkan nama sumber, kategori, URL RSS, bahasa, dan halaman tujuan. Pilih `Berita` untuk BALI/NTB/NTT, atau `Hiburan` untuk Drakor, Dracin, Donghua, Manga, Webtoon, dan kategori terkait. Daftar ini tersimpan di Neon dan bisa diaktifkan/nonaktifkan dari dashboard.
 
 ID dan access token kedua Page **disimpan terpisah sebagai environment variables Vercel, bukan di Neon**. Satu database menyimpan semua artikel beserta `page_key`; tidak perlu membuat database kedua.
 
@@ -67,8 +60,12 @@ Untuk Facebook, pastikan Meta App/Page memiliki izin yang diperlukan untuk memub
 
 Schedule GitHub hanya aktif dari branch default. Jangan aktifkan sebelum konfigurasi lengkap; pemanggilan manual pertama dapat membuat posting sungguhan di Facebook.
 
-## Endpoint
+## Dashboard dan endpoint
 
+Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kamu dapat menambah, menonaktifkan, dan menghapus feed; memantau integrasi, statistik artikel, status RSS terakhir, dan artikel terbaru. Tombol proses manual baru muncul saat feed dan integrasi untuk halaman yang digunakan sudah siap; tombol tersebut mem-posting artikel sungguhan.
+
+- `GET /api/dashboard` — ringkasan admin (wajib bearer secret).
+- `POST/PATCH/DELETE /api/admin/feeds` — kelola RSS dari dashboard (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
 - `GET /api/cron` — satu siklus RSS sampai posting. Wajib header `Authorization: Bearer <CRON_SECRET>`.
 - `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
