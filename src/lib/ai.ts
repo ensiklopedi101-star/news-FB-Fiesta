@@ -22,7 +22,7 @@ export async function writeNewsCopy(input: {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY belum diatur.");
   const ai = new GoogleGenAI({ apiKey });
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   const prompt = `Kamu editor berita berbahasa Indonesia. Buat ringkasan akurat dari materi sumber berikut untuk caption Facebook.
 
 Aturan wajib:
