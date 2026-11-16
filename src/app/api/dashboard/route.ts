@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, like } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
@@ -21,6 +21,8 @@ export async function GET(request: NextRequest) {
     const [articleTotal] = await db.select({ value: count() }).from(articles);
     const [publishedToday] = await db.select({ value: count() }).from(articles)
       .where(and(eq(articles.status, "published"), gte(articles.publishedAt, today)));
+    const [bufferQueuedToday] = await db.select({ value: count() }).from(articles)
+      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gte(articles.updatedAt, today)));
     const [enabledSourceCount] = await db.select({ value: count() }).from(rssSources).where(eq(rssSources.active, true));
     const [allSourceCount] = await db.select({ value: count() }).from(rssSources);
     const [publisherLock] = await db.select({ id: publisherState.id }).from(publisherState).limit(1);
@@ -35,6 +37,7 @@ export async function GET(request: NextRequest) {
       sourceName: articles.sourceName,
       sourceUrl: articles.sourceUrl,
       status: articles.status,
+      facebookPostId: articles.facebookPostId,
       errorMessage: articles.errorMessage,
       createdAt: articles.createdAt,
       publishedAt: articles.publishedAt,
@@ -44,19 +47,21 @@ export async function GET(request: NextRequest) {
     for (const row of groupedStatuses) statusCounts[row.status] = row.value;
 
     const activePages = new Set(feeds.filter((feed) => feed.active).map((feed) => feed.pageKey));
-    const pageCredentials = {
-      news: Boolean((process.env.FB_NEWS_PAGE_ID && process.env.FB_NEWS_PAGE_ACCESS_TOKEN) || (process.env.FB_PAGE_ID && process.env.FB_PAGE_ACCESS_TOKEN)),
-      entertainment: Boolean(process.env.FB_ENTERTAINMENT_PAGE_ID && process.env.FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN),
+    const bufferApi = Boolean(process.env.BUFFER_API_KEY?.trim());
+    const bufferChannels = {
+      news: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
+      entertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
     };
-    const allActivePagesConfigured = [...activePages].every((page) => pageCredentials[page]);
+    const allActivePagesConfigured = [...activePages].every((page) => bufferChannels[page]);
     const integrations = {
       database: true,
       schema: true,
       feeds: enabledSourceCount.value > 0,
       gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
       groq: Boolean(process.env.GROQ_API_KEY),
-      facebookNews: pageCredentials.news,
-      facebookEntertainment: pageCredentials.entertainment,
+      bufferApi,
+      bufferNews: bufferChannels.news,
+      bufferEntertainment: bufferChannels.entertainment,
       appUrl: Boolean(process.env.APP_URL),
       cronSecret: Boolean(process.env.CRON_SECRET),
     };
@@ -65,11 +70,12 @@ export async function GET(request: NextRequest) {
       ok: true,
       checkedAt: new Date().toISOString(),
       integrations,
-      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && allActivePagesConfigured,
+      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && integrations.bufferApi && allActivePagesConfigured,
       schedule: PUBLISH_POLICY,
       stats: {
         articles: articleTotal.value,
         publishedToday: publishedToday.value,
+        bufferQueuedToday: bufferQueuedToday.value,
         enabledFeeds: enabledSourceCount.value,
         totalFeeds: allSourceCount.value,
         ...statusCounts,

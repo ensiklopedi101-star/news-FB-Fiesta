@@ -1,0 +1,143 @@
+import type { PageKey } from "@/lib/facebook";
+
+const BUFFER_GRAPHQL_URL = "https://api.buffer.com/graphql";
+
+export type BufferChannel = {
+  id: string;
+  name: string;
+  service: string;
+  type: string;
+  isDisconnected: boolean;
+};
+
+type GraphQLError = { message?: string };
+type BufferGraphResponse<T> = { data?: T; errors?: GraphQLError[] };
+
+type BufferPostResponse = {
+  createPost?: {
+    post?: { id?: string; status?: string; shareMode?: string; dueAt?: string | null };
+    message?: string;
+  };
+};
+
+export function getBufferConfigurationGaps(pageKeys: PageKey[] = ["news", "entertainment"]): string[] {
+  const missing: string[] = [];
+  if (!process.env.BUFFER_API_KEY?.trim()) missing.push("BUFFER_API_KEY");
+  for (const pageKey of pageKeys) {
+    const variable = pageKey === "news" ? "BUFFER_NEWS_CHANNEL_ID" : "BUFFER_ENTERTAINMENT_CHANNEL_ID";
+    if (!process.env[variable]?.trim()) missing.push(variable);
+  }
+  return missing;
+}
+
+function getApiKey() {
+  const apiKey = process.env.BUFFER_API_KEY?.trim();
+  if (!apiKey) throw new Error("BUFFER_API_KEY belum diatur di environment Vercel.");
+  return apiKey;
+}
+
+function getChannelId(pageKey: PageKey) {
+  const variable = pageKey === "news" ? "BUFFER_NEWS_CHANNEL_ID" : "BUFFER_ENTERTAINMENT_CHANNEL_ID";
+  const channelId = process.env[variable]?.trim();
+  if (!channelId) throw new Error(`${variable} belum diatur di environment Vercel.`);
+  return channelId;
+}
+
+function safeMessage(message: string, apiKey: string) {
+  return message.split(apiKey).join("[REDACTED]").slice(0, 300);
+}
+
+async function graphQL<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  const apiKey = getApiKey();
+  let response: Response;
+  try {
+    response = await fetch(BUFFER_GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ query, ...(variables ? { variables } : {}) }),
+      signal: AbortSignal.timeout(20_000),
+      cache: "no-store",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Request ke Buffer gagal.";
+    throw new Error(`Buffer API: ${safeMessage(message, apiKey)}`);
+  }
+
+  const result = await response.json().catch(() => null) as BufferGraphResponse<T> | null;
+  if (!response.ok || result?.errors?.length) {
+    const message = result?.errors?.map((item) => item.message).filter(Boolean).join("; ") || `HTTP ${response.status}`;
+    throw new Error(`Buffer API: ${safeMessage(message, apiKey)}`);
+  }
+  if (!result?.data) throw new Error("Buffer API tidak mengembalikan data.");
+  return result.data;
+}
+
+export async function listBufferChannels(): Promise<BufferChannel[]> {
+  const organizationsQuery = `query BufferOrganizations {
+    account { organizations { id name } }
+  }`;
+  const organizationsData = await graphQL<{
+    account?: { organizations?: Array<{ id: string; name: string }> };
+  }>(organizationsQuery);
+  const organizations = organizationsData.account?.organizations ?? [];
+  if (!organizations.length) throw new Error("Tidak ada organisasi Buffer yang dapat diakses API key ini.");
+
+  const channelsQuery = `query BufferChannels($input: ChannelsInput!) {
+    channels(input: $input) {
+      id
+      name
+      service
+      type
+      isDisconnected
+    }
+  }`;
+  const results = await Promise.all(organizations.map(async (organization) => {
+    const data = await graphQL<{ channels?: BufferChannel[] }>(channelsQuery, {
+      input: { organizationId: organization.id, filter: { isLocked: false } },
+    });
+    return (data.channels ?? []).map((channel) => ({ ...channel, name: `${organization.name} — ${channel.name}` }));
+  }));
+  return results.flat();
+}
+
+export async function enqueueBufferFacebookPost(input: {
+  pageKey: PageKey;
+  imageUrl: string;
+  caption: string;
+  sourceUrl: string;
+}): Promise<string> {
+  const mutation = `mutation CreatePost($input: CreatePostInput!) {
+    createPost(input: $input) {
+      ... on PostActionSuccess { post { id status shareMode dueAt } }
+      ... on InvalidInputError { message }
+      ... on UnauthorizedError { message }
+      ... on UnexpectedError { message }
+      ... on NotFoundError { message }
+      ... on LimitReachedError { message }
+      ... on RestProxyError { message code }
+    }
+  }`;
+  const data = await graphQL<BufferPostResponse>(mutation, {
+    input: {
+      channelId: getChannelId(input.pageKey),
+      mode: "addToQueue",
+      schedulingType: "automatic",
+      text: input.caption,
+      assets: [{ image: { url: input.imageUrl } }],
+      metadata: {
+        facebook: {
+          type: "post",
+          firstComment: `Sumber berita: ${input.sourceUrl}`,
+        },
+      },
+    },
+  });
+  const result = data.createPost;
+  if (result?.message) throw new Error(`Buffer API: ${safeMessage(result.message, getApiKey())}`);
+  const postId = result?.post?.id;
+  if (!postId) throw new Error("Buffer tidak mengembalikan ID post; pastikan channel Facebook terhubung dan bisa menjadwalkan post.");
+  return postId;
+}
