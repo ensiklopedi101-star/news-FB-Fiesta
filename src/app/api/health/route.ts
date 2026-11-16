@@ -38,8 +38,9 @@ export async function GET() {
     integrations: {
       gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
       groq: Boolean(process.env.GROQ_API_KEY),
-      facebookNews: Boolean((process.env.FB_NEWS_PAGE_ID && process.env.FB_NEWS_PAGE_ACCESS_TOKEN) || (process.env.FB_PAGE_ID && process.env.FB_PAGE_ACCESS_TOKEN)),
-      facebookEntertainment: Boolean(process.env.FB_ENTERTAINMENT_PAGE_ID && process.env.FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN),
+      bufferApi: Boolean(process.env.BUFFER_API_KEY?.trim()),
+      bufferNews: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
+      bufferEntertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
       feeds: activeFeeds > 0,
     },
   });

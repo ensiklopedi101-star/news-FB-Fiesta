@@ -23,6 +23,7 @@ type Article = {
   sourceName: string;
   sourceUrl: string;
   status: string;
+  facebookPostId: string | null;
   errorMessage: string | null;
   createdAt: string;
   publishedAt: string | null;
@@ -33,12 +34,13 @@ type DashboardData = {
   readyToPublish: boolean;
   integrations: Record<string, boolean>;
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
-  stats: { articles: number; publishedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number };
+  stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number };
   feeds: Feed[];
   articles: Article[];
 };
 
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean };
+type BufferChannel = { id: string; name: string; service: string; type: string; isDisconnected: boolean };
+type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean; channels?: BufferChannel[] };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -46,8 +48,9 @@ const integrationLabels: Record<string, string> = {
   feeds: "RSS aktif",
   groq: "Groq AI (utama)",
   gemini: "Gemini AI (cadangan)",
-  facebookNews: "Facebook berita",
-  facebookEntertainment: "Facebook hiburan",
+  bufferApi: "Buffer API key",
+  bufferNews: "Channel Buffer berita",
+  bufferEntertainment: "Channel Buffer hiburan",
   appUrl: "URL publik aplikasi",
   cronSecret: "Pengaman cron",
 };
@@ -62,6 +65,13 @@ function pageLabel(pageKey: Feed["pageKey"]) {
   return pageKey === "news" ? "Berita" : "Hiburan";
 }
 
+function articleStatusLabel(article: Article) {
+  if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:")) return "Antrean Buffer";
+  if (article.status === "ready") return "Siap";
+  if (article.status === "published") return "Terbit";
+  return article.status;
+}
+
 export default function Dashboard() {
   const [secret, setSecret] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
@@ -74,6 +84,7 @@ export default function Dashboard() {
   const [feedUrl, setFeedUrl] = useState("");
   const [language, setLanguage] = useState("id");
   const [keywords, setKeywords] = useState("");
+  const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([]);
 
   const api = useCallback(async (url: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
@@ -177,6 +188,20 @@ export default function Dashboard() {
     }
   }
 
+  async function loadBufferChannels() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/buffer/channels");
+      setBufferChannels(result.channels ?? []);
+      setMessage(`Ditemukan ${result.channels?.length ?? 0} channel di Buffer. Gunakan ID channel Facebook Page yang sesuai di environment variables Vercel.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal membaca channel Buffer.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function harvestNow() {
     setBusy(true);
     setMessage("");
@@ -193,12 +218,12 @@ export default function Dashboard() {
   }
 
   async function publishOne() {
-    if (!window.confirm("Ini akan menjalankan pipeline dan dapat menerbitkan satu postingan sungguhan ke Facebook. Lanjutkan?")) return;
+    if (!window.confirm("Ini akan mengirim satu artikel sungguhan ke antrean Buffer. Buffer dapat menerbitkannya otomatis sesuai jadwal channel. Lanjutkan?")) return;
     setBusy(true);
     setMessage("");
     try {
       const result = await api("/api/cron");
-      setMessage(result.title ? `Berhasil diproses: ${result.title}` : result.detail || "Siklus selesai.");
+      setMessage(result.result === "queued" && result.title ? `Masuk antrean Buffer: ${result.title}` : result.title ? `Berhasil diproses: ${result.title}` : result.detail || "Siklus selesai.");
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Pipeline gagal.");
@@ -250,7 +275,7 @@ export default function Dashboard() {
 
       <section className="stat-grid" aria-label="Statistik artikel">
         <article className="stat-card"><span>Total artikel tersimpan</span><strong>{data?.stats.articles ?? 0}</strong><small>Semua kategori</small></article>
-        <article className="stat-card"><span>Terbit hari ini</span><strong>{data?.stats.publishedToday ?? 0}</strong><small>Waktu UTC</small></article>
+        <article className="stat-card"><span>Masuk antrean Buffer hari ini</span><strong>{data?.stats.bufferQueuedToday ?? 0}</strong><small>Buffer akan menerbitkan sesuai jadwal Page</small></article>
         <article className="stat-card"><span>Feed aktif</span><strong>{data?.stats.enabledFeeds ?? 0}</strong><small>{data?.stats.totalFeeds ?? 0} feed tersimpan</small></article>
         <article className="stat-card"><span>Perlu perhatian</span><strong className={(data?.stats.failed ?? 0) > 0 ? "number-alert" : ""}>{data?.stats.failed ?? 0}</strong><small>Artikel gagal diproses</small></article>
       </section>
@@ -265,14 +290,17 @@ export default function Dashboard() {
       </section>
 
       <section className="panel readiness-panel setup-panel">
-        <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Facebook</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
+        <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Buffer</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
         <div className="setup-grid">
           <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (utama)</strong><p>Tambahkan <code>GROQ_API_KEY</code> di Vercel. Jika Groq gagal, aplikasi beralih ke Gemini; modelnya dapat diatur lewat <code>GROQ_MODEL</code>.</p></div><b>{checks.groq ? "Tersedia" : "Opsional"}</b></article>
           <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI (cadangan)</strong><p>Atur <code>GEMINI_API_KEY</code>; opsional tambahkan <code>GEMINI_API_KEY_FALLBACK</code>. Key cadangan dicoba jika Groq atau Gemini utama gagal.</p></div><b>{checks.gemini ? "Tersedia" : "Opsional"}</b></article>
-          <article className="setup-card"><span className={checks.facebookNews ? "check-dot good" : "check-dot"} /><div><strong>Facebook — Berita</strong><p>Atur <code>FB_NEWS_PAGE_ID</code> dan <code>FB_NEWS_PAGE_ACCESS_TOKEN</code> untuk Page berita dari <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">Meta for Developers</a>.</p></div><b>{checks.facebookNews ? "Tersedia" : "Belum diatur"}</b></article>
-          <article className="setup-card"><span className={checks.facebookEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Facebook — Hiburan</strong><p>Atur <code>FB_ENTERTAINMENT_PAGE_ID</code> dan <code>FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN</code> untuk Page hiburan dari <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">Meta for Developers</a>.</p></div><b>{checks.facebookEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
+          <article className="setup-card"><span className={checks.bufferApi ? "check-dot good" : "check-dot"} /><div><strong>Buffer API</strong><p>Tambahkan <code>BUFFER_API_KEY</code> dari pengaturan/developer portal Buffer ke Vercel. Aplikasi mengirim post ke antrean Buffer; Buffer yang menerbitkannya pada jadwal channel.</p><a className="feed-url" href="https://developers.buffer.com/" target="_blank" rel="noreferrer">Dokumentasi API Buffer ↗</a></div><b>{checks.bufferApi ? "Tersedia" : "Belum diatur"}</b></article>
+          <article className="setup-card"><span className={checks.bufferNews ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Berita</strong><p>Atur <code>BUFFER_NEWS_CHANNEL_ID</code> ke ID channel Facebook Page berita di Buffer.</p></div><b>{checks.bufferNews ? "Tersedia" : "Belum diatur"}</b></article>
+          <article className="setup-card"><span className={checks.bufferEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Hiburan</strong><p>Atur <code>BUFFER_ENTERTAINMENT_CHANNEL_ID</code> ke ID channel Facebook Page hiburan di Buffer.</p></div><b>{checks.bufferEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
-        <p className="muted small-note">Simpan nilai rahasia hanya di Vercel → Project → Settings → Environment Variables, lalu deploy ulang. Dashboard tidak meminta atau menyimpan API key/token. Status “tersedia” hanya memeriksa keberadaan variabel, bukan menguji izin atau validitas token.</p>
+        <p className="muted small-note">Simpan <code>BUFFER_API_KEY</code> dan kedua ID channel hanya di Vercel → Project → Settings → Environment Variables, lalu deploy ulang. Dashboard tidak meminta atau menyimpan API key. Pemeriksaan “tersedia” hanya memeriksa keberadaan nilai, bukan menguji izin Buffer.</p>
+        {checks.bufferApi && <button type="button" className="secondary-button" disabled={busy} onClick={() => void loadBufferChannels()}>{busy ? "Memeriksa…" : "Tampilkan ID channel Buffer (hanya baca)"}</button>}
+        {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}
         <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
       </section>
 
@@ -312,7 +340,7 @@ export default function Dashboard() {
           <div className="panel-heading"><div><p className="eyebrow">ANTREAN TERBARU</p><h2>Artikel</h2></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
           {data?.articles.length ? <div className="article-list">{data.articles.map((article) => (
             <article className="article-row" key={article.id}>
-              <div className="article-row-top"><span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span><span className={`status-tag ${article.status}`}>{article.status}</span></div>
+              <div className="article-row-top"><span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span><span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span></div>
               <strong>{article.title}</strong>
               <div className="article-meta">{article.sourceName} · {article.category} · {formatDate(article.createdAt)}</div>
               {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
@@ -320,8 +348,8 @@ export default function Dashboard() {
             </article>
           ))}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>
-          {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Proses & terbitkan 1 berita"}</button>}
-          {!canPublish && <p className="muted small-note">Tombol publikasi akan aktif setelah feed, minimal satu penyedia AI, URL aplikasi, dan kredensial Facebook untuk halaman tujuan siap.</p>}
+          {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Kirim 1 berita ke Buffer"}</button>}
+          {!canPublish && <p className="muted small-note">Tombol pengiriman aktif setelah feed, minimal satu penyedia AI, URL aplikasi, pengaman cron, Buffer API key, dan ID channel Buffer untuk setiap halaman tujuan siap.</p>}
         </section>
       </div>
 

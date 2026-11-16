@@ -1,10 +1,10 @@
 import "server-only";
-import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, like, lt, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articles, type Article } from "@/lib/schema";
+import { articles, rssSources, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { writeNewsCopy } from "@/lib/ai";
-import { addSourceComment, createFacebookPhotoPost } from "@/lib/facebook";
+import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -42,21 +42,34 @@ async function claimNextArticle(): Promise<Article | null> {
 
 async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
   const now = Date.now();
-  const recent = await getDb().select({ publishedAt: articles.publishedAt })
-    .from(articles)
-    .where(and(eq(articles.status, "published"), gt(articles.publishedAt, new Date(now - PUBLISH_POLICY.maxPerHour * 60 * 60 * 1000))))
-    .orderBy(desc(articles.publishedAt))
-    .limit(PUBLISH_POLICY.maxPerHour);
-  const lastPublishedAt = recent[0]?.publishedAt?.getTime();
+  const cutoff = new Date(now - PUBLISH_POLICY.maxPerHour * 60 * 60 * 1000);
+  const db = getDb();
+  const [facebookPublished, bufferQueued] = await Promise.all([
+    db.select({ occurredAt: articles.publishedAt })
+      .from(articles)
+      .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff)))
+      .orderBy(desc(articles.publishedAt))
+      .limit(PUBLISH_POLICY.maxPerHour),
+    db.select({ occurredAt: articles.updatedAt })
+      .from(articles)
+      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff)))
+      .orderBy(desc(articles.updatedAt))
+      .limit(PUBLISH_POLICY.maxPerHour),
+  ]);
+  const recent = [...facebookPublished, ...bufferQueued]
+    .filter((item): item is { occurredAt: Date } => item.occurredAt instanceof Date)
+    .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
+    .slice(0, PUBLISH_POLICY.maxPerHour);
+  const lastPublishedAt = recent[0]?.occurredAt.getTime();
   const minimumGapAt = lastPublishedAt === undefined ? now : lastPublishedAt + PUBLISH_POLICY.minimumGapMinutes * 60 * 1000;
   const oldestInWindow = recent[PUBLISH_POLICY.maxPerHour - 1];
-  const hourlyLimitAt = recent.length >= PUBLISH_POLICY.maxPerHour && oldestInWindow?.publishedAt
-    ? oldestInWindow.publishedAt.getTime() + 60 * 60 * 1000
+  const hourlyLimitAt = recent.length >= PUBLISH_POLICY.maxPerHour && oldestInWindow
+    ? oldestInWindow.occurredAt.getTime() + 60 * 60 * 1000
     : now;
   const nextAllowedAt = Math.max(minimumGapAt, hourlyLimitAt);
   if (nextAllowedAt <= now) return null;
   return {
-    detail: recent.length >= 2
+    detail: recent.length >= PUBLISH_POLICY.maxPerHour
       ? "Batas publikasi tercapai: maksimal 2 artikel dalam 60 menit."
       : "Jeda publikasi minimum 15 menit belum terpenuhi.",
     nextAllowedAt: new Date(nextAllowedAt).toISOString(),
@@ -74,7 +87,7 @@ function getPublicAppUrl() {
 }
 
 export type RunResult = {
-  result: "published" | "already-published" | "idle" | "failed" | "rate-limited";
+  result: "queued" | "idle" | "failed" | "rate-limited";
   articleId?: string;
   title?: string;
   detail?: string;
@@ -82,6 +95,11 @@ export type RunResult = {
 
 export async function runNewsPipeline(): Promise<RunResult> {
   const db = getDb();
+  const activePages = await db.select({ pageKey: rssSources.pageKey }).from(rssSources).where(eq(rssSources.active, true)).groupBy(rssSources.pageKey);
+  const configurationGaps = getBufferConfigurationGaps(activePages.map(({ pageKey }) => pageKey));
+  if (configurationGaps.length) {
+    return { result: "failed", detail: `Konfigurasi Buffer belum lengkap: ${configurationGaps.join(", ")}. Artikel tetap di antrean.` };
+  }
   const pause = await getPublishingPause();
   if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
   const article = await claimNextArticle();
@@ -101,23 +119,20 @@ export async function runNewsPipeline(): Promise<RunResult> {
 
     const appUrl = getPublicAppUrl();
     const imageUrl = `${appUrl}/api/og/${article.id}`;
-    const postId = await createFacebookPhotoPost({ pageKey: article.pageKey, imageUrl, caption });
+    const bufferPostId = await enqueueBufferFacebookPost({
+      pageKey: article.pageKey,
+      imageUrl,
+      caption,
+      sourceUrl: article.sourceUrl,
+    });
 
-    // Simpan ID sebelum membuat komentar agar kegagalan komentar tidak menyebabkan repost.
+    // Buffer menerima konten ke antreannya; Facebook akan menerbitkannya pada slot jadwal Buffer.
+    // Gunakan prefix untuk membedakan ID Buffer dari ID posting Facebook lama tanpa migrasi schema.
     await db.update(articles)
-      .set({ status: "published", facebookPostId: postId, publishedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "ready", facebookPostId: `buffer:${bufferPostId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
       .where(eq(articles.id, article.id));
 
-    try {
-      await addSourceComment(article.pageKey, postId, article.sourceUrl);
-    } catch (commentError) {
-      const message = commentError instanceof Error ? commentError.message : "Gagal menambahkan komentar sumber.";
-      await db.update(articles).set({ errorMessage: `Posting berhasil; komentar sumber gagal: ${message}`, updatedAt: new Date() })
-        .where(eq(articles.id, article.id));
-      return { result: "published", articleId: article.id, title: copy.title, detail: "Posting berhasil, tetapi komentar sumber gagal." };
-    }
-
-    return { result: "published", articleId: article.id, title: copy.title };
+    return { result: "queued", articleId: article.id, title: copy.title, detail: "Konten masuk ke antrean Buffer untuk dijadwalkan." };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kesalahan tidak diketahui saat memproses berita.";
     await db.update(articles)
