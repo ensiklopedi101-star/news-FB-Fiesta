@@ -2,6 +2,7 @@ import { ImageResponse } from "next/og";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
+import { fetchOgImageDataUrl } from "@/lib/og-image";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 /* eslint-disable @next/next/no-img-element */
@@ -13,7 +14,7 @@ export const revalidate = 0;
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
-  const [article] = await getDb().select({ title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl })
+  const [article] = await getDb().select({ title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl })
     .from(articles)
     .where(eq(articles.id, id))
     .limit(1);
@@ -24,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const brand = (pageBrand || process.env.PAGE_BRAND || (isEntertainment ? "Popbeez" : "Nusabeez")).slice(0, 40);
   const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
   const title = article.title.slice(0, 130);
-  const image = isSafePublicImageUrl(article.imageUrl) ? article.imageUrl : null;
+  const image = await fetchOgImageDataUrl(article.imageUrl, article.sourceUrl);
   const localOrigin = process.env.APP_URL || new URL(request.url).origin;
   const localLogo = new URL(`/brand/${isEntertainment ? "popbeez_icon.png" : "nusabeez_icon.png"}`, localOrigin).toString();
   const customLogo = isEntertainment ? process.env.PAGE_LOGO_ENTERTAINMENT_URL : process.env.PAGE_LOGO_NEWS_URL;
