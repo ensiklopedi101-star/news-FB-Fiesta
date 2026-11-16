@@ -10,6 +10,22 @@ export type BufferChannel = {
   isDisconnected: boolean;
 };
 
+export type BufferChannelMapping = {
+  status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready";
+  channelName?: string;
+};
+
+export function checkBufferChannelMapping(channelId: string | undefined, channels: BufferChannel[]): BufferChannelMapping {
+  if (!channelId) return { status: "missing-channel-id" };
+  const channel = channels.find((candidate) => candidate.id === channelId);
+  if (!channel) return { status: "id-not-found" };
+  if (channel.service.toLowerCase() !== "facebook" || channel.type.toLowerCase() !== "page") {
+    return { status: "not-a-facebook-page", channelName: channel.name };
+  }
+  if (channel.isDisconnected) return { status: "disconnected", channelName: channel.name };
+  return { status: "ready", channelName: channel.name };
+}
+
 type GraphQLError = { message?: string };
 type BufferGraphResponse<T> = { data?: T; errors?: GraphQLError[] };
 
