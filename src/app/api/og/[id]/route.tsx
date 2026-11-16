@@ -1,20 +1,20 @@
 import { ImageResponse } from "next/og";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
-import { fetchOgImageDataUrl } from "@/lib/og-image";
+import { fetchAndStoreOgImage, isVercelBlobImageUrl } from "@/lib/og-image";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 /* eslint-disable @next/next/no-img-element */
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
-  const [article] = await getDb().select({ title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl })
+  const [article] = await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl })
     .from(articles)
     .where(eq(articles.id, id))
     .limit(1);
@@ -25,7 +25,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const brand = (pageBrand || process.env.PAGE_BRAND || (isEntertainment ? "Popbeez" : "Nusabeez")).slice(0, 40);
   const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
   const title = article.title.slice(0, 130);
-  const image = await fetchOgImageDataUrl(article.imageUrl, article.sourceUrl);
+  const storedImage = await fetchAndStoreOgImage(article.id, article.imageUrl, article.sourceUrl);
+  const image = storedImage?.dataUrl ?? null;
+  if (article.imageUrl && !storedImage) {
+    console.warn(`[og-image] Source image could not be fetched or was rejected for article ${article.id}.`);
+  }
+  if (storedImage?.blobUrl && article.imageUrl && !isVercelBlobImageUrl(article.imageUrl)) {
+    try {
+      await getDb().update(articles)
+        .set({ imageUrl: storedImage.blobUrl, updatedAt: new Date() })
+        .where(and(eq(articles.id, article.id), eq(articles.imageUrl, article.imageUrl)));
+    } catch {
+      console.error(`[og-image] Neon URL update failed for article ${article.id}; Blob upload succeeded.`);
+    }
+  }
   const localOrigin = process.env.APP_URL || new URL(request.url).origin;
   const localLogo = new URL(`/brand/${isEntertainment ? "popbeez_icon.png" : "nusabeez_icon.png"}`, localOrigin).toString();
   const customLogo = isEntertainment ? process.env.PAGE_LOGO_ENTERTAINMENT_URL : process.env.PAGE_LOGO_NEWS_URL;
