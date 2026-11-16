@@ -2,6 +2,9 @@ import Parser from "rss-parser";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { fetchArticlePage, MAX_ARTICLE_SNIPPET_CHARS } from "@/lib/article-page";
+import { isSafePublicImageUrl } from "@/lib/safe-url";
+import { PUBLISH_POLICY } from "@/lib/schedule";
 import { rssSources, type RssSource } from "@/lib/schema";
 
 export type FeedStory = {
@@ -14,6 +17,7 @@ export type FeedStory = {
   rawText: string;
   imageUrl: string | null;
   feedPublishedAt: Date | null;
+  enriched: boolean;
 };
 
 const parser = new Parser({
@@ -42,10 +46,16 @@ function usableUrl(candidate: unknown, baseUrl: string): string | null {
   try {
     const url = new URL(candidate, baseUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
     return url.toString();
   } catch {
     return null;
   }
+}
+
+function usableImageUrl(candidate: unknown, baseUrl: string): string | null {
+  const url = typeof candidate === "string" ? usableUrl(candidate, baseUrl) : null;
+  return url && isSafePublicImageUrl(url) ? url : null;
 }
 
 function getImage(item: Record<string, unknown>, sourceUrl: string): string | null {
@@ -54,10 +64,10 @@ function getImage(item: Record<string, unknown>, sourceUrl: string): string | nu
   const thumbnail = item.mediaThumbnail as { $?: { url?: unknown } } | undefined;
   const encoded = String(item.contentEncoded ?? item.content ?? "");
   const fromHtml = encoded.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1];
-  const fromMedia = media?.$?.url ?? thumbnail?.$?.url;
-  return usableUrl(enclosure?.url, sourceUrl)
-    ?? usableUrl(fromMedia, sourceUrl)
-    ?? usableUrl(fromHtml, sourceUrl);
+  return usableImageUrl(enclosure?.url, sourceUrl)
+    ?? usableImageUrl(media?.$?.url, sourceUrl)
+    ?? usableImageUrl(thumbnail?.$?.url, sourceUrl)
+    ?? usableImageUrl(fromHtml, sourceUrl);
 }
 
 function canonicalize(rawUrl: string): string {
@@ -102,7 +112,7 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
       const content = cleanText(String(item.contentEncoded ?? item.contentSnippet ?? item.content ?? item.summary ?? ""));
       if (!matchesKeywords(source, title, content)) continue;
       const sourceUrl = canonicalize(rawLink);
-      const rawText = [title, content].filter(Boolean).join("\n\n").slice(0, 14_000);
+      const rawText = [title, content].filter(Boolean).join("\n\n").slice(0, MAX_ARTICLE_SNIPPET_CHARS);
       stories.push({
         sourceName: source.name,
         category: source.category,
@@ -113,6 +123,7 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
         rawText,
         imageUrl: getImage(item, sourceUrl),
         feedPublishedAt: Number.isFinite(published) ? new Date(published) : null,
+        enriched: false,
       });
     }
     return stories;
@@ -126,10 +137,45 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
   }
 }
 
+async function enrichStory(story: FeedStory): Promise<FeedStory> {
+  const page = await fetchArticlePage(story.sourceUrl);
+  if (!page) return story;
+
+  const rssContent = story.rawText.startsWith(story.title)
+    ? story.rawText.slice(story.title.length).trim()
+    : story.rawText;
+  const content = page.text || rssContent;
+  const rawText = [story.title, content].filter(Boolean).join("\n\n").slice(0, MAX_ARTICLE_SNIPPET_CHARS);
+  return {
+    ...story,
+    rawText,
+    imageUrl: story.imageUrl || page.imageUrl,
+    enriched: Boolean(page.text || page.imageUrl),
+  };
+}
+
+async function mapWithConcurrency<T, U>(items: T[], concurrency: number, worker: (item: T) => Promise<U>): Promise<U[]> {
+  const results = new Array<U>(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 export async function fetchRecentStories(): Promise<FeedStory[]> {
   const feeds = await getDb().select().from(rssSources).where(eq(rssSources.active, true));
   const perFeed = 8;
   const cutoff = Date.now() - 72 * 60 * 60 * 1000;
   const results = await Promise.all(feeds.map((feed) => fetchOneSource(feed, perFeed, cutoff)));
-  return results.flat().sort((a, b) => (b.feedPublishedAt?.getTime() ?? 0) - (a.feedPublishedAt?.getTime() ?? 0));
+  const stories = results.flat().sort((a, b) => (b.feedPublishedAt?.getTime() ?? 0) - (a.feedPublishedAt?.getTime() ?? 0));
+  const harvestCandidates = stories.slice(0, PUBLISH_POLICY.maxArticlesPerHarvest);
+  const enriched = await mapWithConcurrency(harvestCandidates, 8, enrichStory);
+  return [...enriched, ...stories.slice(harvestCandidates.length)];
 }

@@ -38,14 +38,14 @@ type DashboardData = {
   articles: Article[];
 };
 
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; limited?: boolean };
+type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
   schema: "Skema database",
   feeds: "RSS aktif",
-  gemini: "Gemini AI (utama/cadangan)",
-  groq: "Groq AI (fallback)",
+  groq: "Groq AI (utama)",
+  gemini: "Gemini AI (cadangan)",
   facebookNews: "Facebook berita",
   facebookEntertainment: "Facebook hiburan",
   appUrl: "URL publik aplikasi",
@@ -183,7 +183,7 @@ export default function Dashboard() {
     try {
       const result = await api("/api/harvest", { method: "POST" });
       const cap = result.limited ? " Batas panen 50 artikel tercapai." : "";
-      setMessage(`Panen selesai: ${result.scanned ?? 0} item cocok diperiksa, ${result.added ?? 0} artikel baru masuk antrean.${cap}`);
+      setMessage(`Panen selesai: ${result.scanned ?? 0} item cocok diperiksa, ${result.added ?? 0} artikel baru masuk antrean; ${result.enriched ?? 0} item diperkaya dari halaman sumber.${cap}`);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Panen RSS gagal.");
@@ -267,12 +267,13 @@ export default function Dashboard() {
       <section className="panel readiness-panel setup-panel">
         <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Facebook</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
         <div className="setup-grid">
-          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI</strong><p>Atur <code>GEMINI_API_KEY</code> di Vercel; opsional tambahkan <code>GEMINI_API_KEY_FALLBACK</code>. Aplikasi mencoba key Gemini cadangan jika key utama gagal.</p></div><b>{checks.gemini ? "Tersedia" : "Belum diatur"}</b></article>
-          <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (cadangan)</strong><p>Opsional: tambahkan <code>GROQ_API_KEY</code>. Groq dicoba jika kedua key Gemini gagal; model opsional diatur lewat <code>GROQ_MODEL</code>.</p></div><b>{checks.groq ? "Tersedia" : "Opsional"}</b></article>
+          <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (utama)</strong><p>Tambahkan <code>GROQ_API_KEY</code> di Vercel. Jika Groq gagal, aplikasi beralih ke Gemini; modelnya dapat diatur lewat <code>GROQ_MODEL</code>.</p></div><b>{checks.groq ? "Tersedia" : "Opsional"}</b></article>
+          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI (cadangan)</strong><p>Atur <code>GEMINI_API_KEY</code>; opsional tambahkan <code>GEMINI_API_KEY_FALLBACK</code>. Key cadangan dicoba jika Groq atau Gemini utama gagal.</p></div><b>{checks.gemini ? "Tersedia" : "Opsional"}</b></article>
           <article className="setup-card"><span className={checks.facebookNews ? "check-dot good" : "check-dot"} /><div><strong>Facebook — Berita</strong><p>Atur <code>FB_NEWS_PAGE_ID</code> dan <code>FB_NEWS_PAGE_ACCESS_TOKEN</code> untuk Page berita dari <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">Meta for Developers</a>.</p></div><b>{checks.facebookNews ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.facebookEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Facebook — Hiburan</strong><p>Atur <code>FB_ENTERTAINMENT_PAGE_ID</code> dan <code>FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN</code> untuk Page hiburan dari <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">Meta for Developers</a>.</p></div><b>{checks.facebookEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
         <p className="muted small-note">Simpan nilai rahasia hanya di Vercel → Project → Settings → Environment Variables, lalu deploy ulang. Dashboard tidak meminta atau menyimpan API key/token. Status “tersedia” hanya memeriksa keberadaan variabel, bukan menguji izin atau validitas token.</p>
+        <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
       </section>
 
       <div className="dashboard-columns">
