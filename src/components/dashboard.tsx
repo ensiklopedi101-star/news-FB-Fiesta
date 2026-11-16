@@ -396,6 +396,7 @@ export default function Dashboard() {
               <strong>{article.title}</strong>
               <div className="article-meta">{article.sourceName} · {article.category} · {formatDate(article.createdAt)}</div>
               {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
+              <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Pratinjau kartu yang dikirim ke Buffer ↗</a>
               <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka sumber ↗</a>
             </article>
           ))}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
