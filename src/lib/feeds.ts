@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { fetchArticlePage, MAX_ARTICLE_SNIPPET_CHARS } from "@/lib/article-page";
-import { isSafePublicImageUrl } from "@/lib/safe-url";
+import { extractFeedImageUrl } from "@/lib/feed-image";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { rssSources, type RssSource } from "@/lib/schema";
 
@@ -51,23 +51,6 @@ function usableUrl(candidate: unknown, baseUrl: string): string | null {
   } catch {
     return null;
   }
-}
-
-function usableImageUrl(candidate: unknown, baseUrl: string): string | null {
-  const url = typeof candidate === "string" ? usableUrl(candidate, baseUrl) : null;
-  return url && isSafePublicImageUrl(url) ? url : null;
-}
-
-function getImage(item: Record<string, unknown>, sourceUrl: string): string | null {
-  const enclosure = item.enclosure as { url?: unknown } | undefined;
-  const media = item.mediaContent as { $?: { url?: unknown } } | undefined;
-  const thumbnail = item.mediaThumbnail as { $?: { url?: unknown } } | undefined;
-  const encoded = String(item.contentEncoded ?? item.content ?? "");
-  const fromHtml = encoded.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1];
-  return usableImageUrl(enclosure?.url, sourceUrl)
-    ?? usableImageUrl(media?.$?.url, sourceUrl)
-    ?? usableImageUrl(thumbnail?.$?.url, sourceUrl)
-    ?? usableImageUrl(fromHtml, sourceUrl);
 }
 
 function canonicalize(rawUrl: string): string {
@@ -121,7 +104,7 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
         urlHash: createHash("sha256").update(sourceUrl).digest("hex"),
         title,
         rawText,
-        imageUrl: getImage(item, sourceUrl),
+        imageUrl: extractFeedImageUrl(item, sourceUrl),
         feedPublishedAt: Number.isFinite(published) ? new Date(published) : null,
         enriched: false,
       });
