@@ -53,7 +53,8 @@ export async function GET(request: NextRequest) {
       database: true,
       schema: true,
       feeds: enabledSourceCount.value > 0,
-      gemini: Boolean(process.env.GEMINI_API_KEY),
+      gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
+      groq: Boolean(process.env.GROQ_API_KEY),
       facebookNews: pageCredentials.news,
       facebookEntertainment: pageCredentials.entertainment,
       appUrl: Boolean(process.env.APP_URL),
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
       ok: true,
       checkedAt: new Date().toISOString(),
       integrations,
-      readyToPublish: integrations.feeds && integrations.gemini && integrations.appUrl && integrations.cronSecret && allActivePagesConfigured,
+      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && allActivePagesConfigured,
       schedule: PUBLISH_POLICY,
       stats: {
         articles: articleTotal.value,

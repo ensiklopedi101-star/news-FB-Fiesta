@@ -1,6 +1,6 @@
 # News FB Fiesta
 
-Backend Next.js untuk alur **RSS → ringkasan Gemini → news card 1080×1350 → Facebook Page**. Satu database **Neon Postgres** melalui `DATABASE_URL` melayani dua channel publikasi: `news` dan `entertainment`. Supabase tidak dibutuhkan. Aplikasi ini tidak membuat video Reels.
+Backend Next.js untuk alur **RSS → ringkasan AI (Gemini dengan fallback Gemini/Groq) → news card 1080×1350 → Facebook Page**. Satu database **Neon Postgres** melalui `DATABASE_URL` melayani dua channel publikasi: `news` dan `entertainment`. Supabase tidak dibutuhkan. Aplikasi ini tidak membuat video Reels.
 
 > Repository tidak menyimpan kredensial. Hubungkan Neon lewat `DATABASE_URL`; daftar RSS dikelola dari Dashboard aplikasi dan disimpan di Neon. API Gemini dan Meta tetap di Vercel Environment Variables.
 
@@ -10,7 +10,7 @@ Backend Next.js untuk alur **RSS → ringkasan Gemini → news card 1080×1350 �
 - Preset satu-klik untuk sumber hiburan dari daftar awal, termasuk filter kata kunci per feed; feed Google News dan HanCinema masuk nonaktif untuk ditinjau terlebih dahulu.
 - Panen RSS harian terpisah dari jadwal publikasi; artikel hasil panen masuk antrean Neon, bukan langsung diposting.
 - Deduplicasi URL sumber dengan SHA-256 dan unique index di Neon; setiap artikel menyimpan `page_key` tujuan.
-- Ringkasan bahasa Indonesia menggunakan Gemini: judul, tepat tiga paragraf pendek, dan pertanyaan penutup.
+- Ringkasan bahasa Indonesia melalui failover berurutan: Gemini utama → Gemini cadangan → Groq. Caption terdiri dari judul, tepat tiga paragraf pendek, dan pertanyaan penutup.
 - Kartu berita dinamis vertikal 1080×1350 pada `/api/og/{articleId}`; memakai gambar RSS jika tersedia.
 - Unggah foto + caption ke Facebook Page yang sesuai dengan `page_key`, lalu komentar berisi URL sumber.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
@@ -38,7 +38,13 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
-- `GEMINI_API_KEY`: API key Google AI Studio; `GEMINI_MODEL` opsional (default `gemini-3.8-flash`).
+- `GEMINI_API_KEY`: API key Google AI Studio utama.
+- `GEMINI_API_KEY_FALLBACK`: API key Gemini cadangan; aplikasi mencoba key ini jika Gemini utama gagal.
+- `GEMINI_MODEL`: opsional, model untuk kedua key Gemini (default `gemini-3.8-flash`).
+- `GROQ_API_KEY`: opsional, fallback terakhir setelah kedua key Gemini gagal.
+- `GROQ_MODEL`: opsional, model Groq (default `llama-3.3-70b-versatile`); sesuaikan dengan model yang tersedia untuk akun Groq.
+
+Kegagalan provider atau format hasil akan mengaktifkan provider berikutnya. Pesan error akhir disimpan pada artikel; key rahasia tidak dicatat di database atau log.
 - `FB_NEWS_PAGE_ID`, `FB_NEWS_PAGE_ACCESS_TOKEN`: kredensial Page berita.
 - `FB_ENTERTAINMENT_PAGE_ID`, `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN`: kredensial Page hiburan.
 - `FB_GRAPH_VERSION`: versi Graph API yang didukung akun Meta-mu, format `vNN.0`.

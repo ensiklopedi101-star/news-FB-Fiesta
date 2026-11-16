@@ -44,7 +44,8 @@ const integrationLabels: Record<string, string> = {
   database: "Neon database",
   schema: "Skema database",
   feeds: "RSS aktif",
-  gemini: "Gemini AI",
+  gemini: "Gemini AI (utama/cadangan)",
+  groq: "Groq AI (fallback)",
   facebookNews: "Facebook berita",
   facebookEntertainment: "Facebook hiburan",
   appUrl: "URL publik aplikasi",
@@ -264,9 +265,10 @@ export default function Dashboard() {
       </section>
 
       <section className="panel readiness-panel setup-panel">
-        <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan Gemini dan Facebook</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
+        <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Facebook</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
         <div className="setup-grid">
-          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI</strong><p>Buat API key di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">Google AI Studio</a>, lalu simpan sebagai <code>GEMINI_API_KEY</code> di Vercel.</p></div><b>{checks.gemini ? "Tersedia" : "Belum diatur"}</b></article>
+          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI</strong><p>Atur <code>GEMINI_API_KEY</code> di Vercel; opsional tambahkan <code>GEMINI_API_KEY_FALLBACK</code>. Aplikasi mencoba key Gemini cadangan jika key utama gagal.</p></div><b>{checks.gemini ? "Tersedia" : "Belum diatur"}</b></article>
+          <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (cadangan)</strong><p>Opsional: tambahkan <code>GROQ_API_KEY</code>. Groq dicoba jika kedua key Gemini gagal; model opsional diatur lewat <code>GROQ_MODEL</code>.</p></div><b>{checks.groq ? "Tersedia" : "Opsional"}</b></article>
           <article className="setup-card"><span className={checks.facebookNews ? "check-dot good" : "check-dot"} /><div><strong>Facebook — Berita</strong><p>Atur <code>FB_NEWS_PAGE_ID</code> dan <code>FB_NEWS_PAGE_ACCESS_TOKEN</code> untuk Page berita dari <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">Meta for Developers</a>.</p></div><b>{checks.facebookNews ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.facebookEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Facebook — Hiburan</strong><p>Atur <code>FB_ENTERTAINMENT_PAGE_ID</code> dan <code>FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN</code> untuk Page hiburan dari <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">Meta for Developers</a>.</p></div><b>{checks.facebookEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
@@ -318,7 +320,7 @@ export default function Dashboard() {
           ))}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>
           {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Proses & terbitkan 1 berita"}</button>}
-          {!canPublish && <p className="muted small-note">Tombol publikasi akan aktif setelah feed, Gemini, URL aplikasi, dan kredensial Facebook untuk halaman tujuan siap.</p>}
+          {!canPublish && <p className="muted small-note">Tombol publikasi akan aktif setelah feed, minimal satu penyedia AI, URL aplikasi, dan kredensial Facebook untuk halaman tujuan siap.</p>}
         </section>
       </div>
 
