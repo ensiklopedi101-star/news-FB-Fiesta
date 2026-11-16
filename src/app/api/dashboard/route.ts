@@ -74,6 +74,10 @@ export async function GET(request: NextRequest) {
       ok: true,
       checkedAt: new Date().toISOString(),
       integrations,
+      aiModels: {
+        groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "llama-3.3-70b-versatile",
+        gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "gemini-3.8-flash",
+      },
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && integrations.bufferApi && hasConfiguredActiveFeed,
       schedule: PUBLISH_POLICY,
       stats: {

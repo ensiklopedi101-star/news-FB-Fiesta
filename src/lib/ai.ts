@@ -1,5 +1,6 @@
 import "server-only";
 import { GoogleGenAI, Type } from "@google/genai";
+import { safeProviderError } from "@/lib/ai-error";
 
 const outputSchema = {
   type: Type.OBJECT,
@@ -12,7 +13,30 @@ const outputSchema = {
   required: ["title", "paragraphs", "question", "hashtags"],
 } as const;
 
-export type GeneratedCopy = { title: string; caption: string };
+export type AiProviderAttempt = {
+  provider: "Groq" | "Gemini" | "Gemini cadangan";
+  model: string;
+  outcome: "ok" | "failed" | "skipped";
+  elapsedMs: number;
+  error?: string;
+};
+
+type GeneratedText = { title: string; caption: string };
+
+export type GeneratedCopy = GeneratedText & {
+  provider: AiProviderAttempt["provider"];
+  model: string;
+  elapsedMs: number;
+  attempts: AiProviderAttempt[];
+};
+
+export class AiGenerationError extends Error {
+  constructor(message: string, readonly attempts: AiProviderAttempt[]) {
+    super(message);
+    this.name = "AiGenerationError";
+  }
+}
+
 type GeneratedDraft = { title?: unknown; paragraphs?: unknown; question?: unknown; hashtags?: unknown };
 
 const AI_TOTAL_TIMEOUT_MS = 30_000;
@@ -105,7 +129,7 @@ function normalizeHashtag(value: string): string | null {
   return tag.length >= 2 ? `#${tag}` : null;
 }
 
-function validateDraft(raw: string): GeneratedCopy {
+function validateDraft(raw: string): GeneratedText {
   let data: GeneratedDraft;
   try {
     data = JSON.parse(raw) as GeneratedDraft;
@@ -130,15 +154,7 @@ function validateDraft(raw: string): GeneratedCopy {
   return { title: title.slice(0, 180), caption };
 }
 
-function safeError(error: unknown, secrets: string[]): string {
-  let message = error instanceof Error ? error.message : "Kesalahan tidak diketahui.";
-  for (const secret of secrets) {
-    if (secret) message = message.split(secret).join("[REDACTED]");
-  }
-  return message.slice(0, 300);
-}
-
-async function generateWithGemini(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedCopy> {
+async function generateWithGemini(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
@@ -151,14 +167,14 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
       responseSchema: outputSchema,
       temperature: 0.35,
       maxOutputTokens: 350,
-      httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
+      httpOptions: { timeout: timeoutMs },
     },
   });
   if (!result.text) throw new Error("Gemini tidak mengembalikan ringkasan.");
   return validateDraft(result.text);
 }
 
-async function generateWithGroq(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedCopy> {
+async function generateWithGroq(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -183,7 +199,10 @@ async function generateWithGroq(apiKey: string, model: string, prompt: string, t
     error?: { message?: string };
     choices?: Array<{ message?: { content?: unknown } }>;
   } | null;
-  if (!response.ok) throw new Error(data?.error?.message || `Groq API HTTP ${response.status}.`);
+  if (!response.ok) {
+    const detail = data?.error?.message || response.statusText || "Respons error kosong.";
+    throw new Error(`Groq HTTP ${response.status} model=${model}: ${detail}`);
+  }
   const raw = data?.choices?.[0]?.message?.content;
   if (typeof raw !== "string" || !raw.trim()) throw new Error("Groq tidak mengembalikan ringkasan.");
   return validateDraft(raw);
@@ -204,53 +223,80 @@ export async function writeNewsCopy(input: {
   }
 
   const prompt = buildPrompt(input);
-  const failures: string[] = [];
-  const deadline = Date.now() + AI_TOTAL_TIMEOUT_MS;
+  const attempts: AiProviderAttempt[] = [];
+  const startedAt = Date.now();
+  const deadline = startedAt + AI_TOTAL_TIMEOUT_MS;
   const providerTimeout = () => Math.min(AI_PROVIDER_TIMEOUT_MS, deadline - Date.now());
+
+  async function tryProvider(
+    provider: AiProviderAttempt["provider"],
+    model: string,
+    call: (timeoutMs: number) => Promise<GeneratedText>,
+  ): Promise<GeneratedCopy | null> {
+    const timeoutMs = providerTimeout();
+    if (timeoutMs <= 0) {
+      const attempt: AiProviderAttempt = { provider, model, outcome: "skipped", elapsedMs: 0, error: "Batas waktu total AI sudah habis." };
+      attempts.push(attempt);
+      return null;
+    }
+
+    const attemptStartedAt = Date.now();
+    try {
+      const generated = await call(timeoutMs);
+      const elapsedMs = Date.now() - attemptStartedAt;
+      const attempt: AiProviderAttempt = { provider, model, outcome: "ok", elapsedMs };
+      attempts.push(attempt);
+      console.info(`[ai] ${JSON.stringify({ event: "provider_attempt", ...attempt })}`);
+      return {
+        ...generated,
+        provider,
+        model,
+        elapsedMs: Date.now() - startedAt,
+        attempts: [...attempts],
+      };
+    } catch (error) {
+      const elapsedMs = Date.now() - attemptStartedAt;
+      const detail = safeProviderError(error, configuredKeys);
+      const attempt: AiProviderAttempt = { provider, model, outcome: "failed", elapsedMs, error: detail };
+      attempts.push(attempt);
+      console.warn(`[ai] ${JSON.stringify({ event: "provider_attempt", ...attempt })}`);
+      return null;
+    }
+  }
 
   if (groqKey) {
     const timeoutMs = providerTimeout();
-    if (timeoutMs > 0) {
-      const models = await selectGroqModel(groqKey, Math.min(2_000, timeoutMs));
-      if (models.length === 0) failures.push("Groq: tidak ada model teks yang cocok tersedia untuk akun ini.");
-      for (const model of models) {
-        const attemptTimeout = providerTimeout();
-        if (attemptTimeout <= 0) break;
-        try {
-          return await generateWithGroq(groqKey, model, prompt, attemptTimeout);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "";
-          failures.push(`Groq model=${model}: ${safeError(error, configuredKeys)}`);
-          if (/\b401\b|\b403\b|unauthorized|permission denied/i.test(message)) break;
-        }
-      }
+    const models = timeoutMs > 0 ? await selectGroqModel(groqKey, Math.min(2_000, timeoutMs)) : [];
+    for (const model of models) {
+      const result = await tryProvider("Groq", model, (attemptTimeout) => generateWithGroq(groqKey, model, prompt, attemptTimeout));
+      if (result) return result;
+      if (/HTTP (?:401|403)|unauthorized|permission denied/i.test(attempts.at(-1)?.error || "") || Date.now() >= deadline) break;
+    }
+    if (models.length === 0) {
+      const attempt: AiProviderAttempt = { provider: "Groq", model: process.env.GROQ_MODEL?.trim() || "otomatis", outcome: "skipped", elapsedMs: 0, error: "Tidak ada model teks yang cocok tersedia untuk akun ini." };
+      attempts.push(attempt);
     }
   }
 
-  const geminiProviders: Array<{ name: string; key: string }> = [];
-  if (primaryKey) geminiProviders.push({ name: "Gemini", key: primaryKey });
-  if (fallbackKey && fallbackKey !== primaryKey) geminiProviders.push({ name: "Gemini cadangan", key: fallbackKey });
+  const geminiProviders: Array<{ provider: "Gemini" | "Gemini cadangan"; key: string }> = [];
+  if (primaryKey) geminiProviders.push({ provider: "Gemini", key: primaryKey });
+  if (fallbackKey && fallbackKey !== primaryKey) geminiProviders.push({ provider: "Gemini cadangan", key: fallbackKey });
 
   for (const provider of geminiProviders) {
     const timeoutMs = providerTimeout();
-    if (timeoutMs <= 0) {
-      failures.push(`${provider.name}: batas waktu total AI tercapai.`);
-      break;
-    }
+    if (timeoutMs <= 0) break;
     const models = await selectGeminiModel(provider.key, Math.min(2_000, timeoutMs));
-    if (models.length === 0) failures.push(`${provider.name}: tidak ada model teks yang cocok tersedia untuk akun ini.`);
     for (const model of models) {
-      const attemptTimeout = providerTimeout();
-      if (attemptTimeout <= 0) break;
-      try {
-        return await generateWithGemini(provider.key, model, prompt, attemptTimeout);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        failures.push(`${provider.name} model=${model}: ${safeError(error, configuredKeys)}`);
-        if (/\b401\b|\b403\b|unauthorized|permission denied/i.test(message)) break;
-      }
+      const result = await tryProvider(provider.provider, model, (attemptTimeout) => generateWithGemini(provider.key, model, prompt, attemptTimeout));
+      if (result) return result;
+      if (/HTTP (?:401|403)|unauthorized|permission denied/i.test(attempts.at(-1)?.error || "") || Date.now() >= deadline) break;
+    }
+    if (models.length === 0) {
+      const attempt: AiProviderAttempt = { provider: provider.provider, model: process.env.GEMINI_MODEL?.trim() || "otomatis", outcome: "skipped", elapsedMs: 0, error: "Tidak ada model teks yang cocok tersedia untuk akun ini." };
+      attempts.push(attempt);
     }
   }
 
-  throw new Error(`Semua penyedia AI gagal. ${failures.join(" | ")}`.slice(0, 950));
+  const detail = attempts.map((attempt) => `${attempt.provider} model=${attempt.model} outcome=${attempt.outcome} duration=${attempt.elapsedMs}ms${attempt.error ? ` error=${attempt.error}` : ""}`).join(" | ");
+  throw new AiGenerationError(`Semua penyedia AI gagal. ${detail}`.slice(0, 950), attempts);
 }
