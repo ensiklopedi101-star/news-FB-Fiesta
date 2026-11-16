@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkBufferChannelMapping, enqueueBufferFacebookPost, getBufferConfigurationGaps, listBufferChannels } from "../src/lib/buffer-api";
+import { BufferEnqueueOutcomeUnknownError, checkBufferChannelMapping, enqueueBufferFacebookPost, getBufferConfigurationGaps, listBufferChannels } from "../src/lib/buffer-api";
 
 const ENV_KEYS = ["BUFFER_API_KEY", "BUFFER_NEWS_CHANNEL_ID", "BUFFER_ENTERTAINMENT_CHANNEL_ID"] as const;
 
@@ -92,6 +92,22 @@ test("validates Buffer channel mappings without publishing", () => {
   assert.deepEqual(checkBufferChannelMapping("group-1", channels), { status: "not-a-facebook-page", channelName: "Group" });
   assert.deepEqual(checkBufferChannelMapping("page-offline", channels), { status: "disconnected", channelName: "Offline Page" });
   assert.deepEqual(checkBufferChannelMapping("page-1", channels), { status: "ready", channelName: "PopBeez" });
+});
+
+test("marks a Buffer gateway timeout as an unknown enqueue outcome without retrying", async () => {
+  await withBufferEnvironment(async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ errors: [{ message: "gateway timeout" }] }), { status: 504 })) as typeof fetch;
+    await assert.rejects(
+      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: "https://example.test/card.png", caption: "Caption", sourceUrl: "https://example.test/story" }),
+      (error: unknown) => {
+        assert.ok(error instanceof BufferEnqueueOutcomeUnknownError);
+        assert.match(error.message, /hasil enqueue tidak diketahui/);
+        assert.match(error.message, /Jangan kirim ulang/);
+        assert.doesNotMatch(error.message, /unit-test-buffer-key/);
+        return true;
+      },
+    );
+  });
 });
 
 test("redacts the Buffer API key from API error text", async () => {

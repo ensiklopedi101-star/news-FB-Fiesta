@@ -13,6 +13,9 @@ export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const startedAt = Date.now();
+  const requestId = request.headers.get("x-vercel-id") ?? "unknown";
+  console.info(`[cron] start requestId=${requestId}`);
   const db = getDb();
   await db.insert(publisherState).values({ id: 1 }).onConflictDoNothing();
   const [lock] = await db.update(publisherState)
@@ -40,5 +43,6 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error("[cron:unlock]", error instanceof Error ? error.message : error);
     }
+    console.info(`[cron] complete requestId=${requestId} elapsedMs=${Date.now() - startedAt}`);
   }
 }

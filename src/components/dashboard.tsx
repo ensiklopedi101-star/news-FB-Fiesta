@@ -67,6 +67,7 @@ function pageLabel(pageKey: Feed["pageKey"]) {
 }
 
 function articleStatusLabel(article: Article) {
+  if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:pending:")) return "Perlu cek Buffer";
   if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:")) return "Antrean Buffer";
   if (article.status === "ready") return "Siap";
   if (article.status === "published") return "Terbit";
