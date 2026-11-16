@@ -1,0 +1,31 @@
+name: Daily RSS harvest
+
+on:
+  # Setiap hari pukul 07.00 WITA, satu jam sebelum publisher mulai (GitHub Actions memakai UTC).
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-rss-harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Panen feed RSS ke antrean Neon
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$APP_URL" || -z "$CRON_SECRET" ]]; then
+            echo "GitHub Secrets APP_URL dan CRON_SECRET wajib diisi."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 75 \
+            -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${APP_URL%/}/api/harvest"

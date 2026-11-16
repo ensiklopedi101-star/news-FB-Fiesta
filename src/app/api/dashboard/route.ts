@@ -2,7 +2,8 @@ import { and, asc, count, desc, eq, gte } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { articles, rssSources } from "@/lib/schema";
+import { PUBLISH_POLICY } from "@/lib/schedule";
+import { articles, publisherState, rssSources } from "@/lib/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const db = getDb();
+    await db.insert(publisherState).values({ id: 1 }).onConflictDoNothing();
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     const [articleTotal] = await db.select({ value: count() }).from(articles);
@@ -21,6 +23,8 @@ export async function GET(request: NextRequest) {
       .where(and(eq(articles.status, "published"), gte(articles.publishedAt, today)));
     const [enabledSourceCount] = await db.select({ value: count() }).from(rssSources).where(eq(rssSources.active, true));
     const [allSourceCount] = await db.select({ value: count() }).from(rssSources);
+    const [publisherLock] = await db.select({ id: publisherState.id }).from(publisherState).limit(1);
+    if (!publisherLock) throw new Error("Migration scheduler belum diterapkan.");
     const groupedStatuses = await db.select({ status: articles.status, value: count() }).from(articles).groupBy(articles.status);
     const feeds = await db.select().from(rssSources).orderBy(asc(rssSources.pageKey), asc(rssSources.name));
     const recentArticles = await db.select({
@@ -61,6 +65,7 @@ export async function GET(request: NextRequest) {
       checkedAt: new Date().toISOString(),
       integrations,
       readyToPublish: integrations.feeds && integrations.gemini && integrations.appUrl && integrations.cronSecret && allActivePagesConfigured,
+      schedule: PUBLISH_POLICY,
       stats: {
         articles: articleTotal.value,
         publishedToday: publishedToday.value,
@@ -75,7 +80,7 @@ export async function GET(request: NextRequest) {
     console.error("[dashboard]", error instanceof Error ? error.message : error);
     return NextResponse.json({
       ok: false,
-      error: "Skema database belum lengkap. Jalankan migrasi drizzle/0002_rss_sources.sql di Neon, lalu muat ulang dashboard.",
+      error: "Skema database belum lengkap. Jalankan migrasi drizzle/0003_scheduled_harvest.sql di Neon setelah migrasi RSS sebelumnya, lalu muat ulang dashboard.",
     }, { status: 503 });
   }
 }
