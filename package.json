@@ -8,12 +8,14 @@
     "start": "next start --hostname 0.0.0.0",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@google/genai": "^1.11.0",
     "@neondatabase/serverless": "^1.0.1",
+    "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.4",
     "next": "^15.5.0",
     "react": "^19.1.0",

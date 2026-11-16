@@ -2,7 +2,8 @@ export function isSafePublicImageUrl(raw: string | null | undefined): raw is str
   if (!raw) return false;
   try {
     const url = new URL(raw);
-    if (url.protocol !== "https:") return false;
+    if (url.protocol !== "https:" || url.username || url.password) return false;
+    if (url.port && url.port !== "443") return false;
     const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
     if (!hostname || hostname === "localhost" || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".localhost")) return false;
     if (hostname.includes(":")) return false; // Tolak literal IPv6 supaya tidak memanggil alamat lokal/link-local.
