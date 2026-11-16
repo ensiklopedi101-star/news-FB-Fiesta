@@ -80,7 +80,7 @@ export default function Dashboard() {
     if (init.body) headers.set("Content-Type", "application/json");
     const response = await fetch(url, { ...init, headers, cache: "no-store" });
     const result = await response.json().catch(() => ({})) as ApiResult & Partial<DashboardData>;
-    if (!response.ok) throw new Error(result.error || `Permintaan gagal (HTTP ${response.status}).`);
+    if (!response.ok) throw new Error(result.error || result.detail || `Permintaan gagal (HTTP ${response.status}).`);
     return result;
   }, [secret]);
 

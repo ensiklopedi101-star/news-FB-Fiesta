@@ -23,7 +23,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await runNewsPipeline();
-    return NextResponse.json({ ok: result.result !== "failed", ...result }, { status: result.result === "failed" ? 502 : 200 });
+    return NextResponse.json({
+      ok: result.result !== "failed",
+      ...(result.result === "failed" ? { error: result.detail || "Pipeline gagal memproses artikel." } : {}),
+      ...result,
+    }, { status: result.result === "failed" ? 502 : 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kesalahan server.";
     console.error("[cron]", message);
