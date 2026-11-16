@@ -9,6 +9,7 @@ CREATE TABLE "rss_sources" (
   "feed_url" text NOT NULL,
   "language" text DEFAULT 'id' NOT NULL,
   "active" boolean DEFAULT true NOT NULL,
+  "keywords" text[] DEFAULT ARRAY[]::text[] NOT NULL,
   "last_fetched_at" timestamp with time zone,
   "last_error" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -43,3 +44,12 @@ CREATE UNIQUE INDEX "articles_url_hash_unique" ON "articles" USING btree ("url_h
 CREATE INDEX "articles_status_created_idx" ON "articles" USING btree ("status", "created_at");
 CREATE INDEX "articles_page_status_created_idx" ON "articles" USING btree ("page_key", "status", "created_at");
 CREATE INDEX "articles_published_at_idx" ON "articles" USING btree ("published_at");
+
+CREATE TABLE "publisher_state" (
+  "id" integer PRIMARY KEY NOT NULL,
+  "locked_until" timestamp with time zone DEFAULT 'epoch' NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "publisher_state_singleton_check" CHECK ("id" = 1)
+);
+
+INSERT INTO "publisher_state" ("id") VALUES (1);

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed"]);
@@ -13,6 +14,7 @@ export const rssSources = pgTable(
     feedUrl: text("feed_url").notNull(),
     language: text("language").notNull().default("id"),
     active: boolean("active").notNull().default(true),
+    keywords: text("keywords").array().notNull().default(sql`ARRAY[]::text[]`),
     lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -53,6 +55,12 @@ export const articles = pgTable(
     index("articles_published_at_idx").on(table.publishedAt),
   ],
 );
+
+export const publisherState = pgTable("publisher_state", {
+  id: integer("id").primaryKey(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull().default(sql`'epoch'::timestamptz`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;

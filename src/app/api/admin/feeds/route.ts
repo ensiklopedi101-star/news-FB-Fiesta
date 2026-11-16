@@ -21,6 +21,7 @@ const feedInput = z.object({
     }
   }, "URL feed harus memakai HTTP/HTTPS tanpa kredensial."),
   language: z.string().trim().min(2).max(12).default("id"),
+  keywords: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
 });
 
 async function readJson(request: NextRequest): Promise<unknown> {

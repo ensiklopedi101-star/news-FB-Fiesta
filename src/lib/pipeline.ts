@@ -1,8 +1,8 @@
 import "server-only";
-import { and, asc, eq, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
-import { fetchRecentStories } from "@/lib/feeds";
+import { PUBLISH_POLICY } from "@/lib/schedule";
 import { writeNewsCopy } from "@/lib/ai";
 import { addSourceComment, createFacebookPhotoPost } from "@/lib/facebook";
 
@@ -32,34 +32,35 @@ async function claimNextArticle(): Promise<Article | null> {
     }
   }
 
-  if (!candidateId) {
-    const stories = await fetchRecentStories();
-    for (const story of stories) {
-      const [inserted] = await db.insert(articles).values({
-        sourceName: story.sourceName,
-        category: story.category,
-        pageKey: story.pageKey,
-        sourceUrl: story.sourceUrl,
-        urlHash: story.urlHash,
-        title: story.title,
-        originalTitle: story.title,
-        rawText: story.rawText,
-        imageUrl: story.imageUrl,
-        status: "queued",
-      }).onConflictDoNothing({ target: articles.urlHash }).returning({ id: articles.id });
-      if (inserted) {
-        candidateId = inserted.id;
-        break;
-      }
-    }
-  }
-
   if (!candidateId) return null;
   const [claimed] = await db.update(articles)
     .set({ status: "processing", updatedAt: new Date(), errorMessage: null })
     .where(and(eq(articles.id, candidateId), eq(articles.status, "queued")))
     .returning();
   return claimed ?? null;
+}
+
+async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
+  const now = Date.now();
+  const recent = await getDb().select({ publishedAt: articles.publishedAt })
+    .from(articles)
+    .where(and(eq(articles.status, "published"), gt(articles.publishedAt, new Date(now - PUBLISH_POLICY.maxPerHour * 60 * 60 * 1000))))
+    .orderBy(desc(articles.publishedAt))
+    .limit(PUBLISH_POLICY.maxPerHour);
+  const lastPublishedAt = recent[0]?.publishedAt?.getTime();
+  const minimumGapAt = lastPublishedAt === undefined ? now : lastPublishedAt + PUBLISH_POLICY.minimumGapMinutes * 60 * 1000;
+  const oldestInWindow = recent[PUBLISH_POLICY.maxPerHour - 1];
+  const hourlyLimitAt = recent.length >= PUBLISH_POLICY.maxPerHour && oldestInWindow?.publishedAt
+    ? oldestInWindow.publishedAt.getTime() + 60 * 60 * 1000
+    : now;
+  const nextAllowedAt = Math.max(minimumGapAt, hourlyLimitAt);
+  if (nextAllowedAt <= now) return null;
+  return {
+    detail: recent.length >= 2
+      ? "Batas publikasi tercapai: maksimal 2 artikel dalam 60 menit."
+      : "Jeda publikasi minimum 15 menit belum terpenuhi.",
+    nextAllowedAt: new Date(nextAllowedAt).toISOString(),
+  };
 }
 
 function getPublicAppUrl() {
@@ -73,7 +74,7 @@ function getPublicAppUrl() {
 }
 
 export type RunResult = {
-  result: "published" | "already-published" | "idle" | "failed";
+  result: "published" | "already-published" | "idle" | "failed" | "rate-limited";
   articleId?: string;
   title?: string;
   detail?: string;
@@ -81,6 +82,8 @@ export type RunResult = {
 
 export async function runNewsPipeline(): Promise<RunResult> {
   const db = getDb();
+  const pause = await getPublishingPause();
+  if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
   const article = await claimNextArticle();
   if (!article) return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
 

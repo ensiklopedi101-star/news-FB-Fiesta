@@ -13,6 +13,7 @@ export type FeedStory = {
   title: string;
   rawText: string;
   imageUrl: string | null;
+  feedPublishedAt: Date | null;
 };
 
 const parser = new Parser({
@@ -70,6 +71,12 @@ function canonicalize(rawUrl: string): string {
   return url.toString();
 }
 
+function matchesKeywords(source: RssSource, title: string, content: string): boolean {
+  if (source.keywords.length === 0) return true;
+  const haystack = `${title} ${content}`.toLocaleLowerCase();
+  return source.keywords.some((keyword) => haystack.includes(keyword.toLocaleLowerCase()));
+}
+
 async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number): Promise<FeedStory[]> {
   const db = getDb();
   try {
@@ -92,8 +99,9 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
       if (!title || !rawLink) continue;
       const published = Date.parse(String(item.isoDate ?? item.pubDate ?? ""));
       if (Number.isFinite(published) && published < cutoff) continue;
-      const sourceUrl = canonicalize(rawLink);
       const content = cleanText(String(item.contentEncoded ?? item.contentSnippet ?? item.content ?? item.summary ?? ""));
+      if (!matchesKeywords(source, title, content)) continue;
+      const sourceUrl = canonicalize(rawLink);
       const rawText = [title, content].filter(Boolean).join("\n\n").slice(0, 14_000);
       stories.push({
         sourceName: source.name,
@@ -104,6 +112,7 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
         title,
         rawText,
         imageUrl: getImage(item, sourceUrl),
+        feedPublishedAt: Number.isFinite(published) ? new Date(published) : null,
       });
     }
     return stories;
@@ -122,5 +131,5 @@ export async function fetchRecentStories(): Promise<FeedStory[]> {
   const perFeed = 8;
   const cutoff = Date.now() - 72 * 60 * 60 * 1000;
   const results = await Promise.all(feeds.map((feed) => fetchOneSource(feed, perFeed, cutoff)));
-  return results.flat();
+  return results.flat().sort((a, b) => (b.feedPublishedAt?.getTime() ?? 0) - (a.feedPublishedAt?.getTime() ?? 0));
 }

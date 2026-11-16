@@ -1,7 +1,7 @@
 import { count, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { rssSources } from "@/lib/schema";
+import { publisherState, rssSources } from "@/lib/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +20,10 @@ export async function GET() {
   let activeFeeds = 0;
   try {
     const [sourceCount] = await db.select({ value: count() }).from(rssSources).where(eq(rssSources.active, true));
+    await db.select({ id: rssSources.id, keywords: rssSources.keywords }).from(rssSources).limit(1);
+    await db.insert(publisherState).values({ id: 1 }).onConflictDoNothing();
+    const [lockRow] = await db.select({ id: publisherState.id }).from(publisherState).limit(1);
+    if (!lockRow) throw new Error("Migration scheduler belum diterapkan.");
     activeFeeds = sourceCount.value;
   } catch (error) {
     schemaReady = false;
