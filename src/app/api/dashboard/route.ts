@@ -46,13 +46,12 @@ export async function GET(request: NextRequest) {
     const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0 };
     for (const row of groupedStatuses) statusCounts[row.status] = row.value;
 
-    const activePages = new Set(feeds.filter((feed) => feed.active).map((feed) => feed.pageKey));
     const bufferApi = Boolean(process.env.BUFFER_API_KEY?.trim());
     const bufferChannels = {
       news: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
       entertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
     };
-    const allActivePagesConfigured = [...activePages].every((page) => bufferChannels[page]);
+    const hasConfiguredActiveFeed = feeds.some((feed) => feed.active && bufferChannels[feed.pageKey]);
     const integrations = {
       database: true,
       schema: true,
@@ -70,7 +69,7 @@ export async function GET(request: NextRequest) {
       ok: true,
       checkedAt: new Date().toISOString(),
       integrations,
-      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && integrations.bufferApi && allActivePagesConfigured,
+      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && integrations.bufferApi && hasConfiguredActiveFeed,
       schedule: PUBLISH_POLICY,
       stats: {
         articles: articleTotal.value,

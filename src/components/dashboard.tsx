@@ -40,7 +40,8 @@ type DashboardData = {
 };
 
 type BufferChannel = { id: string; name: string; service: string; type: string; isDisconnected: boolean };
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean; channels?: BufferChannel[] };
+type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
+type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -72,6 +73,16 @@ function articleStatusLabel(article: Article) {
   return article.status;
 }
 
+function bufferMappingLabel(mapping: BufferChannelMapping) {
+  switch (mapping.status) {
+    case "ready": return `Terhubung: ${mapping.channelName}`;
+    case "missing-channel-id": return "ID channel belum diatur di Vercel";
+    case "id-not-found": return "ID tidak ditemukan untuk API key ini";
+    case "not-a-facebook-page": return `Bukan Facebook Page: ${mapping.channelName}`;
+    case "disconnected": return `Channel terputus: ${mapping.channelName}`;
+  }
+}
+
 export default function Dashboard() {
   const [secret, setSecret] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
@@ -85,6 +96,7 @@ export default function Dashboard() {
   const [language, setLanguage] = useState("id");
   const [keywords, setKeywords] = useState("");
   const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([]);
+  const [bufferMappings, setBufferMappings] = useState<ApiResult["mappings"]>(undefined);
 
   const api = useCallback(async (url: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
@@ -194,7 +206,10 @@ export default function Dashboard() {
     try {
       const result = await api("/api/admin/buffer/channels");
       setBufferChannels(result.channels ?? []);
-      setMessage(`Ditemukan ${result.channels?.length ?? 0} channel di Buffer. Gunakan ID channel Facebook Page yang sesuai di environment variables Vercel.`);
+      setBufferMappings(result.mappings);
+      const newsStatus = result.mappings?.news ? bufferMappingLabel(result.mappings.news) : "belum diperiksa";
+      const entertainmentStatus = result.mappings?.entertainment ? bufferMappingLabel(result.mappings.entertainment) : "belum diperiksa";
+      setMessage(`Koneksi Buffer berhasil dibaca. Berita: ${newsStatus}. Hiburan: ${entertainmentStatus}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal membaca channel Buffer.");
     } finally {
@@ -283,7 +298,7 @@ export default function Dashboard() {
       <section className="panel readiness-panel">
         <div className="panel-heading"><div><p className="eyebrow">PEMERIKSAAN LAYANAN</p><h2>Apa yang sudah siap?</h2></div><span className="muted">Refresh otomatis tiap menit</span></div>
         <div className="check-grid">{Object.entries(integrationLabels).map(([key, label]) => <div className="check-item" key={key}><span className={checks[key] ? "check-dot good" : "check-dot"} />{label}<strong>{checks[key] ? "Siap" : "Belum"}</strong></div>)}</div>
-        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Rilis: maks. {data?.schedule.maxPerHour ?? 2} berita/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 15} menit.</p>
+        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher: maks. {data?.schedule.maxPerHour ?? 2} pengiriman/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 15} menit. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
         {feedPages.size > 0 && [...feedPages].some((key) => key === "news" || key === "entertainment") && (
           <p className="muted small-note">Halaman tujuan aktif: {[...feedPages].map((key) => key === "news" ? "Berita" : "Hiburan").join(" · ")}</p>
         )}
@@ -299,7 +314,8 @@ export default function Dashboard() {
           <article className="setup-card"><span className={checks.bufferEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Hiburan</strong><p>Atur <code>BUFFER_ENTERTAINMENT_CHANNEL_ID</code> ke ID channel Facebook Page hiburan di Buffer.</p></div><b>{checks.bufferEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
         <p className="muted small-note">Simpan <code>BUFFER_API_KEY</code> dan kedua ID channel hanya di Vercel → Project → Settings → Environment Variables, lalu deploy ulang. Dashboard tidak meminta atau menyimpan API key. Pemeriksaan “tersedia” hanya memeriksa keberadaan nilai, bukan menguji izin Buffer.</p>
-        {checks.bufferApi && <button type="button" className="secondary-button" disabled={busy} onClick={() => void loadBufferChannels()}>{busy ? "Memeriksa…" : "Tampilkan ID channel Buffer (hanya baca)"}</button>}
+        {checks.bufferApi && <button type="button" className="secondary-button" disabled={busy} onClick={() => void loadBufferChannels()}>{busy ? "Memeriksa…" : "Tes Buffer & tampilkan ID channel (hanya baca)"}</button>}
+        {bufferMappings && <div className="setup-grid"><article className="setup-card"><span className={bufferMappings.news.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Berita</strong><p>{bufferMappingLabel(bufferMappings.news)}</p></div></article><article className="setup-card"><span className={bufferMappings.entertainment.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Hiburan</strong><p>{bufferMappingLabel(bufferMappings.entertainment)}</p></div></article></div>}
         {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}
         <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
       </section>

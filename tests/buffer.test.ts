@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { enqueueBufferFacebookPost, listBufferChannels } from "../src/lib/buffer-api";
+import { checkBufferChannelMapping, enqueueBufferFacebookPost, getBufferConfigurationGaps, listBufferChannels } from "../src/lib/buffer-api";
 
 const ENV_KEYS = ["BUFFER_API_KEY", "BUFFER_NEWS_CHANNEL_ID", "BUFFER_ENTERTAINMENT_CHANNEL_ID"] as const;
 
@@ -71,6 +71,27 @@ test("lists Buffer channels with read-only GraphQL requests", async () => {
     assert.equal(callCount, 2);
     assert.deepEqual(channels, [{ id: "page-1", name: "News Fiesta — PopBeez", service: "facebook", type: "page", isDisconnected: false }]);
   });
+});
+
+test("reports missing Buffer configuration before the publisher consumes an article", async () => {
+  await withBufferEnvironment(async () => {
+    delete process.env.BUFFER_NEWS_CHANNEL_ID;
+    assert.deepEqual(getBufferConfigurationGaps(["news"]), ["BUFFER_NEWS_CHANNEL_ID"]);
+    assert.deepEqual(getBufferConfigurationGaps(["entertainment"]), []);
+  });
+});
+
+test("validates Buffer channel mappings without publishing", () => {
+  const channels = [
+    { id: "page-1", name: "PopBeez", service: "facebook", type: "page", isDisconnected: false },
+    { id: "group-1", name: "Group", service: "facebook", type: "group", isDisconnected: false },
+    { id: "page-offline", name: "Offline Page", service: "facebook", type: "page", isDisconnected: true },
+  ];
+  assert.deepEqual(checkBufferChannelMapping(undefined, channels), { status: "missing-channel-id" });
+  assert.deepEqual(checkBufferChannelMapping("missing", channels), { status: "id-not-found" });
+  assert.deepEqual(checkBufferChannelMapping("group-1", channels), { status: "not-a-facebook-page", channelName: "Group" });
+  assert.deepEqual(checkBufferChannelMapping("page-offline", channels), { status: "disconnected", channelName: "Offline Page" });
+  assert.deepEqual(checkBufferChannelMapping("page-1", channels), { status: "ready", channelName: "PopBeez" });
 });
 
 test("redacts the Buffer API key from API error text", async () => {

@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, gt, like, lt, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articles, rssSources, type Article } from "@/lib/schema";
+import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { writeNewsCopy } from "@/lib/ai";
 import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
@@ -10,9 +10,14 @@ const LOCK_STALE_MS = 30 * 60 * 1000;
 
 async function claimNextArticle(): Promise<Article | null> {
   const db = getDb();
+  const configuredPages = (["news", "entertainment"] as const)
+    .filter((pageKey) => getBufferConfigurationGaps([pageKey]).length === 0);
+  if (!configuredPages.length) return null;
+  const configuredPageFilter = or(...configuredPages.map((pageKey) => eq(articles.pageKey, pageKey)));
+  if (!configuredPageFilter) return null;
   const [queued] = await db.select({ id: articles.id })
     .from(articles)
-    .where(eq(articles.status, "queued"))
+    .where(and(eq(articles.status, "queued"), configuredPageFilter))
     .orderBy(asc(articles.createdAt))
     .limit(1);
 
@@ -21,7 +26,7 @@ async function claimNextArticle(): Promise<Article | null> {
     const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
     const [stale] = await db.select({ id: articles.id })
       .from(articles)
-      .where(and(eq(articles.status, "processing"), lt(articles.updatedAt, staleBefore)))
+      .where(and(eq(articles.status, "processing"), configuredPageFilter, lt(articles.updatedAt, staleBefore)))
       .orderBy(asc(articles.updatedAt))
       .limit(1);
     candidateId = stale?.id;
@@ -95,15 +100,25 @@ export type RunResult = {
 
 export async function runNewsPipeline(): Promise<RunResult> {
   const db = getDb();
-  const activePages = await db.select({ pageKey: rssSources.pageKey }).from(rssSources).where(eq(rssSources.active, true)).groupBy(rssSources.pageKey);
-  const configurationGaps = getBufferConfigurationGaps(activePages.map(({ pageKey }) => pageKey));
-  if (configurationGaps.length) {
-    return { result: "failed", detail: `Konfigurasi Buffer belum lengkap: ${configurationGaps.join(", ")}. Artikel tetap di antrean.` };
+  const apiKeyGap = getBufferConfigurationGaps([]);
+  if (apiKeyGap.length) {
+    return { result: "failed", detail: `Konfigurasi Buffer belum lengkap: ${apiKeyGap.join(", ")}. Artikel tetap di antrean.` };
   }
   const pause = await getPublishingPause();
   if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
   const article = await claimNextArticle();
-  if (!article) return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
+  if (!article) {
+    const [blocked] = await db.select({ pageKey: articles.pageKey })
+      .from(articles)
+      .where(eq(articles.status, "queued"))
+      .orderBy(asc(articles.createdAt))
+      .limit(1);
+    const missingChannel = blocked ? getBufferConfigurationGaps([blocked.pageKey]) : [];
+    if (missingChannel.length) {
+      return { result: "failed", detail: `Artikel tetap di antrean: ${missingChannel.join(", ")} belum diatur untuk Page ini.` };
+    }
+    return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
+  }
 
   try {
     const copy = await writeNewsCopy({

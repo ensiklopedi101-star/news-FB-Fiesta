@@ -25,6 +25,30 @@ jobs:
             echo "GitHub Secrets APP_URL dan CRON_SECRET wajib diisi."
             exit 1
           fi
-          curl --fail-with-body --silent --show-error --max-time 75 \
+          response_file="$RUNNER_TEMP/publisher-response.json"
+          curl_error_file="$RUNNER_TEMP/publisher-curl-error.txt"
+          set +e
+          http_code=$(curl --silent --show-error --max-time 75 --output "$response_file" --write-out '%{http_code}' \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${APP_URL%/}/api/cron"
+            "${APP_URL%/}/api/cron" 2>"$curl_error_file")
+          curl_status=$?
+          set -e
+          if [[ $curl_status -ne 0 ]]; then
+            echo "Pemanggilan endpoint cron gagal (curl exit $curl_status)."
+            cat "$curl_error_file"
+            { echo '### Publisher gagal menghubungi aplikasi'; cat "$curl_error_file"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat "$response_file"
+          {
+            echo '### Respons publisher'
+            echo "HTTP: $http_code"
+            echo '```json'
+            cat "$response_file"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "Endpoint cron mengembalikan HTTP $http_code. Lihat respons di atas."
+            exit 1
+          fi
