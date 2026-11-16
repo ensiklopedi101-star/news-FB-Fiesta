@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
       pageKey: articles.pageKey,
       sourceName: articles.sourceName,
       sourceUrl: articles.sourceUrl,
+      imageUrl: articles.imageUrl,
       status: articles.status,
       facebookPostId: articles.facebookPostId,
       errorMessage: articles.errorMessage,
@@ -68,6 +69,7 @@ export async function GET(request: NextRequest) {
       bufferEntertainment: bufferChannels.entertainment,
       appUrl: Boolean(process.env.APP_URL),
       cronSecret: Boolean(process.env.CRON_SECRET),
+      blobStorage: Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim()),
     };
 
     return NextResponse.json({

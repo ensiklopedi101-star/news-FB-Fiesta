@@ -22,6 +22,7 @@ type Article = {
   pageKey: "news" | "entertainment";
   sourceName: string;
   sourceUrl: string;
+  imageUrl: string | null;
   status: string;
   facebookPostId: string | null;
   errorMessage: string | null;
@@ -44,7 +45,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -57,6 +58,7 @@ const integrationLabels: Record<string, string> = {
   bufferEntertainment: "Channel Buffer hiburan",
   appUrl: "URL publik aplikasi",
   cronSecret: "Pengaman cron",
+  blobStorage: "Penyimpanan gambar Blob",
 };
 
 function formatDate(value: string | null) {
@@ -249,7 +251,7 @@ export default function Dashboard() {
     try {
       const result = await api("/api/harvest", { method: "POST" });
       const cap = result.limited ? " Batas panen 50 artikel tercapai." : "";
-      setMessage(`Panen selesai: ${result.scanned ?? 0} item cocok diperiksa, ${result.added ?? 0} artikel baru masuk antrean; ${result.enriched ?? 0} item diperkaya dari halaman sumber.${cap}`);
+      setMessage(`Panen selesai: ${result.scanned ?? 0} item diperiksa, ${result.added ?? 0} artikel baru masuk antrean, ${result.enriched ?? 0} diperkaya dari halaman sumber; foto terdeteksi ${result.imageCandidates ?? 0}, tersimpan ke Blob ${result.imageBlobStored ?? 0}.${cap}`);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Panen RSS gagal.");
@@ -338,6 +340,7 @@ export default function Dashboard() {
           <article className="setup-card"><span className={checks.bufferApi ? "check-dot good" : "check-dot"} /><div><strong>Buffer API</strong><p>Tambahkan <code>BUFFER_API_KEY</code> dari pengaturan/developer portal Buffer ke Vercel. Aplikasi mengirim post ke antrean Buffer; Buffer yang menerbitkannya pada jadwal channel.</p><a className="feed-url" href="https://developers.buffer.com/" target="_blank" rel="noreferrer">Dokumentasi API Buffer ↗</a></div><b>{checks.bufferApi ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.bufferNews ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Berita</strong><p>Atur <code>BUFFER_NEWS_CHANNEL_ID</code> ke ID channel Facebook Page berita di Buffer.</p></div><b>{checks.bufferNews ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.bufferEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Hiburan</strong><p>Atur <code>BUFFER_ENTERTAINMENT_CHANNEL_ID</code> ke ID channel Facebook Page hiburan di Buffer.</p></div><b>{checks.bufferEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
+          <article className="setup-card"><span className={checks.blobStorage ? "check-dot good" : "check-dot"} /><div><strong>Vercel Blob — gambar artikel</strong><p>Atur <code>BLOB_READ_WRITE_TOKEN</code> agar foto RSS disimpan sebagai URL publik tahan lama. Tanpa token, aplikasi tetap mencoba foto sumber langsung.</p></div><b>{checks.blobStorage ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
         {(checks.groq || checks.gemini) && <div className="diagnostic-actions">
           <button type="button" className="secondary-button" disabled={busy} onClick={() => void testAiConnection()}>{busy ? "Memeriksa…" : "Tes koneksi AI (tanpa menerbitkan)"}</button>
@@ -396,8 +399,18 @@ export default function Dashboard() {
               <strong>{article.title}</strong>
               <div className="article-meta">{article.sourceName} · {article.category} · {formatDate(article.createdAt)}</div>
               {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
-              <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Pratinjau kartu yang dikirim ke Buffer ↗</a>
-              <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka sumber ↗</a>
+              <div className="article-card-preview">
+                <a href={`/api/og/${article.id}`} target="_blank" rel="noreferrer" aria-label={`Buka news card: ${article.title}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/api/og/${article.id}`} alt={`Pratinjau news card: ${article.title}`} loading="lazy" />
+                </a>
+                <div className="article-card-details">
+                  <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? "Gambar sumber terdeteksi" : "Belum ada gambar sumber"}</strong>
+                  <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Buka news card ukuran penuh ↗</a>
+                  {article.imageUrl && <a className="article-source" href={article.imageUrl} target="_blank" rel="noreferrer">Buka foto sumber ↗</a>}
+                </div>
+              </div>
+              <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka artikel sumber ↗</a>
             </article>
           ))}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>

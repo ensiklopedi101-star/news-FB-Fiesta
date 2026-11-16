@@ -12,7 +12,8 @@ Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS
 - Deduplicasi URL sumber dengan SHA-256 dan unique index di Neon; setiap artikel menyimpan `page_key` tujuan.
 - Saat panen, sistem mencoba mengambil 1–2 paragraf artikel dan `og:image` dengan batas waktu, ukuran, HTTPS, dan redirect; jika gagal/diblokir, memakai cuplikan RSS.
 - Ringkasan bahasa Indonesia melalui failover Groq → Gemini utama → Gemini cadangan. Caption memakai hook, fakta/konteks berbasis sumber, CTA netral, serta hashtag yang relevan.
-- Kartu berita vertikal 1080×1350 pada `/api/og/{articleId}`; prioritas gambar: RSS → `og:image` → latar fallback lokal. Logo Nusabeez/Popbeez tertanam dari aset proyek.
+- Kartu berita vertikal 1080×1350 pada `/api/og/{articleId}`; deteksi gambar RSS mencakup enclosure, Media RSS (termasuk media:group), `content:encoded`, description/summary, gambar lazy-load, dan srcset; fallback halaman artikel memakai `og:image`, lalu latar fallback lokal. Logo Nusabeez/Popbeez tertanam dari aset proyek.
+- Dashboard menampilkan pratinjau aktual news card, indikator apakah foto sumber ditemukan, status token Blob, serta hasil panen berupa jumlah foto terdeteksi dan berhasil disimpan ke Blob.
 - Mengirim foto + caption ke antrean Buffer pada channel Facebook Page sesuai `page_key`; Buffer menerbitkan otomatis mengikuti jadwal channel. URL sumber disertakan di akhir caption agar kompatibel dengan paket Buffer tanpa fitur komentar pertama.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
 - GitHub Actions workflow untuk panen RSS setiap hari pukul 07.00 WITA dan mengirim maksimal satu artikel yang memenuhi batas ke antrean Buffer pada percobaan pukul :00 serta :15 setiap jam.
@@ -62,6 +63,14 @@ Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kand
 3. Jalankan panen RSS setelah Blob terhubung untuk menyimpan gambar artikel baru. Panen hanya mengambil berita dan tidak menerbitkan post. Endpoint `/api/og/<article-id>` lalu membaca gambar dari URL Blob di Neon dan merender kartu.
 
 Berkas gambar disimpan di Vercel Blob; Neon hanya menyimpan URL. Upload terjadi saat panen, sekali per artikel dengan nama object deterministik.
+
+### Jika news card tidak menampilkan foto
+
+1. Pastikan feed RSS menyediakan gambar melalui enclosure, `media:content`, `media:thumbnail`, `content:encoded`, description/summary, atau halaman artikel dengan `og:image`. Aplikasi menolak URL gambar non-HTTPS dan jenis berkas yang tidak didukung.
+2. Di Dashboard, jalankan **Panen RSS sekarang**. Hasil panen menunjukkan berapa foto terdeteksi dan berapa yang masuk Blob. Panel artikel juga menampilkan indikator gambar sumber dan pratinjau kartu akhir.
+3. Jika foto terdeteksi tetapi pratinjau hanya menampilkan latar, buka foto sumber dan pastikan URL bisa diakses publik tanpa login/hotlink protection. Kartu menerima JPEG, PNG, atau WebP dengan batas ukuran 5 MB.
+4. Pastikan `BLOB_READ_WRITE_TOKEN` tersedia pada environment deployment yang menjalankan panen. Bila token tidak tersedia, URL RSS tetap disimpan dan kartu mencoba mengambilnya langsung; upload ke Blob tidak akan terjadi.
+5. Buka `/api/og/<article-id>` untuk memeriksa hasil PNG langsung. Nilai `image_url` berada di Neon; tabel/schema tidak perlu dimigrasikan untuk perubahan ini.
 
 ### Hubungkan Buffer
 
