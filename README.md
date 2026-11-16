@@ -50,7 +50,7 @@ Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kand
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
 - `APP_URL`: URL HTTPS deployment publik tanpa slash di akhir. Buffer mengambil news card dari URL ini.
-- `BLOB_READ_WRITE_TOKEN`: token akses Vercel Blob. Buat Blob Store pada project Vercel; Vercel akan memasang token ini sebagai environment variable. Proses panen menyimpan gambar artikel baru ke Blob dan memperbarui `articles.image_url` di Neon. Endpoint OG tetap berjalan di Edge dan hanya membaca/merender gambar. Tidak ada migrasi schema.
+- `BLOB_READ_WRITE_TOKEN`: token akses Vercel Blob. Buat Blob Store pada project Vercel; Vercel akan memasang token ini sebagai environment variable. Proses panen menyimpan gambar artikel baru ke Blob dan memperbarui `articles.image_url` di Neon. Endpoint OG menormalkan gambar ke JPEG sebelum `ImageResponse` merendernya. Tidak ada migrasi schema.
 - `PAGE_BRAND_NEWS`, `PAGE_BRAND_ENTERTAINMENT`: nama yang dicetak pada kartu masing-masing Page.
 - Logo default tersedia di `public/brand/nusabeez_icon.png` dan `public/brand/popbeez_icon.png`; URL custom per Page bisa diatur lewat `PAGE_LOGO_NEWS_URL` atau `PAGE_LOGO_ENTERTAINMENT_URL`, dengan `PAGE_LOGO_URL` sebagai fallback bersama.
 - Kredensial Graph API Facebook lama hanya diperlukan untuk endpoint retry komentar dari postingan langsung lama; alur baru tidak memerlukan Page Access Token Meta.

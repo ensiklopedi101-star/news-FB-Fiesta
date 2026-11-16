@@ -1,25 +1,30 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import sharp from "sharp";
 import { fetchOgImage, fetchOgImageDataUrl, isVercelBlobImageUrl } from "../src/lib/og-image";
 
 const pngBytes = new Uint8Array([137, 80, 78, 71]);
 
-test("fetches a safe image with its publisher referer and inlines it for the OG renderer", async () => {
+test("normalizes a WebP source to JPEG for the OG renderer and sends the publisher referer", async () => {
+  const sourcePng = await readFile(new URL("../public/brand/popbeez_icon.png", import.meta.url));
+  const sourceWebp = await sharp(sourcePng).webp().toBuffer();
   let requestedUrl = "";
   let requestedReferer = "";
   const result = await fetchOgImageDataUrl(
-    "https://images.example/cover.jpg",
+    "https://images.example/cover.webp",
     "https://www.example.com/news/story",
     async (input, init) => {
       requestedUrl = String(input);
       requestedReferer = new Headers(init?.headers).get("referer") ?? "";
-      return new Response(pngBytes, { headers: { "content-type": "image/png" } });
+      return new Response(sourceWebp, { headers: { "content-type": "image/webp" } });
     },
   );
 
-  assert.equal(requestedUrl, "https://images.example/cover.jpg");
+  assert.equal(requestedUrl, "https://images.example/cover.webp");
   assert.equal(requestedReferer, "https://www.example.com/");
-  assert.equal(result, `data:image/png;base64,${btoa(String.fromCharCode(...pngBytes))}`);
+  assert.ok(result?.startsWith("data:image/jpeg;base64,"));
+  assert.deepEqual([...Buffer.from(result!.split(",")[1], "base64").subarray(0, 3)], [0xff, 0xd8, 0xff]);
 });
 
 test("follows safe redirects but rejects unsafe redirect destinations", async () => {
