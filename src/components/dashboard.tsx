@@ -33,6 +33,7 @@ type DashboardData = {
   checkedAt: string;
   readyToPublish: boolean;
   integrations: Record<string, boolean>;
+  aiModels: { groq: string; gemini: string };
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number };
   feeds: Feed[];
@@ -41,6 +42,8 @@ type DashboardData = {
 
 type BufferChannel = { id: string; name: string; service: string; type: string; isDisconnected: boolean };
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
+type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
+type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
 type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
@@ -98,6 +101,7 @@ export default function Dashboard() {
   const [keywords, setKeywords] = useState("");
   const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([]);
   const [bufferMappings, setBufferMappings] = useState<ApiResult["mappings"]>(undefined);
+  const [aiDiagnostic, setAiDiagnostic] = useState<AiDiagnostic | null>(null);
 
   const api = useCallback(async (url: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
@@ -218,6 +222,27 @@ export default function Dashboard() {
     }
   }
 
+  async function testAiConnection() {
+    setBusy(true);
+    setMessage("");
+    setAiDiagnostic(null);
+    try {
+      const response = await fetch("/api/admin/diagnostics/ai", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secret}` },
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => ({})) as AiDiagnostic;
+      setAiDiagnostic(result);
+      if (!response.ok || !result.ok) throw new Error(result.error || `Tes AI gagal (HTTP ${response.status}).`);
+      setMessage(`Tes AI berhasil: ${result.provider} · ${result.model} · ${result.elapsedMs} ms. Tidak ada konten yang dipublikasikan.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Tes koneksi AI gagal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function harvestNow() {
     setBusy(true);
     setMessage("");
@@ -308,13 +333,23 @@ export default function Dashboard() {
       <section className="panel readiness-panel setup-panel">
         <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Buffer</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
         <div className="setup-grid">
-          <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (utama)</strong><p>Tambahkan <code>GROQ_API_KEY</code> di Vercel. Jika Groq gagal, aplikasi beralih ke Gemini; modelnya dapat diatur lewat <code>GROQ_MODEL</code>.</p></div><b>{checks.groq ? "Tersedia" : "Opsional"}</b></article>
-          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI (cadangan)</strong><p>Atur <code>GEMINI_API_KEY</code>; opsional tambahkan <code>GEMINI_API_KEY_FALLBACK</code>. Key cadangan dicoba jika Groq atau Gemini utama gagal.</p></div><b>{checks.gemini ? "Tersedia" : "Opsional"}</b></article>
+          <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (utama)</strong><p>Model aktif: <code>{data?.aiModels.groq || "llama-3.3-70b-versatile"}</code>. Jika model tak tersedia atau key tak berizin, aplikasi beralih ke Gemini.</p></div><b>{checks.groq ? "Key tersedia" : "Opsional"}</b></article>
+          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI (cadangan)</strong><p>Model aktif: <code>{data?.aiModels.gemini || "gemini-3.8-flash"}</code>. Key cadangan dicoba jika Gemini utama gagal.</p></div><b>{checks.gemini ? "Key tersedia" : "Opsional"}</b></article>
           <article className="setup-card"><span className={checks.bufferApi ? "check-dot good" : "check-dot"} /><div><strong>Buffer API</strong><p>Tambahkan <code>BUFFER_API_KEY</code> dari pengaturan/developer portal Buffer ke Vercel. Aplikasi mengirim post ke antrean Buffer; Buffer yang menerbitkannya pada jadwal channel.</p><a className="feed-url" href="https://developers.buffer.com/" target="_blank" rel="noreferrer">Dokumentasi API Buffer ↗</a></div><b>{checks.bufferApi ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.bufferNews ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Berita</strong><p>Atur <code>BUFFER_NEWS_CHANNEL_ID</code> ke ID channel Facebook Page berita di Buffer.</p></div><b>{checks.bufferNews ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.bufferEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Hiburan</strong><p>Atur <code>BUFFER_ENTERTAINMENT_CHANNEL_ID</code> ke ID channel Facebook Page hiburan di Buffer.</p></div><b>{checks.bufferEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
-        <p className="muted small-note">Simpan <code>BUFFER_API_KEY</code> dan kedua ID channel hanya di Vercel → Project → Settings → Environment Variables, lalu deploy ulang. Dashboard tidak meminta atau menyimpan API key. Pemeriksaan “tersedia” hanya memeriksa keberadaan nilai, bukan menguji izin Buffer.</p>
+        {(checks.groq || checks.gemini) && <div className="diagnostic-actions">
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void testAiConnection()}>{busy ? "Memeriksa…" : "Tes koneksi AI (tanpa menerbitkan)"}</button>
+          <p className="muted small-note">Tes ini mengirim prompt teknis singkat ke provider aktif dan memakai sedikit kuota API. Tes tidak menyimpan hasil dan tidak mengirim apa pun ke Buffer/Facebook.</p>
+        </div>}
+        {aiDiagnostic && <div className={`diagnostic-result ${aiDiagnostic.ok ? "success" : "failure"}`}>
+          <strong>{aiDiagnostic.ok ? `AI aktif: ${aiDiagnostic.provider} · ${aiDiagnostic.model}` : "Semua percobaan AI gagal"}</strong>
+          <span>{aiDiagnostic.ok ? `${aiDiagnostic.elapsedMs ?? 0} ms. ${aiDiagnostic.detail ?? ""}` : aiDiagnostic.error}</span>
+          {(aiDiagnostic.attempts ?? []).map((attempt, index) => <small key={`${attempt.provider}-${index}`}><b>{attempt.provider} · {attempt.model}</b> — {attempt.outcome}, {attempt.elapsedMs} ms{attempt.error ? ` · ${attempt.error}` : ""}</small>)}
+          {aiDiagnostic.requestId && <small>ID diagnostik: <code>{aiDiagnostic.requestId}</code></small>}
+        </div>}
+        <p className="muted small-note">Simpan <code>BUFFER_API_KEY</code> dan kedua ID channel hanya di Vercel → Project → Settings → Environment Variables, lalu deploy ulang. Dashboard tidak meminta atau menyimpan API key. Status “Key tersedia” hanya memeriksa keberadaan nilai, bukan membuktikan key/model valid; gunakan tes di atas untuk menguji jalur AI.</p>
         {checks.bufferApi && <button type="button" className="secondary-button" disabled={busy} onClick={() => void loadBufferChannels()}>{busy ? "Memeriksa…" : "Tes Buffer & tampilkan ID channel (hanya baca)"}</button>}
         {bufferMappings && <div className="setup-grid"><article className="setup-card"><span className={bufferMappings.news.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Berita</strong><p>{bufferMappingLabel(bufferMappings.news)}</p></div></article><article className="setup-card"><span className={bufferMappings.entertainment.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Hiburan</strong><p>{bufferMappingLabel(bufferMappings.entertainment)}</p></div></article></div>}
         {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}

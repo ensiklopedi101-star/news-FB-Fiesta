@@ -45,7 +45,7 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 - `GEMINI_API_KEY_FALLBACK`: key Gemini cadangan, dicoba jika key Gemini utama gagal.
 - `GEMINI_MODEL`: model untuk kedua key Gemini (default `gemini-3.8-flash`).
 
-Kegagalan provider atau format hasil mengaktifkan provider berikutnya. Error yang disimpan di artikel menyamarkan nilai API key.
+Model harus tersedia dan diizinkan untuk API key pada provider terkait. Jika muncul HTTP 404/403 atau “model does not exist / no access”, periksa ID model aktif di katalog akun provider dan perbarui `GROQ_MODEL` atau `GEMINI_MODEL` di Vercel; jangan menebak ID model. Dashboard menampilkan model konfigurasi yang sedang dipakai, bukan nilai API key. Kegagalan provider atau format hasil mengaktifkan provider berikutnya; log diagnostik menampilkan provider, model, waktu, status HTTP dan pesan aman tanpa nilai API key.
 - `BUFFER_API_KEY`: API key Buffer (Bearer token), simpan hanya sebagai environment variable Vercel.
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
@@ -79,12 +79,13 @@ Schedule GitHub hanya aktif dari branch default. Panen manual hanya menyimpan be
 
 ## Dashboard dan endpoint
 
-Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kamu dapat mengimpor preset hiburan, menambah feed dengan filter kata kunci, menonaktifkan dan menghapus feed, melihat antrean artikel, menjalankan panen manual (tidak menerbitkan), serta membaca daftar channel Buffer secara read-only. API key dan ID channel Buffer disimpan di Vercel Environment Variables—dashboard tidak meminta atau menyimpan API key. Tombol kirim manual hanya muncul saat konfigurasi siap; tombol itu mengirim post ke antrean Buffer, dan Buffer dapat menerbitkannya otomatis mengikuti jadwal channel.
+Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kamu dapat mengimpor preset hiburan, menambah feed dengan filter kata kunci, menonaktifkan dan menghapus feed, melihat antrean artikel, menjalankan panen manual (tidak menerbitkan), membaca daftar channel Buffer secara read-only, dan menjalankan tes AI eksplisit yang menghabiskan sedikit kuota tetapi tidak menyimpan atau menerbitkan konten. Dashboard menampilkan ID model konfigurasi dan status percobaan AI; keberadaan key saja tidak berarti key/model valid. API key dan ID channel Buffer disimpan di Vercel Environment Variables—dashboard tidak meminta atau menyimpan API key. Tombol kirim manual hanya muncul saat konfigurasi siap; tombol itu mengirim post ke antrean Buffer, dan Buffer dapat menerbitkannya otomatis mengikuti jadwal channel.
 
 - `GET /api/dashboard` — ringkasan admin (wajib bearer secret).
 - `POST/PATCH/DELETE /api/admin/feeds` — kelola RSS dari dashboard (wajib bearer secret).
 - `POST /api/admin/feeds/import-presets` — masukkan preset hiburan (wajib bearer secret).
 - `GET /api/admin/buffer/channels` — baca nama dan ID channel Buffer (wajib bearer secret; tidak membuat post).
+- `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
 - `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
 - `GET /api/cron` — proses satu artikel dan kirim ke antrean Buffer; mematuhi batas 2 pengiriman/jam dan jeda 15 menit. Wajib header `Authorization: Bearer <CRON_SECRET>`. Buffer mengatur waktu publikasi akhir.
