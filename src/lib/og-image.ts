@@ -69,8 +69,12 @@ export async function fetchOgImage(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
   fetcher: Fetcher = fetch,
+  reportFailure?: (reason: string) => void,
 ): Promise<FetchedImage | null> {
-  if (!isSafePublicImageUrl(rawImageUrl)) return null;
+  if (!isSafePublicImageUrl(rawImageUrl)) {
+    reportFailure?.("URL is not an allowed public HTTPS image URL");
+    return null;
+  }
   let currentUrl = rawImageUrl;
   let referer: string | undefined;
   try {
@@ -93,33 +97,50 @@ export async function fetchOgImage(
         cache: "no-store",
       });
     } catch {
+      reportFailure?.("request failed or timed out");
       return null;
     }
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       await response.body?.cancel().catch(() => undefined);
-      if (!location || redirectCount === MAX_REDIRECTS) return null;
+      if (!location) {
+        reportFailure?.("redirect did not include a destination");
+        return null;
+      }
+      if (redirectCount === MAX_REDIRECTS) {
+        reportFailure?.("too many redirects");
+        return null;
+      }
       try {
         currentUrl = new URL(location, currentUrl).toString();
       } catch {
+        reportFailure?.("redirect destination was malformed");
         return null;
       }
-      if (!isSafePublicImageUrl(currentUrl)) return null;
+      if (!isSafePublicImageUrl(currentUrl)) {
+        reportFailure?.("redirect destination was not an allowed public HTTPS URL");
+        return null;
+      }
       continue;
     }
 
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
+      reportFailure?.(`image server returned HTTP ${response.status}`);
       return null;
     }
     const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
     if (!IMAGE_TYPES.has(contentType)) {
       await response.body?.cancel().catch(() => undefined);
+      reportFailure?.(`unsupported image content type: ${contentType || "missing"}`);
       return null;
     }
     const bytes = await readImage(response);
-    if (!bytes?.byteLength) return null;
+    if (!bytes?.byteLength) {
+      reportFailure?.("image body was empty, unreadable, or exceeded the 5 MB limit");
+      return null;
+    }
     return { bytes, contentType };
   }
   return null;
@@ -130,13 +151,14 @@ export async function fetchOgImageDataUrl(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
   fetcher: Fetcher = fetch,
+  reportFailure?: (reason: string) => void,
 ): Promise<string | null> {
-  const image = await fetchOgImage(rawImageUrl, sourceUrl, fetcher);
+  const image = await fetchOgImage(rawImageUrl, sourceUrl, fetcher, reportFailure);
   if (!image) return null;
   try {
     return await toJpegDataUrl(image.bytes);
   } catch {
-    console.warn("[og-image] Source image could not be decoded and normalized.");
+    reportFailure?.("image could not be decoded and normalized by Sharp");
     return null;
   }
 }

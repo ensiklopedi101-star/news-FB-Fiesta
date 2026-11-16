@@ -25,15 +25,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const brand = (pageBrand || process.env.PAGE_BRAND || (isEntertainment ? "Popbeez" : "Nusabeez")).slice(0, 40);
   const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
   const title = article.title.slice(0, 130);
-  const image = await fetchOgImageDataUrl(article.imageUrl, article.sourceUrl);
-  if (article.imageUrl && !image) {
-    console.warn(`[og-image] Source image could not be fetched or was rejected for article ${article.id}.`);
-  }
+  const image = await fetchOgImageDataUrl(article.imageUrl, article.sourceUrl, fetch, (reason) => {
+    console.warn(`[og-image] Article image rejected for ${article.id}: ${reason}.`);
+  });
   const localOrigin = process.env.APP_URL || new URL(request.url).origin;
   const localLogo = new URL(`/brand/${isEntertainment ? "popbeez_icon.png" : "nusabeez_icon.png"}`, localOrigin).toString();
   const customLogo = isEntertainment ? process.env.PAGE_LOGO_ENTERTAINMENT_URL : process.env.PAGE_LOGO_NEWS_URL;
-  const logoCandidate = customLogo || process.env.PAGE_LOGO_URL || localLogo;
-  const logo = isSafePublicImageUrl(logoCandidate) ? logoCandidate : localLogo;
+  const logoCandidate = customLogo || process.env.PAGE_LOGO_URL;
+  // next/og does not parse WebP data-URI dimensions; normalize custom logos too so Satori only sees JPEG data.
+  const normalizedLogo = logoCandidate && isSafePublicImageUrl(logoCandidate)
+    ? await fetchOgImageDataUrl(logoCandidate, article.sourceUrl, fetch, (reason) => {
+      console.warn(`[og-image] Custom logo rejected for article ${article.id}: ${reason}.`);
+    })
+    : null;
+  const logo = normalizedLogo || localLogo;
   const palette = isEntertainment
     ? { dark: "#641735", accent: "#e42d80", light: "#fff3f8", soft: "#ffc84a" }
     : { dark: "#173b61", accent: "#e44d47", light: "#f3f7fc", soft: "#f7c84b" };
