@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, like } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, like, notLike } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
@@ -22,7 +22,12 @@ export async function GET(request: NextRequest) {
     const [publishedToday] = await db.select({ value: count() }).from(articles)
       .where(and(eq(articles.status, "published"), gte(articles.publishedAt, today)));
     const [bufferQueuedToday] = await db.select({ value: count() }).from(articles)
-      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gte(articles.updatedAt, today)));
+      .where(and(
+        eq(articles.status, "ready"),
+        like(articles.facebookPostId, "buffer:%"),
+        notLike(articles.facebookPostId, "buffer:pending:%"),
+        gte(articles.updatedAt, today),
+      ));
     const [enabledSourceCount] = await db.select({ value: count() }).from(rssSources).where(eq(rssSources.active, true));
     const [allSourceCount] = await db.select({ value: count() }).from(rssSources);
     const [publisherLock] = await db.select({ id: publisherState.id }).from(publisherState).limit(1);

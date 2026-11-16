@@ -29,6 +29,13 @@ export function checkBufferChannelMapping(channelId: string | undefined, channel
 type GraphQLError = { message?: string };
 type BufferGraphResponse<T> = { data?: T; errors?: GraphQLError[] };
 
+export class BufferEnqueueOutcomeUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BufferEnqueueOutcomeUnknownError";
+  }
+}
+
 type BufferPostResponse = {
   createPost?: {
     post?: { id?: string; status?: string; shareMode?: string; dueAt?: string | null };
@@ -63,7 +70,7 @@ function safeMessage(message: string, apiKey: string) {
   return message.split(apiKey).join("[REDACTED]").slice(0, 300);
 }
 
-async function graphQL<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+async function graphQL<T>(query: string, variables?: Record<string, unknown>, mutationMayHaveSideEffects = false): Promise<T> {
   const apiKey = getApiKey();
   let response: Response;
   try {
@@ -74,20 +81,33 @@ async function graphQL<T>(query: string, variables?: Record<string, unknown>): P
         "content-type": "application/json",
       },
       body: JSON.stringify({ query, ...(variables ? { variables } : {}) }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(8_000),
       cache: "no-store",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request ke Buffer gagal.";
-    throw new Error(`Buffer API: ${safeMessage(message, apiKey)}`);
+    const safe = safeMessage(message, apiKey);
+    if (mutationMayHaveSideEffects) {
+      throw new BufferEnqueueOutcomeUnknownError(`Buffer API: hasil enqueue tidak diketahui setelah kegagalan jaringan (${safe}). Jangan kirim ulang sebelum memeriksa antrean Buffer.`);
+    }
+    throw new Error(`Buffer API: ${safe}`);
   }
 
   const result = await response.json().catch(() => null) as BufferGraphResponse<T> | null;
   if (!response.ok || result?.errors?.length) {
     const message = result?.errors?.map((item) => item.message).filter(Boolean).join("; ") || `HTTP ${response.status}`;
-    throw new Error(`Buffer API: ${safeMessage(message, apiKey)}`);
+    const safe = safeMessage(message, apiKey);
+    if (mutationMayHaveSideEffects && (response.status >= 500 || result?.errors?.length)) {
+      throw new BufferEnqueueOutcomeUnknownError(`Buffer API: hasil enqueue tidak diketahui (${safe}). Jangan kirim ulang sebelum memeriksa antrean Buffer.`);
+    }
+    throw new Error(`Buffer API: ${safe}`);
   }
-  if (!result?.data) throw new Error("Buffer API tidak mengembalikan data.");
+  if (!result?.data) {
+    if (mutationMayHaveSideEffects) {
+      throw new BufferEnqueueOutcomeUnknownError("Buffer API tidak mengembalikan data post setelah permintaan enqueue; periksa antrean Buffer sebelum mencoba lagi.");
+    }
+    throw new Error("Buffer API tidak mengembalikan data.");
+  }
   return result.data;
 }
 
@@ -150,10 +170,12 @@ export async function enqueueBufferFacebookPost(input: {
         },
       },
     },
-  });
+  }, true);
   const result = data.createPost;
   if (result?.message) throw new Error(`Buffer API: ${safeMessage(result.message, getApiKey())}`);
   const postId = result?.post?.id;
-  if (!postId) throw new Error("Buffer tidak mengembalikan ID post; pastikan channel Facebook terhubung dan bisa menjadwalkan post.");
+  if (!postId) {
+    throw new BufferEnqueueOutcomeUnknownError("Buffer tidak mengembalikan ID post setelah enqueue; periksa antrean Buffer sebelum mencoba lagi.");
+  }
   return postId;
 }

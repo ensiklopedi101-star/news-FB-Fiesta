@@ -15,6 +15,9 @@ const outputSchema = {
 export type GeneratedCopy = { title: string; caption: string };
 type GeneratedDraft = { title?: unknown; paragraphs?: unknown; question?: unknown; hashtags?: unknown };
 
+const AI_TOTAL_TIMEOUT_MS = 30_000;
+const AI_PROVIDER_TIMEOUT_MS = 12_000;
+
 function buildPrompt(input: {
   title: string;
   rawText: string;
@@ -80,8 +83,11 @@ function safeError(error: unknown, secrets: string[]): string {
   return message.slice(0, 300);
 }
 
-async function generateWithGemini(apiKey: string, prompt: string): Promise<GeneratedCopy> {
-  const ai = new GoogleGenAI({ apiKey });
+async function generateWithGemini(apiKey: string, prompt: string, timeoutMs: number): Promise<GeneratedCopy> {
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
+  });
   const result = await ai.models.generateContent({
     model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
     contents: prompt,
@@ -90,13 +96,14 @@ async function generateWithGemini(apiKey: string, prompt: string): Promise<Gener
       responseSchema: outputSchema,
       temperature: 0.35,
       maxOutputTokens: 350,
+      httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
     },
   });
   if (!result.text) throw new Error("Gemini tidak mengembalikan ringkasan.");
   return validateDraft(result.text);
 }
 
-async function generateWithGroq(apiKey: string, prompt: string): Promise<GeneratedCopy> {
+async function generateWithGroq(apiKey: string, prompt: string, timeoutMs: number): Promise<GeneratedCopy> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -113,7 +120,7 @@ async function generateWithGroq(apiKey: string, prompt: string): Promise<Generat
       temperature: 0.35,
       max_tokens: 350,
     }),
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",
   });
 
@@ -143,12 +150,17 @@ export async function writeNewsCopy(input: {
 
   const prompt = buildPrompt(input);
   const failures: string[] = [];
+  const deadline = Date.now() + AI_TOTAL_TIMEOUT_MS;
+  const providerTimeout = () => Math.min(AI_PROVIDER_TIMEOUT_MS, deadline - Date.now());
 
   if (groqKey) {
-    try {
-      return await generateWithGroq(groqKey, prompt);
-    } catch (error) {
-      failures.push(`Groq utama: ${safeError(error, configuredKeys)}`);
+    const timeoutMs = providerTimeout();
+    if (timeoutMs > 0) {
+      try {
+        return await generateWithGroq(groqKey, prompt, timeoutMs);
+      } catch (error) {
+        failures.push(`Groq utama: ${safeError(error, configuredKeys)}`);
+      }
     }
   }
 
@@ -157,8 +169,13 @@ export async function writeNewsCopy(input: {
   if (fallbackKey && fallbackKey !== primaryKey) geminiProviders.push({ name: "Gemini cadangan", key: fallbackKey });
 
   for (const provider of geminiProviders) {
+    const timeoutMs = providerTimeout();
+    if (timeoutMs <= 0) {
+      failures.push(`${provider.name}: batas waktu total AI tercapai.`);
+      break;
+    }
     try {
-      return await generateWithGemini(provider.key, prompt);
+      return await generateWithGemini(provider.key, prompt, timeoutMs);
     } catch (error) {
       failures.push(`${provider.name}: ${safeError(error, configuredKeys)}`);
     }

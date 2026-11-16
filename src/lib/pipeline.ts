@@ -5,6 +5,7 @@ import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { writeNewsCopy } from "@/lib/ai";
 import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
+import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -120,39 +121,88 @@ export async function runNewsPipeline(): Promise<RunResult> {
     return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
   }
 
+  const startedAt = Date.now();
+  const logStage = (stage: string) => console.info(`[pipeline] article=${article.id} stage=${stage} elapsedMs=${Date.now() - startedAt}`);
+  let bufferPostId: string | null = null;
+
   try {
+    logStage("ai-start");
     const copy = await writeNewsCopy({
       title: article.originalTitle,
       rawText: article.rawText,
       category: article.category,
       sourceName: article.sourceName,
     });
+    logStage("ai-complete");
     const caption = `${copy.caption}\n\n📰 ${article.sourceName}\nTautan sumber lengkap ada di komentar pertama.`;
     await db.update(articles)
-      .set({ title: copy.title, caption, status: "ready", updatedAt: new Date(), errorMessage: null })
+      .set({
+        title: copy.title,
+        caption,
+        status: "ready",
+        facebookPostId: `buffer:pending:${article.id}`,
+        updatedAt: new Date(),
+        errorMessage: null,
+      })
       .where(eq(articles.id, article.id));
 
     const appUrl = getPublicAppUrl();
     const imageUrl = `${appUrl}/api/og/${article.id}`;
-    const bufferPostId = await enqueueBufferFacebookPost({
+    logStage("buffer-enqueue-start");
+    bufferPostId = await enqueueBufferFacebookPost({
       pageKey: article.pageKey,
       imageUrl,
       caption,
       sourceUrl: article.sourceUrl,
     });
+    logStage("buffer-enqueue-complete");
 
     // Buffer menerima konten ke antreannya; Facebook akan menerbitkannya pada slot jadwal Buffer.
     // Gunakan prefix untuk membedakan ID Buffer dari ID posting Facebook lama tanpa migrasi schema.
     await db.update(articles)
       .set({ status: "ready", facebookPostId: `buffer:${bufferPostId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
       .where(eq(articles.id, article.id));
+    logStage("tracking-saved");
 
     return { result: "queued", articleId: article.id, title: copy.title, detail: "Konten masuk ke antrean Buffer untuk dijadwalkan." };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kesalahan tidak diketahui saat memproses berita.";
+    const outcomeUnknown = error instanceof BufferEnqueueOutcomeUnknownError;
+
+    if (outcomeUnknown || bufferPostId) {
+      const trackingReference = bufferPostId ? `buffer:${bufferPostId}` : `buffer:pending:${article.id}`;
+      let trackingRecovered = false;
+      try {
+        await db.update(articles)
+          .set({
+            status: "ready",
+            facebookPostId: trackingReference,
+            errorMessage: outcomeUnknown ? `${message} Status tertunda untuk mencegah pengiriman duplikat.`.slice(0, 1_000) : null,
+            updatedAt: new Date(),
+          })
+          .where(eq(articles.id, article.id));
+        trackingRecovered = true;
+      } catch (trackingError) {
+        console.error(`[pipeline] tracking-recovery-failed article=${article.id}:`, trackingError instanceof Error ? trackingError.message : trackingError);
+      }
+      const detail = outcomeUnknown
+        ? `${message} Status disimpan sebagai tertunda untuk mencegah pengiriman duplikat.`
+        : trackingRecovered
+          ? "Buffer menerima post dan ID antreannya berhasil disimpan setelah percobaan pemulihan database."
+          : `Buffer sudah menerima post, tetapi penyimpanan ID Buffer gagal. Periksa antrean sebelum mencoba lagi. ${message}`;
+      logStage(outcomeUnknown ? "buffer-outcome-unknown" : "tracking-recovery");
+      console.error(`[pipeline] artikel ${article.id}:`, detail);
+      return {
+        result: outcomeUnknown || !trackingRecovered ? "failed" : "queued",
+        articleId: article.id,
+        detail,
+      };
+    }
+
     await db.update(articles)
-      .set({ status: "failed", attempts: article.attempts + 1, errorMessage: message.slice(0, 1_000), updatedAt: new Date() })
+      .set({ status: "failed", facebookPostId: null, attempts: article.attempts + 1, errorMessage: message.slice(0, 1_000), updatedAt: new Date() })
       .where(and(eq(articles.id, article.id), or(eq(articles.status, "processing"), eq(articles.status, "ready"))));
+    logStage("failed");
     console.error(`[pipeline] artikel ${article.id}:`, message);
     return { result: "failed", articleId: article.id, detail: message };
   }
