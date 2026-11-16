@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+import sharp from "sharp";
 import { isSafePublicImageUrl } from "./safe-url";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -7,13 +9,13 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 type Fetcher = typeof fetch;
 type FetchedImage = { bytes: Uint8Array; contentType: string };
 
-function toDataUrl(bytes: Uint8Array, contentType: string): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return `data:${contentType};base64,${btoa(binary)}`;
+async function toJpegDataUrl(bytes: Uint8Array): Promise<string> {
+  const normalized = await sharp(Buffer.from(bytes), { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize(1080, 660, { fit: "cover", position: "centre" })
+    .jpeg({ quality: 86 })
+    .toBuffer();
+  return `data:image/jpeg;base64,${normalized.toString("base64")}`;
 }
 
 async function readImage(response: Response): Promise<Uint8Array | null> {
@@ -62,7 +64,7 @@ export function isVercelBlobImageUrl(raw: string | null | undefined): raw is str
   }
 }
 
-/** Fetch a safe, bounded raster image for an Edge-compatible OG renderer. */
+/** Fetch a safe, bounded raster image from a source or Vercel Blob. */
 export async function fetchOgImage(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
@@ -123,12 +125,18 @@ export async function fetchOgImage(
   return null;
 }
 
-/** Inline validated image bytes into the OG payload; no Node-only dependencies, so this runs on Edge. */
+/** Normalize supported source formats to JPEG; next/og's data-URI parser does not support WebP dimensions. */
 export async function fetchOgImageDataUrl(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
   fetcher: Fetcher = fetch,
 ): Promise<string | null> {
   const image = await fetchOgImage(rawImageUrl, sourceUrl, fetcher);
-  return image ? toDataUrl(image.bytes, image.contentType) : null;
+  if (!image) return null;
+  try {
+    return await toJpegDataUrl(image.bytes);
+  } catch {
+    console.warn("[og-image] Source image could not be decoded and normalized.");
+    return null;
+  }
 }

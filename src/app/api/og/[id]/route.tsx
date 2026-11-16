@@ -7,7 +7,7 @@ import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 /* eslint-disable @next/next/no-img-element */
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
