@@ -50,7 +50,7 @@ Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kand
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
 - `APP_URL`: URL HTTPS deployment publik tanpa slash di akhir. Buffer mengambil news card dari URL ini.
-- `BLOB_READ_WRITE_TOKEN`: token akses Vercel Blob. Buat Blob Store pada project Vercel; Vercel akan memasang token ini sebagai environment variable. Endpoint OG menyimpan salinan gambar sumber ke Blob dan mengganti `articles.image_url` di Neon dengan URL Blob tersebut. Tidak ada migrasi schema.
+- `BLOB_READ_WRITE_TOKEN`: token akses Vercel Blob. Buat Blob Store pada project Vercel; Vercel akan memasang token ini sebagai environment variable. Proses panen menyimpan gambar artikel baru ke Blob dan memperbarui `articles.image_url` di Neon. Endpoint OG tetap berjalan di Edge dan hanya membaca/merender gambar. Tidak ada migrasi schema.
 - `PAGE_BRAND_NEWS`, `PAGE_BRAND_ENTERTAINMENT`: nama yang dicetak pada kartu masing-masing Page.
 - Logo default tersedia di `public/brand/nusabeez_icon.png` dan `public/brand/popbeez_icon.png`; URL custom per Page bisa diatur lewat `PAGE_LOGO_NEWS_URL` atau `PAGE_LOGO_ENTERTAINMENT_URL`, dengan `PAGE_LOGO_URL` sebagai fallback bersama.
 - Kredensial Graph API Facebook lama hanya diperlukan untuk endpoint retry komentar dari postingan langsung lama; alur baru tidak memerlukan Page Access Token Meta.
@@ -59,9 +59,9 @@ Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kand
 
 1. Di Vercel, buka project aplikasi → **Storage** → buat **Blob Store** dengan akses public, lalu hubungkan ke project.
 2. Pastikan Vercel menambahkan `BLOB_READ_WRITE_TOKEN` ke environment **Production** (dan Preview jika ingin menguji preview deployment), lalu deploy ulang.
-3. Buka kembali URL `/api/og/<article-id>` untuk artikel yang sudah ada. Endpoint akan mengambil gambar sumber, menyimpan salinannya di Blob, memperbarui `image_url` pada baris Neon ke URL Blob, lalu merender kartu. Tidak perlu memproses ulang atau memublikasikan artikel.
+3. Jalankan panen RSS setelah Blob terhubung untuk menyimpan gambar artikel baru. Panen hanya mengambil berita dan tidak menerbitkan post. Endpoint `/api/og/<article-id>` lalu membaca gambar dari URL Blob di Neon dan merender kartu.
 
-Berkas gambar disimpan di Vercel Blob; Neon hanya menyimpan URL. Upload terjadi sekali per artikel dan memakai nama object deterministik.
+Berkas gambar disimpan di Vercel Blob; Neon hanya menyimpan URL. Upload terjadi saat panen, sekali per artikel dengan nama object deterministik.
 
 ### Hubungkan Buffer
 

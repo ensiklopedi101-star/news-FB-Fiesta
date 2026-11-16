@@ -1,13 +1,13 @@
 import { ImageResponse } from "next/og";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
-import { fetchAndStoreOgImage, isVercelBlobImageUrl } from "@/lib/og-image";
+import { fetchOgImageDataUrl } from "@/lib/og-image";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 /* eslint-disable @next/next/no-img-element */
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -25,19 +25,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const brand = (pageBrand || process.env.PAGE_BRAND || (isEntertainment ? "Popbeez" : "Nusabeez")).slice(0, 40);
   const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
   const title = article.title.slice(0, 130);
-  const storedImage = await fetchAndStoreOgImage(article.id, article.imageUrl, article.sourceUrl);
-  const image = storedImage?.dataUrl ?? null;
-  if (article.imageUrl && !storedImage) {
+  const image = await fetchOgImageDataUrl(article.imageUrl, article.sourceUrl);
+  if (article.imageUrl && !image) {
     console.warn(`[og-image] Source image could not be fetched or was rejected for article ${article.id}.`);
-  }
-  if (storedImage?.blobUrl && article.imageUrl && !isVercelBlobImageUrl(article.imageUrl)) {
-    try {
-      await getDb().update(articles)
-        .set({ imageUrl: storedImage.blobUrl, updatedAt: new Date() })
-        .where(and(eq(articles.id, article.id), eq(articles.imageUrl, article.imageUrl)));
-    } catch {
-      console.error(`[og-image] Neon URL update failed for article ${article.id}; Blob upload succeeded.`);
-    }
   }
   const localOrigin = process.env.APP_URL || new URL(request.url).origin;
   const localLogo = new URL(`/brand/${isEntertainment ? "popbeez_icon.png" : "nusabeez_icon.png"}`, localOrigin).toString();
