@@ -40,12 +40,12 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
 - `GROQ_API_KEY`: opsional, penyedia AI pertama yang dicoba.
-- `GROQ_MODEL`: opsional, model Groq (default `llama-3.3-70b-versatile`); pastikan model tersebut tersedia untuk akunmu.
+- `GROQ_MODEL`: opsional, preferensi model Groq. Aplikasi memeriksa katalog model akun secara otomatis, mengutamakan model ekonomis seperti `llama-3.1-8b-instant`, dan beralih jika model tidak tersedia.
 - `GEMINI_API_KEY`: key Gemini utama, dicoba jika Groq gagal.
 - `GEMINI_API_KEY_FALLBACK`: key Gemini cadangan, dicoba jika key Gemini utama gagal.
-- `GEMINI_MODEL`: model untuk kedua key Gemini (default `gemini-3.8-flash`).
+- `GEMINI_MODEL`: opsional, preferensi model Gemini. Aplikasi hanya memakai model yang terdaftar dan mendukung `generateContent`, lalu mencoba kandidat Flash/Flash-Lite yang hemat.
 
-Kegagalan provider atau format hasil mengaktifkan provider berikutnya. Error yang disimpan di artikel menyamarkan nilai API key.
+Aplikasi memeriksa ketersediaan model per key saat proses generasi dan mencoba model berikutnya jika terjadi error model tidak tersedia. Pilihan awal memprioritaskan model kecil berbiaya rendah; keluaran dibatasi 350 token. Kegagalan provider atau format hasil mengaktifkan provider berikutnya. Error yang disimpan di artikel menyamarkan nilai API key.
 - `BUFFER_API_KEY`: API key Buffer (Bearer token), simpan hanya sebagai environment variable Vercel.
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
