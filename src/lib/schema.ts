@@ -1,6 +1,7 @@
 import { pgEnum, pgTable, text, timestamp, uuid, integer, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed"]);
+export const articlePageKey = pgEnum("article_page_key", ["news", "entertainment"]);
 
 export const articles = pgTable(
   "articles",
@@ -8,6 +9,7 @@ export const articles = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     sourceName: text("source_name").notNull(),
     category: text("category").notNull(),
+    pageKey: articlePageKey("page_key").notNull().default("news"),
     sourceUrl: text("source_url").notNull(),
     urlHash: text("url_hash").notNull(),
     title: text("title").notNull(),
@@ -26,6 +28,7 @@ export const articles = pgTable(
   (table) => [
     uniqueIndex("articles_url_hash_unique").on(table.urlHash),
     index("articles_status_created_idx").on(table.status, table.createdAt),
+    index("articles_page_status_created_idx").on(table.pageKey, table.status, table.createdAt),
     index("articles_published_at_idx").on(table.publishedAt),
   ],
 );

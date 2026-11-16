@@ -1,15 +1,18 @@
 import "server-only";
 
+export type PageKey = "news" | "entertainment";
+
 type GraphResult = { id?: string; post_id?: string; error?: { message?: string; type?: string; code?: number } };
 
-function getGraphBase() {
+function getGraphBase(pageKey: PageKey) {
   const version = process.env.FB_GRAPH_VERSION;
   if (!version || !/^v\d+\.\d+$/.test(version)) {
     throw new Error("FB_GRAPH_VERSION belum diatur dengan format seperti v23.0.");
   }
-  const pageId = process.env.FB_PAGE_ID;
-  const token = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!pageId || !token) throw new Error("FB_PAGE_ID atau FB_PAGE_ACCESS_TOKEN belum diatur.");
+  const prefix = pageKey === "news" ? "FB_NEWS" : "FB_ENTERTAINMENT";
+  const pageId = process.env[`${prefix}_PAGE_ID`] || (pageKey === "news" ? process.env.FB_PAGE_ID : undefined);
+  const token = process.env[`${prefix}_PAGE_ACCESS_TOKEN`] || (pageKey === "news" ? process.env.FB_PAGE_ACCESS_TOKEN : undefined);
+  if (!pageId || !token) throw new Error(`ID atau Page Access Token untuk halaman ${pageKey} belum diatur.`);
   return { url: `https://graph.facebook.com/${version}/${encodeURIComponent(pageId)}`, token };
 }
 
@@ -30,10 +33,11 @@ async function postForm(url: string, fields: Record<string, string>): Promise<Gr
 }
 
 export async function createFacebookPhotoPost(input: {
+  pageKey: PageKey;
   imageUrl: string;
   caption: string;
 }): Promise<string> {
-  const { url, token } = getGraphBase();
+  const { url, token } = getGraphBase(input.pageKey);
   const result = await postForm(`${url}/photos`, {
     url: input.imageUrl,
     caption: input.caption,
@@ -45,8 +49,8 @@ export async function createFacebookPhotoPost(input: {
   return postId;
 }
 
-export async function addSourceComment(postId: string, sourceUrl: string): Promise<void> {
-  const { url, token } = getGraphBase();
+export async function addSourceComment(pageKey: PageKey, postId: string, sourceUrl: string): Promise<void> {
+  const { url, token } = getGraphBase(pageKey);
   await postForm(`${url}/${encodeURIComponent(postId)}/comments`, {
     message: `Sumber berita: ${sourceUrl}`,
     access_token: token,

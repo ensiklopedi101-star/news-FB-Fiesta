@@ -38,6 +38,7 @@ async function claimNextArticle(): Promise<Article | null> {
       const [inserted] = await db.insert(articles).values({
         sourceName: story.sourceName,
         category: story.category,
+        pageKey: story.pageKey,
         sourceUrl: story.sourceUrl,
         urlHash: story.urlHash,
         title: story.title,
@@ -97,7 +98,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
 
     const appUrl = getPublicAppUrl();
     const imageUrl = `${appUrl}/api/og/${article.id}`;
-    const postId = await createFacebookPhotoPost({ imageUrl, caption });
+    const postId = await createFacebookPhotoPost({ pageKey: article.pageKey, imageUrl, caption });
 
     // Simpan ID sebelum membuat komentar agar kegagalan komentar tidak menyebabkan repost.
     await db.update(articles)
@@ -105,7 +106,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
       .where(eq(articles.id, article.id));
 
     try {
-      await addSourceComment(postId, article.sourceUrl);
+      await addSourceComment(article.pageKey, postId, article.sourceUrl);
     } catch (commentError) {
       const message = commentError instanceof Error ? commentError.message : "Gagal menambahkan komentar sumber.";
       await db.update(articles).set({ errorMessage: `Posting berhasil; komentar sumber gagal: ${message}`, updatedAt: new Date() })
