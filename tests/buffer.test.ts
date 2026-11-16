@@ -35,8 +35,7 @@ test("queues a Facebook Page image post in Buffer without sending a live request
     const id = await enqueueBufferFacebookPost({
       pageKey: "entertainment",
       imageUrl: "https://news.example.test/api/og/article-1",
-      caption: "Caption berita",
-      sourceUrl: "https://news.example.test/article-1",
+      caption: "Caption berita\n\n🔗 Sumber: https://news.example.test/article-1",
     });
 
     assert.equal(id, "buffer-post-1");
@@ -46,9 +45,9 @@ test("queues a Facebook Page image post in Buffer without sending a live request
       channelId: "ent-channel-456",
       mode: "addToQueue",
       schedulingType: "automatic",
-      text: "Caption berita",
+      text: "Caption berita\n\n🔗 Sumber: https://news.example.test/article-1",
       assets: [{ image: { url: "https://news.example.test/api/og/article-1" } }],
-      metadata: { facebook: { type: "post", firstComment: "Sumber berita: https://news.example.test/article-1" } },
+      metadata: { facebook: { type: "post" } },
     });
   });
 });
@@ -98,7 +97,7 @@ test("marks a Buffer gateway timeout as an unknown enqueue outcome without retry
   await withBufferEnvironment(async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ errors: [{ message: "gateway timeout" }] }), { status: 504 })) as typeof fetch;
     await assert.rejects(
-      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: "https://example.test/card.png", caption: "Caption", sourceUrl: "https://example.test/story" }),
+      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: "https://example.test/card.png", caption: "Caption" }),
       (error: unknown) => {
         assert.ok(error instanceof BufferEnqueueOutcomeUnknownError);
         assert.match(error.message, /hasil enqueue tidak diketahui/);
@@ -110,11 +109,26 @@ test("marks a Buffer gateway timeout as an unknown enqueue outcome without retry
   });
 });
 
+test("treats a first-comment plan restriction as a definitive Buffer rejection", async () => {
+  await withBufferEnvironment(async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ data: { createPost: { message: "Invalid post: First comment requires a paid plan." } } }), { status: 200 })) as typeof fetch;
+    await assert.rejects(
+      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: "https://example.test/card.png", caption: "Caption with source URL" }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.ok(!(error instanceof BufferEnqueueOutcomeUnknownError));
+        assert.match(error.message, /First comment requires a paid plan/);
+        return true;
+      },
+    );
+  });
+});
+
 test("redacts the Buffer API key from API error text", async () => {
   await withBufferEnvironment(async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ data: { createPost: { message: "Invalid request; unit-test-buffer-key is sensitive" } } }), { status: 200 })) as typeof fetch;
     await assert.rejects(
-      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: "https://example.test/card.png", caption: "Caption", sourceUrl: "https://example.test/story" }),
+      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: "https://example.test/card.png", caption: "Caption" }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.match(error.message, /\[REDACTED\]/);

@@ -13,7 +13,7 @@ Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS
 - Saat panen, sistem mencoba mengambil 1–2 paragraf artikel dan `og:image` dengan batas waktu, ukuran, HTTPS, dan redirect; jika gagal/diblokir, memakai cuplikan RSS.
 - Ringkasan bahasa Indonesia melalui failover Groq → Gemini utama → Gemini cadangan. Caption memakai hook, fakta/konteks berbasis sumber, CTA netral, serta hashtag yang relevan.
 - Kartu berita vertikal 1080×1350 pada `/api/og/{articleId}`; prioritas gambar: RSS → `og:image` → latar fallback lokal. Logo Nusabeez/Popbeez tertanam dari aset proyek.
-- Mengirim foto + caption ke antrean Buffer pada channel Facebook Page sesuai `page_key`; Buffer menerbitkan otomatis mengikuti jadwal channel. URL sumber masuk sebagai komentar pertama.
+- Mengirim foto + caption ke antrean Buffer pada channel Facebook Page sesuai `page_key`; Buffer menerbitkan otomatis mengikuti jadwal channel. URL sumber disertakan di akhir caption agar kompatibel dengan paket Buffer tanpa fitur komentar pertama.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
 - GitHub Actions workflow untuk panen RSS setiap hari pukul 07.00 WITA dan mengirim maksimal satu artikel yang memenuhi batas ke antrean Buffer pada percobaan pukul :00 serta :15 setiap jam.
 

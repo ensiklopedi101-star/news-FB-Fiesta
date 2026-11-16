@@ -134,7 +134,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
       sourceName: article.sourceName,
     });
     logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
-    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\nTautan sumber lengkap ada di komentar pertama.`;
+    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${article.sourceUrl}`;
     await db.update(articles)
       .set({
         title: copy.title,
@@ -153,7 +153,6 @@ export async function runNewsPipeline(): Promise<RunResult> {
       pageKey: article.pageKey,
       imageUrl,
       caption,
-      sourceUrl: article.sourceUrl,
     });
     logStage("buffer-enqueue-complete");
 
