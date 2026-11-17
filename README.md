@@ -16,9 +16,9 @@ Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS
 - Dashboard menampilkan pratinjau aktual news card, indikator apakah foto sumber ditemukan, status token Blob, serta hasil panen berupa jumlah foto terdeteksi dan berhasil disimpan ke Blob.
 - Mengirim foto + caption ke antrean Buffer pada channel Facebook Page sesuai `page_key`; Buffer menerbitkan otomatis mengikuti jadwal channel. URL sumber disertakan di akhir caption agar kompatibel dengan paket Buffer tanpa fitur komentar pertama.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
-- GitHub Actions workflow untuk panen RSS setiap hari pukul 07.00 WITA dan mengirim maksimal satu artikel yang memenuhi batas ke antrean Buffer pada percobaan pukul :00 serta :15 setiap jam.
+- GitHub Actions workflow untuk panen RSS setiap 4 jam dan mengirim maksimal satu artikel yang memenuhi batas ke antrean Buffer pada percobaan pukul :00 serta :15 setiap jam.
 
-Panen menyimpan maksimal 50 artikel baru per hari ke antrean `queued` di Neon; deduplikasi URL mencegah artikel yang sama masuk dua kali. Saat panen, sistem mencoba mengambil maksimal dua paragraf isi artikel (maks. 1.500 karakter) dan foto `og:image`; jika gagal atau diblokir, sistem tetap memakai teks/gambar RSS. Publisher mengirim maksimal satu artikel per siklus ke antrean Buffer, tidak mengambil feed saat proses rilis, dan menerapkan batas maksimal **2 pengiriman dalam 60 menit** dengan jeda minimum **15 menit**. Dengan antrean penuh, batas teoritisnya 48 post Buffer per hari; Buffer sendiri menerbitkannya sesuai slot jadwal channel. Pastikan feed menyediakan konten yang cukup dan atur jadwal Buffer sesuai volume yang diinginkan. Feed yang gagal dicatat di dashboard; berita RSS lebih lama dari 72 jam dilewati.
+Panen menyimpan maksimal 50 artikel baru per hari ke antrean `queued` di Neon; deduplikasi URL mencegah artikel yang sama masuk dua kali. Saat panen, sistem mencoba mengambil maksimal dua paragraf isi artikel (maks. 1.500 karakter) dan foto `og:image`; jika gagal atau diblokir, sistem tetap memakai teks/gambar RSS. Publisher mengirim maksimal satu artikel per siklus ke antrean Buffer, tidak mengambil feed saat proses rilis, dan menerapkan batas maksimal **2 pengiriman dalam 60 menit** dengan jeda minimum **15 menit**. Dengan antrean penuh, batas teoritisnya 48 post Buffer per hari; Buffer sendiri menerbitkannya sesuai slot jadwal channel. Pastikan feed menyediakan konten yang cukup dan atur jadwal Buffer sesuai volume yang diinginkan. Feed yang gagal dicatat di dashboard. Hanya berita yang berumur maksimal 7 jam sejak waktu terbit sumber yang dipertahankan; berita lebih lama otomatis dikeluarkan dari antrean. Jika feed RSS tidak menyediakan waktu terbit, umur dihitung sejak berita masuk ke sistem. Dashboard menampilkan nomor urutan antrean dan memungkinkan berita yang masih berstatus antre untuk dikeluarkan secara manual.
 
 ## 1. Siapkan database Neon (kamu yang memasang)
 
@@ -30,7 +30,8 @@ Panen menyimpan maksimal 50 artikel baru per hari ke antrean `queued` di Neon; d
 4. Jika tabel `articles` sudah ada dari skema versi sebelumnya, jalankan sekali file [`drizzle/0001_multi_page.sql`](./drizzle/0001_multi_page.sql) di Neon SQL Editor. Kolom baru `page_key` untuk artikel lama otomatis bernilai `news`.
 5. Jalankan file [`drizzle/0002_rss_sources.sql`](./drizzle/0002_rss_sources.sql) untuk membuat tabel feed RSS yang dikelola dari Dashboard. Jika database belum memiliki tabel `articles`, gunakan `drizzle/schema.sql` yang sudah mencakup kedua tabel.
 6. Jalankan [`drizzle/0003_scheduled_harvest.sql`](./drizzle/0003_scheduled_harvest.sql) untuk menambahkan filter kata kunci dan pengunci publisher.
-7. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
+7. Jalankan [`drizzle/0004_fresh_queue.sql`](./drizzle/0004_fresh_queue.sql) untuk mencatat waktu terbit sumber, menandai berita kedaluwarsa, dan mengaktifkan status pengeluaran manual dari antrean.
+8. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -91,7 +92,7 @@ Satu database Neon menyimpan semua artikel beserta `page_key`; tidak perlu membu
 3. Di repository GitHub → **Settings → Secrets and variables → Actions → Secrets**, tambahkan:
    - `APP_URL` — URL Vercel, misalnya `https://nama-project.vercel.app`.
    - `CRON_SECRET` — nilai yang sama dengan environment variable Vercel.
-4. Setelah workflow tersedia pada branch default GitHub, **Daily RSS harvest** berjalan pukul 07.00 WITA dan **Trigger news publisher** mencoba mengirim satu artikel ke antrean Buffer pada menit :00 dan :15 setiap jam. GitHub Actions memakai UTC dan dapat terlambat beberapa menit. Jalankan `Daily RSS harvest` manual untuk mengisi antrean Neon. `Trigger news publisher` mengirim konten ke Buffer; Buffer menerbitkannya sesuai jadwal channel.
+4. Setelah workflow tersedia pada branch default GitHub, **RSS harvest** berjalan setiap 4 jam dan **Trigger news publisher** mencoba mengirim satu artikel ke antrean Buffer pada menit :00 dan :15 setiap jam. GitHub Actions memakai UTC dan dapat terlambat beberapa menit. Jalankan `RSS harvest` manual untuk mengisi antrean Neon. `Trigger news publisher` mengirim konten ke Buffer; Buffer menerbitkannya sesuai jadwal channel.
 
 Schedule GitHub hanya aktif dari branch default. Panen manual hanya menyimpan berita ke antrean Neon. Siklus publisher manual mengirim post sungguhan ke antrean Buffer; Buffer dapat menerbitkannya otomatis sesuai jadwal Page. Batas per jam dan jeda minimum tetap berlaku.
 

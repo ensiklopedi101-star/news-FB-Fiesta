@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
 
-export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed"]);
+export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed", "expired", "removed"]);
 export const articlePageKey = pgEnum("article_page_key", ["news", "entertainment"]);
 
 export const rssSources = pgTable(
@@ -44,6 +44,7 @@ export const articles = pgTable(
     facebookPostId: text("facebook_post_id"),
     errorMessage: text("error_message"),
     attempts: integer("attempts").notNull().default(0),
+    sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

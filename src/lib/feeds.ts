@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import { fetchArticlePage, MAX_ARTICLE_SNIPPET_CHARS } from "@/lib/article-page";
 import { extractFeedImageUrl } from "@/lib/feed-image";
 import { PUBLISH_POLICY } from "@/lib/schedule";
+import { getQueueExpiryCutoff } from "@/lib/queue-policy";
 import { rssSources, type RssSource } from "@/lib/schema";
 
 export type FeedStory = {
@@ -155,7 +156,7 @@ async function mapWithConcurrency<T, U>(items: T[], concurrency: number, worker:
 export async function fetchRecentStories(): Promise<FeedStory[]> {
   const feeds = await getDb().select().from(rssSources).where(eq(rssSources.active, true));
   const perFeed = 8;
-  const cutoff = Date.now() - 72 * 60 * 60 * 1000;
+  const cutoff = getQueueExpiryCutoff().getTime();
   const results = await Promise.all(feeds.map((feed) => fetchOneSource(feed, perFeed, cutoff)));
   const stories = results.flat().sort((a, b) => (b.feedPublishedAt?.getTime() ?? 0) - (a.feedPublishedAt?.getTime() ?? 0));
   const harvestCandidates = stories.slice(0, PUBLISH_POLICY.maxArticlesPerHarvest);

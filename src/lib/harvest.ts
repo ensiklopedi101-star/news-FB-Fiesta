@@ -25,6 +25,7 @@ export async function harvestLatestStories() {
     originalTitle: story.title,
     rawText: story.rawText,
     imageUrl: story.imageUrl,
+    sourcePublishedAt: story.feedPublishedAt,
     status: "queued" as const,
     createdAt: story.feedPublishedAt ?? new Date(),
   })))

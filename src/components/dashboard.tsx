@@ -27,7 +27,9 @@ type Article = {
   facebookPostId: string | null;
   errorMessage: string | null;
   createdAt: string;
+  sourcePublishedAt: string | null;
   publishedAt: string | null;
+  queuePosition: number | null;
 };
 
 type DashboardData = {
@@ -36,7 +38,7 @@ type DashboardData = {
   integrations: Record<string, boolean>;
   aiModels: { groq: string; gemini: string };
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
-  stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number };
+  stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
   articles: Article[];
 };
@@ -76,6 +78,8 @@ function articleStatusLabel(article: Article) {
   if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:")) return "Antrean Buffer";
   if (article.status === "ready") return "Siap";
   if (article.status === "published") return "Terbit";
+  if (article.status === "expired") return "Kedaluwarsa";
+  if (article.status === "removed") return "Dihapus";
   return article.status;
 }
 
@@ -187,6 +191,21 @@ export default function Dashboard() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal menghapus feed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeArticle(article: Article) {
+    if (!window.confirm(`Keluarkan “${article.title}” dari antrean? Berita ini tidak akan diproses, tetapi catatannya tetap tersimpan.`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/api/admin/articles", { method: "DELETE", body: JSON.stringify({ id: article.id }) });
+      setMessage("Berita dikeluarkan dari antrean.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal mengeluarkan berita dari antrean.");
     } finally {
       setBusy(false);
     }
@@ -392,12 +411,17 @@ export default function Dashboard() {
         </section>
 
         <section className="panel articles-panel">
-          <div className="panel-heading"><div><p className="eyebrow">ANTREAN TERBARU</p><h2>Artikel</h2></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
+          <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita berumur lebih dari 7 jam otomatis dikeluarkan; jika RSS tak mencantumkan waktu terbit, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.expired ?? 0} lewat batas</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
           {data?.articles.length ? <div className="article-list">{data.articles.map((article) => (
             <article className="article-row" key={article.id}>
-              <div className="article-row-top"><span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span><span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span></div>
+              <div className="article-row-top">
+                {article.queuePosition && <span className="queue-position">#{article.queuePosition}</span>}
+                <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
+                <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
+                {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
+              </div>
               <strong>{article.title}</strong>
-              <div className="article-meta">{article.sourceName} · {article.category} · {formatDate(article.createdAt)}</div>
+              <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
               {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
               <div className="article-card-preview">
                 <a href={`/api/og/${article.id}`} target="_blank" rel="noreferrer" aria-label={`Buka news card: ${article.title}`}>

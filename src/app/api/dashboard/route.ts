@@ -1,20 +1,32 @@
-import { and, asc, count, desc, eq, gte, like, notLike } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, like, lt, ne, notLike, or, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { articles, publisherState, rssSources } from "@/lib/schema";
+import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type ArticleStatus = "queued" | "processing" | "ready" | "published" | "failed";
+type ArticleStatus = "queued" | "processing" | "ready" | "published" | "failed" | "expired" | "removed";
 
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) return NextResponse.json({ error: "Masukkan CRON_SECRET untuk membuka dashboard." }, { status: 401 });
 
   try {
     const db = getDb();
+    const now = new Date();
+    const expiryCutoff = getQueueExpiryCutoff(now);
+    await db.update(articles)
+      .set({ status: "expired", errorMessage: `Berita dikeluarkan dari antrean karena sudah lebih dari ${MAX_QUEUE_AGE_HOURS} jam sejak terbit.`, updatedAt: now })
+      .where(and(
+        eq(articles.status, "queued"),
+        or(
+          lt(articles.sourcePublishedAt, expiryCutoff),
+          and(isNull(articles.sourcePublishedAt), lt(articles.createdAt, expiryCutoff)),
+        ),
+      ));
     await db.insert(publisherState).values({ id: 1 }).onConflictDoNothing();
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -34,7 +46,7 @@ export async function GET(request: NextRequest) {
     if (!publisherLock) throw new Error("Migration scheduler belum diterapkan.");
     const groupedStatuses = await db.select({ status: articles.status, value: count() }).from(articles).groupBy(articles.status);
     const feeds = await db.select().from(rssSources).orderBy(asc(rssSources.pageKey), asc(rssSources.name));
-    const recentArticles = await db.select({
+    const articleFields = {
       id: articles.id,
       title: articles.title,
       category: articles.category,
@@ -46,10 +58,21 @@ export async function GET(request: NextRequest) {
       facebookPostId: articles.facebookPostId,
       errorMessage: articles.errorMessage,
       createdAt: articles.createdAt,
+      sourcePublishedAt: articles.sourcePublishedAt,
       publishedAt: articles.publishedAt,
-    }).from(articles).orderBy(desc(articles.createdAt)).limit(20);
+    };
+    const [queueRows, recentRows] = await Promise.all([
+      db.select(articleFields).from(articles).where(eq(articles.status, "queued"))
+        .orderBy(asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
+      db.select(articleFields).from(articles).where(ne(articles.status, "queued"))
+        .orderBy(desc(articles.createdAt)).limit(10),
+    ]);
+    const dashboardArticles = [
+      ...queueRows.map((article, index) => ({ ...article, queuePosition: index + 1 })),
+      ...recentRows.map((article) => ({ ...article, queuePosition: null })),
+    ];
 
-    const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0 };
+    const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0, expired: 0, removed: 0 };
     for (const row of groupedStatuses) statusCounts[row.status] = row.value;
 
     const bufferApi = Boolean(process.env.BUFFER_API_KEY?.trim());
@@ -91,7 +114,7 @@ export async function GET(request: NextRequest) {
         ...statusCounts,
       },
       feeds,
-      articles: recentArticles,
+      articles: dashboardArticles,
     }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
     console.error("[dashboard]", error instanceof Error ? error.message : error);
