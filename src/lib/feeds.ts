@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { fetchArticlePage, MAX_ARTICLE_SNIPPET_CHARS } from "@/lib/article-page";
-import { extractFeedImageUrl } from "@/lib/feed-image";
+import { extractFeedImageUrls } from "@/lib/feed-image";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { getQueueExpiryCutoff } from "@/lib/queue-policy";
 import { rssSources, type RssSource } from "@/lib/schema";
@@ -17,6 +17,7 @@ export type FeedStory = {
   title: string;
   rawText: string;
   imageUrl: string | null;
+  imageUrls: string[];
   feedPublishedAt: Date | null;
   enriched: boolean;
 };
@@ -97,6 +98,7 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
       if (!matchesKeywords(source, title, content)) continue;
       const sourceUrl = canonicalize(rawLink);
       const rawText = [title, content].filter(Boolean).join("\n\n").slice(0, MAX_ARTICLE_SNIPPET_CHARS);
+      const imageUrls = extractFeedImageUrls(item, sourceUrl);
       stories.push({
         sourceName: source.name,
         category: source.category,
@@ -105,7 +107,8 @@ async function fetchOneSource(source: RssSource, perFeed: number, cutoff: number
         urlHash: createHash("sha256").update(sourceUrl).digest("hex"),
         title,
         rawText,
-        imageUrl: extractFeedImageUrl(item, sourceUrl),
+        imageUrl: imageUrls[0] ?? null,
+        imageUrls,
         feedPublishedAt: Number.isFinite(published) ? new Date(published) : null,
         enriched: false,
       });
@@ -134,6 +137,7 @@ async function enrichStory(story: FeedStory): Promise<FeedStory> {
     ...story,
     rawText,
     imageUrl: story.imageUrl || page.imageUrl,
+    imageUrls: [...new Set([story.imageUrl || page.imageUrl, ...story.imageUrls, ...page.imageUrls].filter((url): url is string => Boolean(url)))].slice(0, 3),
     enriched: Boolean(page.text || page.imageUrl),
   };
 }

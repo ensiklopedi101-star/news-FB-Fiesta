@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderOgCard } from "@/lib/og-card";
+import { imageForCarouselSlide } from "@/lib/carousel-image";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const revalidate = 0;
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
-  const [article] = await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl, postFormat: articles.postFormat, carouselSlides: articles.carouselSlides })
+  const [article] = await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls, sourceUrl: articles.sourceUrl, postFormat: articles.postFormat, carouselSlides: articles.carouselSlides })
     .from(articles)
     .where(eq(articles.id, id))
     .limit(1);
@@ -38,9 +39,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   } : undefined;
 
   try {
-    const photoJpeg = await fetchOgImageJpeg(article.imageUrl, article.sourceUrl, fetch, (reason) => {
+    // The cover remains the hero; factual slides use distinct article gallery images when available.
+    const requestedImage = article.postFormat === "carousel"
+      ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
+      : article.imageUrl;
+    let photoJpeg = await fetchOgImageJpeg(requestedImage, article.sourceUrl, fetch, (reason) => {
       console.warn(`[og-image] Article image rejected for ${article.id}: ${reason}.`);
     });
+    if (!photoJpeg && requestedImage !== article.imageUrl && article.imageUrl) {
+      photoJpeg = await fetchOgImageJpeg(article.imageUrl, article.sourceUrl, fetch, (reason) => {
+        console.warn(`[og-image] Cover fallback rejected for ${article.id}: ${reason}.`);
+      });
+    }
 
     // Diagnostic mode returns the normalized photo bytes directly, without any card rendering.
     if (debugImage) {

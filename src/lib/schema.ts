@@ -40,6 +40,7 @@ export const articles = pgTable(
     originalTitle: text("original_title").notNull(),
     rawText: text("raw_text").notNull().default(""),
     imageUrl: text("image_url"),
+    imageUrls: jsonb("image_urls").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     caption: text("caption"),
     status: articleStatus("status").notNull().default("queued"),
     facebookPostId: text("facebook_post_id"),

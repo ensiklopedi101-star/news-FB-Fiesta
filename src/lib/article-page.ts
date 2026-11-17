@@ -12,6 +12,7 @@ export const MAX_ARTICLE_SNIPPET_CHARS = 1_500;
 export type ArticlePageData = {
   text: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
 };
 
 function toSafeHttpsUrl(candidate: string, baseUrl?: string): string | null {
@@ -105,14 +106,38 @@ function extractSnippet($: ReturnType<typeof load>): string | null {
   return result || null;
 }
 
+const MAX_ARTICLE_IMAGES = 3;
+const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|ads?|banner|tracking|pixel|button|social|share|related)/i;
+
 function extractPageData(html: string, pageUrl: string): ArticlePageData {
   const $ = load(html);
-  const rawImage = $("meta[property='og:image']").attr("content")
-    || $("meta[name='twitter:image']").attr("content")
-    || $("meta[property='og:image:secure_url']").attr("content");
-  const imageUrl = rawImage ? toSafeHttpsUrl(rawImage, pageUrl) : null;
+  const imageUrls: string[] = [];
+  const addImage = (raw: string | undefined, label = "") => {
+    if (!raw || DECORATIVE_IMAGE_WORDS.test(label)) return;
+    const safe = toSafeHttpsUrl(raw, pageUrl);
+    if (safe && !DECORATIVE_IMAGE_WORDS.test(new URL(safe).pathname) && !imageUrls.includes(safe) && imageUrls.length < MAX_ARTICLE_IMAGES) imageUrls.push(safe);
+  };
+  // Preserve publisher-declared hero image as the primary, then use only images inside article content.
+  for (const selector of ["meta[property='og:image']", "meta[property='og:image:secure_url']", "meta[name='twitter:image']"]) {
+    addImage($(selector).first().attr("content"));
+  }
+  const roots = $("article [itemprop='articleBody'], [itemprop='articleBody'], article, main, .article-content, .entry-content, .post-content");
+  roots.each((_, root) => {
+    if (imageUrls.length >= MAX_ARTICLE_IMAGES) return;
+    $(root).find("img").each((__, element) => {
+      const image = $(element);
+      const context = `${image.attr("alt") ?? ""} ${image.attr("class") ?? ""} ${image.parent().attr("class") ?? ""} ${image.parent().attr("id") ?? ""}`;
+      if (DECORATIVE_IMAGE_WORDS.test(context)) return;
+      const width = Number(image.attr("width") ?? image.attr("data-width") ?? 0);
+      const height = Number(image.attr("height") ?? image.attr("data-height") ?? 0);
+      if ((width > 0 && width < 180) || (height > 0 && height < 120)) return;
+      addImage(image.attr("data-src") || image.attr("data-lazy-src") || image.attr("src"), context);
+      if (imageUrls.length >= MAX_ARTICLE_IMAGES) return false;
+    });
+  });
+  const imageUrl = imageUrls[0] ?? null;
   const text = extractSnippet($);
-  return { text, imageUrl };
+  return { text, imageUrl, imageUrls };
 }
 
 async function readLimitedHtml(response: Response): Promise<string | null> {
@@ -199,8 +224,14 @@ export async function fetchArticlePage(rawUrl: string): Promise<ArticlePageData 
     const html = await readLimitedHtml(response);
     if (!html) return null;
     const page = extractPageData(html, currentUrl);
-    const imageBudget = deadline - Date.now();
-    if (page.imageUrl && (imageBudget <= 0 || !(await hasOnlyPublicAddresses(page.imageUrl, Math.min(DNS_TIMEOUT_MS, imageBudget))))) page.imageUrl = null;
+    const publicImages: string[] = [];
+    for (const imageUrl of page.imageUrls) {
+      const imageBudget = deadline - Date.now();
+      if (imageBudget <= 0) break;
+      if (await hasOnlyPublicAddresses(imageUrl, Math.min(DNS_TIMEOUT_MS, imageBudget))) publicImages.push(imageUrl);
+    }
+    page.imageUrls = publicImages;
+    page.imageUrl = publicImages[0] ?? null;
     return page;
   }
   return null;

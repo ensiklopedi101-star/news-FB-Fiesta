@@ -56,26 +56,48 @@ function urlsFromHtml(value: unknown): string[] {
   return urls;
 }
 
-/** Find the first safe, public HTTPS image advertised by common RSS/Atom fields. */
-export function extractFeedImageUrl(item: Record<string, unknown>, sourceUrl: string): string | null {
+const MAX_ARTICLE_IMAGES = 3;
+const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|ads?|banner|tracking|pixel|button|social|share)/i;
+
+function looksDecorative(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return DECORATIVE_IMAGE_WORDS.test(`${parsed.pathname} ${parsed.search}`);
+  } catch {
+    return true;
+  }
+}
+
+/** Find up to three distinct safe, public HTTPS editorial images advertised by common RSS/Atom fields. */
+export function extractFeedImageUrls(item: Record<string, unknown>, sourceUrl: string): string[] {
   const mediaFields = [
     ...valuesFromMediaField(item.enclosure),
     ...valuesFromMediaField(item.mediaContent),
     ...valuesFromMediaField(item.mediaThumbnail),
     ...valuesFromMediaField(item.image),
   ];
+  const urls: string[] = [];
+  const add = (candidate: unknown, type?: unknown) => {
+    if (typeof type === "string" && !type.toLowerCase().startsWith("image/")) return;
+    const url = usableImageUrl(candidate, sourceUrl);
+    if (url && !looksDecorative(url) && !urls.includes(url)) urls.push(url);
+  };
   for (const candidate of mediaFields) {
-    if (typeof candidate.type === "string" && !candidate.type.toLowerCase().startsWith("image/")) continue;
-    const url = usableImageUrl(candidate.url, sourceUrl);
-    if (url) return url;
+    add(candidate.url, candidate.type);
+    if (urls.length === MAX_ARTICLE_IMAGES) return urls;
   }
 
   const htmlFields = [item.contentEncoded, item["content:encoded"], item.content, item.description, item.summary, item.contentSnippet];
   for (const field of htmlFields) {
     for (const candidate of urlsFromHtml(field)) {
-      const url = usableImageUrl(candidate, sourceUrl);
-      if (url) return url;
+      add(candidate);
+      if (urls.length === MAX_ARTICLE_IMAGES) return urls;
     }
   }
-  return null;
+  return urls;
+}
+
+/** Backward-compatible primary-image selector. */
+export function extractFeedImageUrl(item: Record<string, unknown>, sourceUrl: string): string | null {
+  return extractFeedImageUrls(item, sourceUrl)[0] ?? null;
 }

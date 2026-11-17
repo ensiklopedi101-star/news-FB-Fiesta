@@ -17,10 +17,24 @@ test("extracts at most two article paragraphs and resolves a safe og:image", () 
   const result = extractArticlePageData(html, "https://news.example/article");
 
   assert.equal(result.imageUrl, "https://news.example/images/story.jpg");
+  assert.deepEqual(result.imageUrls, ["https://news.example/images/story.jpg"]);
   assert.match(result.text ?? "", /Paragraf pertama/);
   assert.match(result.text ?? "", /Paragraf kedua/);
   assert.doesNotMatch(result.text ?? "", /Paragraf ketiga|Navigation text/);
   assert.equal(result.text?.split("\n\n").length, 2);
+});
+
+test("extracts distinct in-article photos while ignoring logos, ads, and tiny decorations", () => {
+  const html = `<head><meta property="og:image" content="/photos/hero.jpg"></head><body>
+    <img src="/logos/publisher-logo.png" alt="publisher logo">
+    <article><img src="/photos/second.jpg" width="900" height="600" alt="witness at scene">
+      <img src="/ads/banner.jpg" width="900" height="600"><img src="/photos/third.jpg" width="900" height="600">
+      <img src="/photos/tiny.jpg" width="32" height="32">
+      <p>Paragraf berita ini cukup panjang untuk menjelaskan isi artikel dan menguji pemilihan gambar yang relevan.</p>
+    </article>
+  </body>`;
+  const result = extractArticlePageData(html, "https://news.example/story");
+  assert.deepEqual(result.imageUrls, ["https://news.example/photos/hero.jpg", "https://news.example/photos/second.jpg", "https://news.example/photos/third.jpg"]);
 });
 
 test("caps extracted article text at 1,500 characters", () => {

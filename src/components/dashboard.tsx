@@ -23,6 +23,7 @@ type Article = {
   sourceName: string;
   sourceUrl: string;
   imageUrl: string | null;
+  imageUrls: string[];
   status: string;
   facebookPostId: string | null;
   errorMessage: string | null;
@@ -438,7 +439,7 @@ export default function Dashboard() {
                   })}
                 </div>
                 <div className="article-card-details">
-                  <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? "Gambar sumber terdeteksi" : "Belum ada gambar sumber"}</strong>
+                  <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? `${article.imageUrls?.length ?? 1} foto sumber terdeteksi` : "Belum ada gambar sumber"}</strong>
                   {article.postFormat === "carousel" && article.carouselSlides?.length !== 3 && <small className="muted">Empat slide dibuat saat berita diproses.</small>}
                   <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Buka news card ukuran penuh ↗</a>
                   {article.imageUrl && <a className="article-source" href={article.imageUrl} target="_blank" rel="noreferrer">Buka foto sumber ↗</a>}
