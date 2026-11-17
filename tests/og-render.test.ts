@@ -45,6 +45,19 @@ test("Sharp card renderer creates the branded fallback without a source photo", 
   assert.ok(centerFallbackPixel.some((channel) => channel > 0));
 });
 
+test("renders a carousel information slide as a square branded JPEG", async () => {
+  const output = await renderOgCard({
+    ...baseOptions,
+    photoJpeg: null,
+    slide: { number: 2, total: 4, label: "FAKTA UTAMA", text: "Dua fakta singkat dari sumber untuk menjaga slide tetap mudah dibaca." },
+  });
+  const metadata = await sharp(output).metadata();
+
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1080);
+  assert.equal(metadata.height, 1080);
+});
+
 test("entertainment cards load the existing Popbeez logo asset", async () => {
   const output = await renderOgCard({
     ...baseOptions,

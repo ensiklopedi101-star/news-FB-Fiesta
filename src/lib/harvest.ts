@@ -6,6 +6,7 @@ import { fetchRecentStories } from "@/lib/feeds";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
 import { isVercelBlobImageUrl } from "@/lib/og-image";
+import { choosePostFormat } from "@/lib/queue-policy";
 
 const MAX_ARTICLES_PER_HARVEST = PUBLISH_POLICY.maxArticlesPerHarvest;
 
@@ -26,6 +27,7 @@ export async function harvestLatestStories() {
     rawText: story.rawText,
     imageUrl: story.imageUrl,
     sourcePublishedAt: story.feedPublishedAt,
+    postFormat: choosePostFormat(story.urlHash),
     status: "queued" as const,
     createdAt: story.feedPublishedAt ?? new Date(),
   })))

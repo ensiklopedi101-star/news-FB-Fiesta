@@ -28,6 +28,8 @@ type Article = {
   errorMessage: string | null;
   createdAt: string;
   sourcePublishedAt: string | null;
+  postFormat: "single" | "carousel";
+  carouselSlides: string[] | null;
   publishedAt: string | null;
   queuePosition: number | null;
 };
@@ -418,18 +420,26 @@ export default function Dashboard() {
                 {article.queuePosition && <span className="queue-position">#{article.queuePosition}</span>}
                 <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
                 <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
+                <span className={`format-tag ${article.postFormat}`}>{article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
                 {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
               </div>
               <strong>{article.title}</strong>
               <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
               {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
-              <div className="article-card-preview">
-                <a href={`/api/og/${article.id}`} target="_blank" rel="noreferrer" aria-label={`Buka news card: ${article.title}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/api/og/${article.id}`} alt={`Pratinjau news card: ${article.title}`} loading="lazy" />
-                </a>
+              <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
+                <div className="article-preview-gallery">
+                  {(article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1]).map((slideNumber) => {
+                    const slideUrl = article.postFormat === "carousel" ? `/api/og/${article.id}?slide=${slideNumber}` : `/api/og/${article.id}`;
+                    return <a href={slideUrl} target="_blank" rel="noreferrer" key={slideNumber} aria-label={`Buka slide ${slideNumber} news card: ${article.title}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={slideUrl} alt={`Pratinjau slide ${slideNumber}: ${article.title}`} loading="lazy" />
+                      {article.postFormat === "carousel" && <span>{slideNumber}/4</span>}
+                    </a>;
+                  })}
+                </div>
                 <div className="article-card-details">
                   <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? "Gambar sumber terdeteksi" : "Belum ada gambar sumber"}</strong>
+                  {article.postFormat === "carousel" && article.carouselSlides?.length !== 3 && <small className="muted">Empat slide dibuat saat berita diproses.</small>}
                   <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Buka news card ukuran penuh ↗</a>
                   {article.imageUrl && <a className="article-source" href={article.imageUrl} target="_blank" rel="noreferrer">Buka foto sumber ↗</a>}
                 </div>

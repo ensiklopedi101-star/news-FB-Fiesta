@@ -59,6 +59,8 @@ export async function GET(request: NextRequest) {
       errorMessage: articles.errorMessage,
       createdAt: articles.createdAt,
       sourcePublishedAt: articles.sourcePublishedAt,
+      postFormat: articles.postFormat,
+      carouselSlides: articles.carouselSlides,
       publishedAt: articles.publishedAt,
     };
     const [queueRows, recentRows] = await Promise.all([

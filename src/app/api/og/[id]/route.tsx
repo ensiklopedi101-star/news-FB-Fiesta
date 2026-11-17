@@ -11,7 +11,7 @@ export const revalidate = 0;
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
-  const [article] = await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl })
+  const [article] = await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl, postFormat: articles.postFormat, carouselSlides: articles.carouselSlides })
     .from(articles)
     .where(eq(articles.id, id))
     .limit(1);
@@ -25,6 +25,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     || (isEntertainment ? "Popbeez" : "Nusabeez")
   ).slice(0, 40);
   const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
+  const requestedSlide = Number.parseInt(new URL(request.url).searchParams.get("slide") ?? "1", 10);
+  if (!Number.isInteger(requestedSlide) || requestedSlide < 1 || requestedSlide > 4) {
+    return new Response("Invalid carousel slide", { status: 400 });
+  }
+  const carouselLabels = ["FAKTA UTAMA", "RINCIAN BERITA", "IKUT BERBAGI PENDAPAT"];
+  const slide = article.postFormat === "carousel" ? {
+    number: requestedSlide,
+    total: 4,
+    label: requestedSlide === 1 ? "COVER" : carouselLabels[requestedSlide - 2]!,
+    ...(requestedSlide > 1 ? { text: article.carouselSlides?.[requestedSlide - 2] ?? "Ringkasan sedang disiapkan." } : {}),
+  } : undefined;
 
   try {
     const photoJpeg = await fetchOgImageJpeg(article.imageUrl, article.sourceUrl, fetch, (reason) => {
@@ -51,6 +62,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       sourceName: article.sourceName,
       isEntertainment,
       photoJpeg,
+      slide,
     });
     return new Response(new Uint8Array(card), {
       headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store, max-age=0" },

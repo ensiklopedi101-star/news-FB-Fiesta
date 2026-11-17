@@ -144,6 +144,8 @@ export async function runNewsPipeline(): Promise<RunResult> {
   const startedAt = Date.now();
   const logStage = (stage: string) => console.info(`[pipeline] article=${article.id} stage=${stage} elapsedMs=${Date.now() - startedAt}`);
   let bufferPostId: string | null = null;
+  let bufferMediaFormat: "single" | "carousel" | null = null;
+  let carouselSlides: [string, string, string] | null = null;
 
   try {
     logStage("ai-start");
@@ -161,10 +163,12 @@ export async function runNewsPipeline(): Promise<RunResult> {
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
     }
     const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${article.sourceUrl}`;
+    carouselSlides = article.postFormat === "carousel" ? copy.carouselSlides : null;
     await db.update(articles)
       .set({
         title: copy.title,
         caption,
+        carouselSlides,
         status: "ready",
         facebookPostId: `buffer:pending:${article.id}`,
         updatedAt: new Date(),
@@ -173,19 +177,24 @@ export async function runNewsPipeline(): Promise<RunResult> {
       .where(eq(articles.id, article.id));
 
     const appUrl = getPublicAppUrl();
-    const imageUrl = `${appUrl}/api/og/${article.id}`;
-    logStage("buffer-enqueue-start");
-    bufferPostId = await enqueueBufferFacebookPost({
+    const imageUrls = article.postFormat === "carousel"
+      ? Array.from({ length: 4 }, (_, index) => `${appUrl}/api/og/${article.id}?slide=${index + 1}`)
+      : [`${appUrl}/api/og/${article.id}`];
+    logStage(`buffer-enqueue-start format=${article.postFormat} assets=${imageUrls.length}`);
+    const enqueueResult = await enqueueBufferFacebookPost({
       pageKey: article.pageKey,
-      imageUrl,
+      imageUrl: imageUrls[0]!,
+      imageUrls,
       caption,
     });
-    logStage("buffer-enqueue-complete");
+    bufferPostId = enqueueResult.postId;
+    bufferMediaFormat = enqueueResult.mediaFormat;
+    logStage(`buffer-enqueue-complete format=${enqueueResult.mediaFormat}`);
 
     // Buffer menerima konten ke antreannya; Facebook akan menerbitkannya pada slot jadwal Buffer.
     // Gunakan prefix untuk membedakan ID Buffer dari ID posting Facebook lama tanpa migrasi schema.
     await db.update(articles)
-      .set({ status: "ready", facebookPostId: `buffer:${bufferPostId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
+      .set({ status: "ready", postFormat: enqueueResult.mediaFormat, carouselSlides: enqueueResult.mediaFormat === "carousel" ? carouselSlides : null, facebookPostId: `buffer:${bufferPostId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
       .where(eq(articles.id, article.id));
     logStage("tracking-saved");
 
@@ -201,6 +210,8 @@ export async function runNewsPipeline(): Promise<RunResult> {
         await db.update(articles)
           .set({
             status: "ready",
+            postFormat: bufferMediaFormat ?? article.postFormat,
+            carouselSlides: (bufferMediaFormat ?? article.postFormat) === "carousel" ? carouselSlides : null,
             facebookPostId: trackingReference,
             errorMessage: outcomeUnknown ? `${message} Status tertunda untuk mencegah pengiriman duplikat.`.slice(0, 1_000) : null,
             updatedAt: new Date(),
