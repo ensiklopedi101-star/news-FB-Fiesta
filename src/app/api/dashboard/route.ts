@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
       sourceName: articles.sourceName,
       sourceUrl: articles.sourceUrl,
       imageUrl: articles.imageUrl,
+      imageUrls: articles.imageUrls,
       status: articles.status,
       facebookPostId: articles.facebookPostId,
       errorMessage: articles.errorMessage,

@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractFeedImageUrl } from "../src/lib/feed-image";
+import { extractFeedImageUrl, extractFeedImageUrls } from "../src/lib/feed-image";
 
 const articleUrl = "https://publisher.example/story/one";
+
+test("extracts up to three unique safe editorial RSS images and filters decorative assets", () => {
+  const images = extractFeedImageUrls({
+    mediaContent: [
+      { $: { url: "https://cdn.example/logo.png", type: "image/png" } },
+      { $: { url: "https://cdn.example/first.jpg", type: "image/jpeg" } },
+      { $: { url: "https://cdn.example/first.jpg", type: "image/jpeg" } },
+      { $: { url: "https://cdn.example/second.jpg", type: "image/jpeg" } },
+      { $: { url: "https://cdn.example/third.jpg", type: "image/jpeg" } },
+      { $: { url: "https://cdn.example/fourth.jpg", type: "image/jpeg" } },
+    ],
+  }, articleUrl);
+  assert.deepEqual(images, ["https://cdn.example/first.jpg", "https://cdn.example/second.jpg", "https://cdn.example/third.jpg"]);
+});
 
 test("extracts RSS media images including repeated media:content fields", () => {
   const image = extractFeedImageUrl({
