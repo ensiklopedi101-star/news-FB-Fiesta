@@ -17,7 +17,7 @@ Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS
 - Dashboard menampilkan pratinjau aktual news card, indikator apakah foto sumber ditemukan, status token Blob, serta hasil panen berupa jumlah foto terdeteksi dan berhasil disimpan ke Blob.
 - Mengirim foto + caption ke antrean Buffer pada channel Facebook Page sesuai `page_key`; Buffer menerbitkan otomatis mengikuti jadwal channel. URL sumber disertakan di akhir caption agar kompatibel dengan paket Buffer tanpa fitur komentar pertama.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
-- GitHub Actions workflow untuk panen RSS setiap 4 jam dan mengirim maksimal satu artikel yang memenuhi batas ke antrean Buffer pada percobaan pukul :00 serta :15 setiap jam.
+- Penjadwalan panen RSS dan pemicu publisher dilakukan oleh cron-job.org melalui endpoint aplikasi yang dilindungi `CRON_SECRET`; tidak menggunakan GitHub Actions.
 
 Setiap siklus panen memproses maksimal 50 kandidat berita ke antrean `queued` di Neon; deduplikasi URL mencegah artikel yang sama masuk dua kali. Saat panen, sistem mencoba mengambil maksimal dua paragraf isi artikel (maks. 1.500 karakter) dan foto `og:image`; jika gagal atau diblokir, sistem tetap memakai teks/gambar RSS. Publisher mengirim maksimal satu artikel per siklus ke antrean Buffer, tidak mengambil feed saat proses rilis, dan menerapkan batas maksimal **2 pengiriman dalam 60 menit** dengan jeda minimum **15 menit**. Dengan antrean penuh, batas teoritisnya 48 post Buffer per hari; Buffer sendiri menerbitkannya sesuai slot jadwal channel. Pastikan feed menyediakan konten yang cukup dan atur jadwal Buffer sesuai volume yang diinginkan. Feed yang gagal dicatat di dashboard. Hanya berita yang berumur maksimal 7 jam sejak waktu terbit sumber yang dipertahankan; berita lebih lama otomatis dikeluarkan dari antrean. Jika feed RSS tidak menyediakan waktu terbit, umur dihitung sejak berita masuk ke sistem. Dashboard menampilkan nomor urutan antrean dan memungkinkan berita yang masih berstatus antre untuk dikeluarkan secara manual.
 
@@ -83,22 +83,22 @@ Berkas gambar disimpan di Vercel Blob; Neon hanya menyimpan URL. Upload terjadi 
 2. Buat API key melalui [Buffer Developer Portal](https://developers.buffer.com/) dan simpan sebagai `BUFFER_API_KEY` di Vercel Production.
 3. Deploy ulang, buka dashboard News FB Fiesta, lalu tekan **Tampilkan ID channel Buffer (hanya baca)**. Pilih baris channel Facebook Page yang benar, lalu salin ID channel-nya.
 4. Tambahkan ID ke `BUFFER_NEWS_CHANNEL_ID` dan `BUFFER_ENTERTAINMENT_CHANNEL_ID` di Vercel Production, kemudian deploy ulang lagi.
-5. Dashboard menandai variabel Buffer tersedia jika API key dan ID channel halaman tujuan ada. Tekan **Tes Buffer & tampilkan ID channel (hanya baca)** untuk benar-benar menguji akses API dan mencocokkan setiap ID ke Facebook Page yang aktif; pemeriksaan ini tidak membuat post. Ringkasan respons publisher berikutnya terlihat di GitHub Actions → workflow run → Summary.
+5. Dashboard menandai variabel Buffer tersedia jika API key dan ID channel halaman tujuan ada. Tekan **Tes Buffer & tampilkan ID channel (hanya baca)** untuk benar-benar menguji akses API dan mencocokkan setiap ID ke Facebook Page yang aktif; pemeriksaan ini tidak membuat post. Hasil setiap pemanggilan terjadwal dapat diperiksa di riwayat eksekusi cron-job.org dan log Vercel.
 
 Aplikasi membuat post dengan mode **Add to Queue**. Pastikan channel Facebook Page Buffer diatur untuk auto-publishing, bukan notifikasi manual, jika ingin publikasi otomatis. Batas/rencana API dan ketersediaannya mengikuti akun Buffer. Tidak perlu membuat Meta App/Page Access Token untuk alur posting lewat Buffer. Daftar RSS tetap dikelola di dashboard aplikasi dan disimpan di Neon; feed Google News/HanCinema yang dipreset nonaktif harus ditinjau dulu.
 
 Satu database Neon menyimpan semua artikel beserta `page_key`; tidak perlu membuat database kedua. API key Buffer dan channel ID disimpan di Vercel, bukan di Neon.
 
-## 3. Deploy dan aktifkan jadwal
+## 3. Deploy dan aktifkan cron-job.org
 
 1. Push branch/repository ke GitHub dan hubungkan project ke Vercel sebagai Next.js.
-2. Tambahkan environment variables di Vercel dan deploy. `APP_URL` harus sama dengan URL deployment publik.
-3. Di repository GitHub → **Settings → Secrets and variables → Actions → Secrets**, tambahkan:
-   - `APP_URL` — URL Vercel, misalnya `https://nama-project.vercel.app`.
-   - `CRON_SECRET` — nilai yang sama dengan environment variable Vercel.
-4. Setelah workflow tersedia pada branch default GitHub, **RSS harvest** berjalan setiap 4 jam dan **Trigger news publisher** mencoba mengirim satu artikel ke antrean Buffer pada menit :00 dan :15 setiap jam. GitHub Actions memakai UTC dan dapat terlambat beberapa menit. Jalankan `RSS harvest` manual untuk mengisi antrean Neon. `Trigger news publisher` mengirim konten ke Buffer; Buffer menerbitkannya sesuai jadwal channel.
+2. Tambahkan environment variables di Vercel dan deploy. `APP_URL` harus sama dengan URL deployment publik; `CRON_SECRET` harus terisi dan dirahasiakan.
+3. Di [cron-job.org](https://cron-job.org/), buat dua tugas HTTPS. Untuk keduanya, atur header `Authorization: Bearer <CRON_SECRET>` menggunakan nilai yang sama dengan environment Vercel—jangan menaruh secret di URL.
+   - **Panen RSS:** `POST https://<domain-aplikasi>/api/harvest`, setiap 4 jam.
+   - **Publisher Buffer:** `GET https://<domain-aplikasi>/api/cron`, pada menit `00` dan `15` setiap jam.
+4. Atur zona waktu UTC, aktifkan notifikasi kegagalan jika tersedia, lalu gunakan fungsi **Run now** untuk menguji masing-masing tugas. Panen hanya memasukkan berita ke antrean Neon. Publisher dapat mengirim satu artikel sungguhan ke antrean Buffer; Buffer menerbitkannya sesuai jadwal channel.
 
-Schedule GitHub hanya aktif dari branch default. Panen manual hanya menyimpan berita ke antrean Neon. Siklus publisher manual mengirim post sungguhan ke antrean Buffer; Buffer dapat menerbitkannya otomatis sesuai jadwal Page. Batas per jam dan jeda minimum tetap berlaku.
+Jangan aktifkan pemicu otomatis lain yang memanggil endpoint yang sama. Publisher tetap menerapkan batas maksimal 2 pengiriman dalam 60 menit dan jeda minimum 15 menit. Post yang sudah masuk Buffer tidak diubah urutannya oleh antrean lokal.
 
 ## Dashboard dan endpoint
 
