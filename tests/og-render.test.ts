@@ -25,7 +25,7 @@ test("Sharp card renderer outputs a complete JPEG and composites the source phot
 
   assert.equal(metadata.format, "jpeg");
   assert.equal(metadata.width, 1080);
-  assert.equal(metadata.height, 1350);
+  assert.equal(metadata.height, 1080);
   assert.ok(centerPhotoPixel[1]! > centerPhotoPixel[0]! * 2);
   assert.ok(centerPhotoPixel[1]! > centerPhotoPixel[2]!);
 });
@@ -41,6 +41,21 @@ test("Sharp card renderer creates the branded fallback without a source photo", 
 
   assert.equal(metadata.format, "jpeg");
   assert.equal(metadata.width, 1080);
-  assert.equal(metadata.height, 1350);
+  assert.equal(metadata.height, 1080);
   assert.ok(centerFallbackPixel.some((channel) => channel > 0));
+});
+
+test("entertainment cards load the existing Popbeez logo asset", async () => {
+  const output = await renderOgCard({
+    ...baseOptions,
+    brand: "Popbeez",
+    category: "ENTERTAINMENT",
+    isEntertainment: true,
+    photoJpeg: null,
+  });
+  const metadata = await sharp(output).metadata();
+
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1080);
+  assert.equal(metadata.height, 1080);
 });
