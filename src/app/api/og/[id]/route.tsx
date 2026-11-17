@@ -11,7 +11,7 @@ export const revalidate = 0;
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
-  const [article] = await getDb().select({ id: articles.id, title: articles.title, caption: articles.caption, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl })
+  const [article] = await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, sourceUrl: articles.sourceUrl })
     .from(articles)
     .where(eq(articles.id, id))
     .limit(1);
@@ -48,7 +48,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       brand,
       category,
       title: article.title.slice(0, 130),
-      summary: article.caption,
       sourceName: article.sourceName,
       isEntertainment,
       photoJpeg,
