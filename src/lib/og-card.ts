@@ -1,4 +1,6 @@
 import { Buffer } from "node:buffer";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import sharp from "sharp";
 
 const WIDTH = 1080;
@@ -7,6 +9,23 @@ const HEADER_HEIGHT = 132;
 const PHOTO_HEIGHT = 660;
 const PHOTO_TOP = HEADER_HEIGHT;
 const FOOTER_TOP = PHOTO_TOP + PHOTO_HEIGHT;
+let fontconfigPromise: Promise<void> | undefined;
+
+async function ensureBundledFonts(): Promise<void> {
+  if (!fontconfigPromise) {
+    fontconfigPromise = (async () => {
+      const fontsDirectory = resolve(process.cwd(), "assets/fonts");
+      const cacheDirectory = "/tmp/news-fb-fiesta-fontconfig-cache";
+      const configPath = "/tmp/news-fb-fiesta-fonts.conf";
+      const config = `<fontconfig><dir>${fontsDirectory}</dir><cachedir>${cacheDirectory}</cachedir></fontconfig>`;
+      await mkdir(cacheDirectory, { recursive: true });
+      await writeFile(configPath, config, "utf8");
+      process.env.FONTCONFIG_FILE = configPath;
+      process.env.FONTCONFIG_PATH = "/tmp";
+    })();
+  }
+  await fontconfigPromise;
+}
 
 export type OgCardOptions = {
   brand: string;
@@ -65,8 +84,8 @@ function buildSvg(options: OgCardOptions): string {
     : `<rect x="0" y="${PHOTO_TOP}" width="${WIDTH}" height="${PHOTO_HEIGHT}" fill="url(#fallback)" />
        <circle cx="880" cy="270" r="175" fill="${palette.soft}" opacity=".18" />
        <circle cx="220" cy="720" r="265" fill="none" stroke="${palette.soft}" stroke-width="20" opacity=".2" />
-       <text x="540" y="390" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="8">${options.isEntertainment ? "POP CULTURE" : "KABAR NUSANTARA"}</text>
-       <text x="540" y="492" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="78" font-weight="900" letter-spacing="3">${escapeXml(options.brand.toUpperCase())}</text>`;
+       <text x="540" y="390" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="34" font-weight="700" letter-spacing="8">${options.isEntertainment ? "POP CULTURE" : "KABAR NUSANTARA"}</text>
+       <text x="540" y="492" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="78" font-weight="900" letter-spacing="3">${escapeXml(options.brand.toUpperCase())}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <defs>
@@ -78,21 +97,22 @@ function buildSvg(options: OgCardOptions): string {
     ${options.photoJpeg ? `<rect x="0" y="${PHOTO_TOP}" width="${WIDTH}" height="${PHOTO_HEIGHT}" fill="url(#photoShade)" />` : ""}
     <rect x="0" y="0" width="${WIDTH}" height="${HEADER_HEIGHT}" fill="${palette.dark}" />
     <circle cx="88" cy="66" r="42" fill="${palette.accent}" />
-    <text x="88" y="81" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="45" font-weight="900">${escapeXml(options.brand.slice(0, 1).toUpperCase())}</text>
-    <text x="150" y="82" fill="#fff" font-family="Arial, sans-serif" font-size="42" font-weight="800">${brand}</text>
+    <text x="88" y="81" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="45" font-weight="900">${escapeXml(options.brand.slice(0, 1).toUpperCase())}</text>
+    <text x="150" y="82" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="42" font-weight="800">${brand}</text>
     <rect x="${categoryLeft}" y="38" width="${categoryWidth}" height="58" rx="29" fill="${palette.accent}" />
-    <text x="${categoryLeft + categoryWidth / 2}" y="76" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="23" font-weight="800" letter-spacing="2">${category}</text>
+    <text x="${categoryLeft + categoryWidth / 2}" y="76" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="800" letter-spacing="2">${category}</text>
     <rect x="48" y="${PHOTO_TOP + PHOTO_HEIGHT - 72}" width="${Math.min(600, Math.max(220, options.sourceName.length * 16 + 44))}" height="48" rx="10" fill="#101b2d" fill-opacity=".82" />
-    <text x="70" y="${PHOTO_TOP + PHOTO_HEIGHT - 40}" fill="#fff" font-family="Arial, sans-serif" font-size="22" font-weight="600">${sourceName}</text>
-    <text x="54" y="${FOOTER_TOP + 86}" fill="${palette.dark}" font-family="Arial, sans-serif" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1">${titleMarkup}</text>
+    <text x="70" y="${PHOTO_TOP + PHOTO_HEIGHT - 40}" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="600">${sourceName}</text>
+    <text x="54" y="${FOOTER_TOP + 86}" fill="${palette.dark}" font-family="DejaVu Sans, sans-serif" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1">${titleMarkup}</text>
     <line x1="54" y1="1267" x2="1026" y2="1267" stroke="${palette.accent}" stroke-width="4" />
-    <text x="54" y="1310" fill="#53657a" font-family="Arial, sans-serif" font-size="23" font-weight="700">RINGKASAN BERITA</text>
-    <text x="1026" y="1310" text-anchor="end" fill="#53657a" font-family="Arial, sans-serif" font-size="23">${brand}</text>
+    <text x="54" y="1310" fill="#53657a" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="700">RINGKASAN BERITA</text>
+    <text x="1026" y="1310" text-anchor="end" fill="#53657a" font-family="DejaVu Sans, sans-serif" font-size="23">${brand}</text>
   </svg>`;
 }
 
 /** Compose the article photo and an SVG card overlay directly with Sharp (no Satori/ImageResponse). */
 export async function renderOgCard(options: OgCardOptions): Promise<Buffer> {
+  await ensureBundledFonts();
   const base = await sharp({
     create: { width: WIDTH, height: HEIGHT, channels: 4, background: "#f3f7fc" },
   }).png().toBuffer();
