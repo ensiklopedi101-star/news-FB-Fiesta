@@ -47,6 +47,7 @@ export const articles = pgTable(
     errorMessage: text("error_message"),
     attempts: integer("attempts").notNull().default(0),
     sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
+    priorityAt: timestamp("priority_at", { withTimezone: true }),
     postFormat: articlePostFormat("post_format").notNull().default("single"),
     carouselSlides: jsonb("carousel_slides").$type<string[]>(),
     publishedAt: timestamp("published_at", { withTimezone: true }),

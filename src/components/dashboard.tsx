@@ -29,6 +29,7 @@ type Article = {
   errorMessage: string | null;
   createdAt: string;
   sourcePublishedAt: string | null;
+  priorityAt: string | null;
   postFormat: "single" | "carousel";
   carouselSlides: string[] | null;
   publishedAt: string | null;
@@ -209,6 +210,26 @@ export default function Dashboard() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal mengeluarkan berita dari antrean.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleArticlePriority(article: Article) {
+    const priority = !article.priorityAt;
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/api/admin/articles", {
+        method: "PATCH",
+        body: JSON.stringify({ id: article.id, priority }),
+      });
+      setMessage(priority
+        ? "Prioritas diperbarui. Berita ini menjadi item antrean lokal berikutnya yang akan dikirim ke Buffer."
+        : "Prioritas berita dibatalkan.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal memperbarui prioritas berita.");
     } finally {
       setBusy(false);
     }
@@ -414,14 +435,16 @@ export default function Dashboard() {
         </section>
 
         <section className="panel articles-panel">
-          <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita berumur lebih dari 7 jam otomatis dikeluarkan; jika RSS tak mencantumkan waktu terbit, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
+          <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya, tetapi tidak mengubah post yang sudah masuk Buffer. Berita berumur lebih dari 7 jam dikeluarkan; tanpa waktu terbit RSS, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
           {data?.articles.length ? <div className="article-list">{data.articles.map((article) => (
             <article className="article-row" key={article.id}>
               <div className="article-row-top">
                 {article.queuePosition && <span className="queue-position">#{article.queuePosition}</span>}
+                {article.status === "queued" && article.priorityAt && <span className="status-tag priority">PRIORITAS</span>}
                 <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
                 <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
                 <span className={`format-tag ${article.postFormat}`}>{article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
+                {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
                 {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
               </div>
               <strong>{article.title}</strong>
