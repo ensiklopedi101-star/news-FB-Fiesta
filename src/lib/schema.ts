@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed", "expired", "removed"]);
 export const articlePageKey = pgEnum("article_page_key", ["news", "entertainment"]);
+export const articlePostFormat = pgEnum("article_post_format", ["single", "carousel"]);
 
 export const rssSources = pgTable(
   "rss_sources",
@@ -45,6 +46,8 @@ export const articles = pgTable(
     errorMessage: text("error_message"),
     attempts: integer("attempts").notNull().default(0),
     sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
+    postFormat: articlePostFormat("post_format").notNull().default("single"),
+    carouselSlides: jsonb("carousel_slides").$type<string[]>(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

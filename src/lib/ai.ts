@@ -8,9 +8,10 @@ const outputSchema = {
     title: { type: Type.STRING },
     paragraphs: { type: Type.ARRAY, items: { type: Type.STRING } },
     question: { type: Type.STRING },
+    slidePoints: { type: Type.ARRAY, items: { type: Type.STRING } },
     hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
   },
-  required: ["title", "paragraphs", "question", "hashtags"],
+  required: ["title", "paragraphs", "question", "slidePoints", "hashtags"],
 } as const;
 
 export type AiProviderAttempt = {
@@ -21,7 +22,7 @@ export type AiProviderAttempt = {
   error?: string;
 };
 
-type GeneratedText = { title: string; caption: string };
+type GeneratedText = { title: string; caption: string; carouselSlides: [string, string, string] };
 
 export type GeneratedCopy = GeneratedText & {
   provider: AiProviderAttempt["provider"];
@@ -37,7 +38,7 @@ export class AiGenerationError extends Error {
   }
 }
 
-type GeneratedDraft = { title?: unknown; paragraphs?: unknown; question?: unknown; hashtags?: unknown };
+type GeneratedDraft = { title?: unknown; paragraphs?: unknown; question?: unknown; slidePoints?: unknown; hashtags?: unknown };
 
 const AI_TOTAL_TIMEOUT_MS = 30_000;
 const AI_PROVIDER_TIMEOUT_MS = 8_000;
@@ -108,14 +109,15 @@ function buildPrompt(input: {
 Gunakan format tepat 3 paragraf:
 1. Hook yang menarik dan emosional secara wajar, lalu masuk ke fakta utama. Jangan menyalin judul mentah atau membuat klaim sensasional.
 2. Jelaskan rincian berita dan konteks yang benar-benar didukung oleh bahan sumber. Jangan memakai ingatan model untuk menambahkan fakta tentang berita terkini, jadwal, aktor, lokasi, atau karya yang tidak disebutkan di bahan. Jika konteks tambahan tidak tersedia, cukup jelaskan rincian sumber dengan bahasa yang mengalir.
-3. Tutup dengan satu pertanyaan terbuka dan netral yang mengundang pendapat atau pengalaman, bukan memancing konflik.
+3. Tutup dengan satu pertanyaan terbuka dan netral maksimal 120 karakter yang mengundang pendapat atau pengalaman, bukan memancing konflik.
+4. Buat 2 slidePoints: masing-masing satu fakta inti berbeda dari sumber, maksimal 120 karakter, ringkas dan mudah dibaca di gambar. Jangan menambah fakta baru.
 
 Batasan:
 - Jangan mengarang fakta, angka, kutipan, tanggal, sebab-akibat, atau status.
 - Maksimal 2 emoji yang relevan.
 - Buat 3 hashtag yang spesifik dan relevan dari nama/topik/lokasi yang benar-benar ada di bahan; jangan menyebutnya populer.
 - Hindari klaim bahwa berita sudah diverifikasi independen.
-- Kembalikan hanya JSON valid: title (string), paragraphs (tepat 3 string), question (string), hashtags (array 3 string).
+- Kembalikan hanya JSON valid: title (string), paragraphs (tepat 3 string), question (string), slidePoints (tepat 2 string, masing-masing maksimal 120 karakter), hashtags (array 3 string).
 
 Kategori: ${input.category}
 Nama sumber: ${input.sourceName}
@@ -142,16 +144,19 @@ function validateDraft(raw: string): GeneratedText {
     ? data.paragraphs.filter((part): part is string => typeof part === "string").map((part) => part.trim()).filter(Boolean).slice(0, 3)
     : [];
   const question = typeof data.question === "string" ? data.question.trim() : "";
+  const slidePoints = Array.isArray(data.slidePoints)
+    ? data.slidePoints.filter((part): part is string => typeof part === "string").map((part) => part.trim()).filter(Boolean).slice(0, 2)
+    : [];
   const hashtags = Array.isArray(data.hashtags)
     ? data.hashtags.filter((tag): tag is string => typeof tag === "string").map(normalizeHashtag).filter((tag): tag is string => Boolean(tag)).slice(0, 3)
     : [];
-  if (!title || paragraphs.length !== 3 || !question || hashtags.length !== 3) {
-    throw new Error("Hasil AI tidak memenuhi format judul, 3 paragraf, pertanyaan, dan 3 hashtag.");
+  if (!title || paragraphs.length !== 3 || !question || question.length > 120 || slidePoints.length !== 2 || slidePoints.some((point) => point.length > 120) || hashtags.length !== 3) {
+    throw new Error("Hasil AI tidak memenuhi format judul, caption, 2 fakta carousel, pertanyaan, dan 3 hashtag.");
   }
 
   const lastParagraph = `${paragraphs[2]} ${question}`.trim();
   const caption = [paragraphs[0], paragraphs[1], lastParagraph, hashtags.join(" ")].join("\n\n");
-  return { title: title.slice(0, 180), caption };
+  return { title: title.slice(0, 180), caption, carouselSlides: [slidePoints[0]!, slidePoints[1]!, question] };
 }
 
 async function generateWithGemini(apiKey: string, model: string, prompt: string, timeoutMs: number): Promise<GeneratedText> {
@@ -166,7 +171,7 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
       responseMimeType: "application/json",
       responseSchema: outputSchema,
       temperature: 0.35,
-      maxOutputTokens: 350,
+      maxOutputTokens: 500,
       httpOptions: { timeout: timeoutMs },
     },
   });
@@ -189,7 +194,7 @@ async function generateWithGroq(apiKey: string, model: string, prompt: string, t
       ],
       response_format: { type: "json_object" },
       temperature: 0.35,
-      max_tokens: 350,
+      max_tokens: 500,
     }),
     signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",

@@ -30,6 +30,7 @@ export type OgCardOptions = {
   sourceName: string;
   isEntertainment: boolean;
   photoJpeg?: Uint8Array | null;
+  slide?: { number: number; total: number; label: string; text?: string };
 };
 
 function escapeXml(value: string): string {
@@ -79,6 +80,14 @@ function buildSvg(options: OgCardOptions): string {
   const titleMarkup = title.lines.map((line, index) =>
     `<text x="540" y="${titleTop + index * title.lineHeight}" text-anchor="middle" fill="${index === 0 ? palette.highlight : "#fff"}" font-family="DejaVu Sans, sans-serif" font-size="${title.fontSize}" font-weight="900" letter-spacing="-1">${escapeXml(line)}</text>`,
   ).join("");
+  const slideText = options.slide?.text?.trim();
+  const slideLines = slideText ? wrapWords(slideText, 34).slice(0, 6) : [];
+  const slideContentMarkup = slideLines.length
+    ? `<text x="540" y="474" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">${escapeXml(options.slide?.label ?? "INTI BERITA")}</text>${slideLines.map((line, index) => `<text x="540" y="${560 + index * 51}" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="800">${escapeXml(line)}</text>`).join("")}`
+    : titleMarkup;
+  const slideIndicator = options.slide
+    ? `<text x="540" y="875" text-anchor="middle" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="800" letter-spacing="3">GESER · ${options.slide.number}/${options.slide.total}</text>`
+    : "";
   const brand = escapeXml(options.brand.trim().slice(0, 24));
   const category = escapeXml(options.category.trim().toUpperCase().slice(0, 24));
   const sourceName = escapeXml(options.sourceName.trim().slice(0, 48));
@@ -102,7 +111,8 @@ function buildSvg(options: OgCardOptions): string {
     <rect x="${categoryLeft}" y="48" width="${categoryWidth}" height="56" rx="28" fill="#fff" fill-opacity=".15" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
     <text x="${categoryLeft + categoryWidth / 2}" y="84" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="800" letter-spacing="2">${category}</text>
     <text x="540" y="337" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="700" letter-spacing="4">${options.isEntertainment ? "SOROTAN HIBURAN" : "KABAR HARI INI"}</text>
-    ${titleMarkup}
+    ${slideContentMarkup}
+    ${slideIndicator}
     <line x1="72" y1="936" x2="1008" y2="936" stroke="${palette.highlight}" stroke-width="3" stroke-opacity=".9"/>
     <text x="72" y="989" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700" letter-spacing="1">${sourceName}</text>
     <text x="1008" y="989" text-anchor="end" fill="#fff" fill-opacity=".82" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="600">${options.isEntertainment ? "POPBEEZ" : "NUSABEEZ"}</text>
