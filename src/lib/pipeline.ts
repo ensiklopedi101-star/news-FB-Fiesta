@@ -1,16 +1,27 @@
 import "server-only";
-import { and, asc, desc, eq, gt, like, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, like, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { writeNewsCopy } from "@/lib/ai";
 import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
+import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
 async function claimNextArticle(): Promise<Article | null> {
   const db = getDb();
+  const now = new Date();
+  const expiryCutoff = getQueueExpiryCutoff(now);
+  const expiredMessage = `Berita dikeluarkan dari antrean karena sudah lebih dari ${MAX_QUEUE_AGE_HOURS} jam sejak terbit.`;
+  const isExpiredByAge = or(
+    lt(articles.sourcePublishedAt, expiryCutoff),
+    and(isNull(articles.sourcePublishedAt), lt(articles.createdAt, expiryCutoff)),
+  );
+  await db.update(articles)
+    .set({ status: "expired", errorMessage: expiredMessage, updatedAt: now })
+    .where(and(eq(articles.status, "queued"), isExpiredByAge));
   const configuredPages = (["news", "entertainment"] as const)
     .filter((pageKey) => getBufferConfigurationGaps([pageKey]).length === 0);
   if (!configuredPages.length) return null;
@@ -19,7 +30,7 @@ async function claimNextArticle(): Promise<Article | null> {
   const [queued] = await db.select({ id: articles.id })
     .from(articles)
     .where(and(eq(articles.status, "queued"), configuredPageFilter))
-    .orderBy(asc(articles.createdAt))
+    .orderBy(asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
     .limit(1);
 
   let candidateId = queued?.id;
@@ -30,11 +41,20 @@ async function claimNextArticle(): Promise<Article | null> {
       .where(and(eq(articles.status, "processing"), configuredPageFilter, lt(articles.updatedAt, staleBefore)))
       .orderBy(asc(articles.updatedAt))
       .limit(1);
-    candidateId = stale?.id;
-    if (candidateId) {
-      await db.update(articles)
-        .set({ status: "queued", updatedAt: new Date() })
-        .where(and(eq(articles.id, candidateId), eq(articles.status, "processing")));
+    if (stale?.id) {
+      const staleId = stale.id;
+      const [processingArticle] = await db.select({ sourcePublishedAt: articles.sourcePublishedAt, createdAt: articles.createdAt })
+        .from(articles).where(eq(articles.id, staleId)).limit(1);
+      if (processingArticle && isQueueItemExpired(processingArticle.sourcePublishedAt ?? processingArticle.createdAt, now)) {
+        await db.update(articles)
+          .set({ status: "expired", errorMessage: expiredMessage, updatedAt: now })
+          .where(and(eq(articles.id, staleId), eq(articles.status, "processing")));
+      } else {
+        await db.update(articles)
+          .set({ status: "queued", updatedAt: now })
+          .where(and(eq(articles.id, staleId), eq(articles.status, "processing")));
+        candidateId = staleId;
+      }
     }
   }
 
@@ -134,6 +154,12 @@ export async function runNewsPipeline(): Promise<RunResult> {
       sourceName: article.sourceName,
     });
     logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
+    if (isQueueItemExpired(article.sourcePublishedAt ?? article.createdAt)) {
+      await db.update(articles)
+        .set({ status: "expired", errorMessage: `Berita dikeluarkan dari antrean karena sudah lebih dari ${MAX_QUEUE_AGE_HOURS} jam sejak terbit.`, updatedAt: new Date() })
+        .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
+      return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
+    }
     const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${article.sourceUrl}`;
     await db.update(articles)
       .set({

@@ -1,4 +1,4 @@
-CREATE TYPE "public"."article_status" AS ENUM ('queued', 'processing', 'ready', 'published', 'failed');
+CREATE TYPE "public"."article_status" AS ENUM ('queued', 'processing', 'ready', 'published', 'failed', 'expired', 'removed');
 CREATE TYPE "public"."article_page_key" AS ENUM ('news', 'entertainment');
 
 CREATE TABLE "rss_sources" (
@@ -35,6 +35,7 @@ CREATE TABLE "articles" (
   "facebook_post_id" text,
   "error_message" text,
   "attempts" integer DEFAULT 0 NOT NULL,
+  "source_published_at" timestamp with time zone,
   "published_at" timestamp with time zone,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -44,6 +45,7 @@ CREATE UNIQUE INDEX "articles_url_hash_unique" ON "articles" USING btree ("url_h
 CREATE INDEX "articles_status_created_idx" ON "articles" USING btree ("status", "created_at");
 CREATE INDEX "articles_page_status_created_idx" ON "articles" USING btree ("page_key", "status", "created_at");
 CREATE INDEX "articles_published_at_idx" ON "articles" USING btree ("published_at");
+CREATE INDEX "articles_status_source_published_idx" ON "articles" USING btree ("status", "source_published_at");
 
 CREATE TABLE "publisher_state" (
   "id" integer PRIMARY KEY NOT NULL,
