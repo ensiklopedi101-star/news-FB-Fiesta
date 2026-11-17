@@ -60,13 +60,14 @@ export async function GET(request: NextRequest) {
       errorMessage: articles.errorMessage,
       createdAt: articles.createdAt,
       sourcePublishedAt: articles.sourcePublishedAt,
+      priorityAt: articles.priorityAt,
       postFormat: articles.postFormat,
       carouselSlides: articles.carouselSlides,
       publishedAt: articles.publishedAt,
     };
     const [queueRows, recentRows] = await Promise.all([
       db.select(articleFields).from(articles).where(eq(articles.status, "queued"))
-        .orderBy(asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
+        .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
       db.select(articleFields).from(articles)
         .where(and(ne(articles.status, "queued"), ne(articles.status, "expired")))
         .orderBy(desc(articles.createdAt)).limit(10),
@@ -124,7 +125,7 @@ export async function GET(request: NextRequest) {
     console.error("[dashboard]", error instanceof Error ? error.message : error);
     return NextResponse.json({
       ok: false,
-      error: "Skema database belum lengkap. Jalankan migrasi drizzle/0003_scheduled_harvest.sql di Neon setelah migrasi RSS sebelumnya, lalu muat ulang dashboard.",
+      error: "Skema database belum lengkap. Pastikan DATABASE_URL mengarah ke Neon yang benar, lalu jalankan migrasi yang belum diterapkan secara berurutan sampai drizzle/0007_queue_priority.sql dan muat ulang dashboard.",
     }, { status: 503 });
   }
 }

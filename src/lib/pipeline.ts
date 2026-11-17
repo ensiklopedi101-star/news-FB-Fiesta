@@ -30,7 +30,7 @@ async function claimNextArticle(): Promise<Article | null> {
   const [queued] = await db.select({ id: articles.id })
     .from(articles)
     .where(and(eq(articles.status, "queued"), configuredPageFilter))
-    .orderBy(asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
+    .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
     .limit(1);
 
   let candidateId = queued?.id;

@@ -38,6 +38,7 @@ CREATE TABLE "articles" (
   "error_message" text,
   "attempts" integer DEFAULT 0 NOT NULL,
   "source_published_at" timestamp with time zone,
+  "priority_at" timestamp with time zone,
   "post_format" "article_post_format" DEFAULT 'single' NOT NULL,
   "carousel_slides" jsonb,
   "published_at" timestamp with time zone,
@@ -50,6 +51,7 @@ CREATE INDEX "articles_status_created_idx" ON "articles" USING btree ("status", 
 CREATE INDEX "articles_page_status_created_idx" ON "articles" USING btree ("page_key", "status", "created_at");
 CREATE INDEX "articles_published_at_idx" ON "articles" USING btree ("published_at");
 CREATE INDEX "articles_status_source_published_idx" ON "articles" USING btree ("status", "source_published_at");
+CREATE INDEX "articles_queued_priority_idx" ON "articles" USING btree ("priority_at", "source_published_at", "created_at") WHERE "status" = 'queued';
 CREATE INDEX "articles_post_format_created_idx" ON "articles" USING btree ("post_format", "created_at");
 
 CREATE TABLE "publisher_state" (
