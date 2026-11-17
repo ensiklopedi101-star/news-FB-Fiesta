@@ -1,14 +1,10 @@
 import { Buffer } from "node:buffer";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
 
 const WIDTH = 1080;
-const HEIGHT = 1350;
-const HEADER_HEIGHT = 132;
-const PHOTO_HEIGHT = 660;
-const PHOTO_TOP = HEADER_HEIGHT;
-const FOOTER_TOP = PHOTO_TOP + PHOTO_HEIGHT;
+const HEIGHT = 1080;
 let fontconfigPromise: Promise<void> | undefined;
 
 async function ensureBundledFonts(): Promise<void> {
@@ -31,6 +27,7 @@ export type OgCardOptions = {
   brand: string;
   category: string;
   title: string;
+  summary?: string | null;
   sourceName: string;
   isEntertainment: boolean;
   photoJpeg?: Uint8Array | null;
@@ -63,70 +60,108 @@ function wrapWords(value: string, maxCharacters: number): string[] {
   return lines.length ? lines : [""];
 }
 
+function getSummary(rawSummary: string | null | undefined): string {
+  if (!rawSummary) return "";
+  return rawSummary
+    .split(/\n\s*\n/)
+    .filter((paragraph) => !paragraph.trim().startsWith("📰") && !paragraph.trim().startsWith("🔗"))
+    .slice(0, 2)
+    .join(" ")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/#[\p{L}\p{N}_]+/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+}
+
+function fitHeadline(rawTitle: string): { lines: string[]; fontSize: number; lineHeight: number } {
+  const title = rawTitle.trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID").slice(0, 130);
+  for (const fontSize of [92, 82, 72, 64, 58, 52]) {
+    const lines = wrapWords(title, Math.floor(970 / (fontSize * 0.76)));
+    if (lines.length <= 5) return { lines, fontSize, lineHeight: fontSize * 1.06 };
+  }
+  const fontSize = 48;
+  const lines = wrapWords(title, Math.floor(970 / (fontSize * 0.76))).slice(0, 6);
+  return { lines, fontSize, lineHeight: fontSize * 1.05 };
+}
+
 function buildSvg(options: OgCardOptions): string {
   const palette = options.isEntertainment
-    ? { dark: "#641735", accent: "#e42d80", light: "#fff3f8", soft: "#ffc84a" }
-    : { dark: "#173b61", accent: "#e44d47", light: "#f3f7fc", soft: "#f7c84b" };
-  const title = options.title.trim().slice(0, 130);
-  const titleFontSize = title.length > 100 ? 48 : title.length > 70 ? 52 : 58;
-  const titleLines = wrapWords(title, Math.floor(972 / (titleFontSize * 0.78))).slice(0, 6);
-  const titleLineHeight = titleFontSize * 1.13;
-  const titleMarkup = titleLines.map((line, index) =>
-    `<tspan x="54" dy="${index === 0 ? 0 : titleLineHeight}">${escapeXml(line)}</tspan>`,
+    ? { dark: "#641735", accent: "#e42d80", highlight: "#ffd12e" }
+    : { dark: "#10243a", accent: "#f2b900", highlight: "#ffd12e" };
+  const title = fitHeadline(options.title);
+  const titleTop = 565 - ((title.lines.length - 1) * title.lineHeight) / 2;
+  const titleMarkup = title.lines.map((line, index) =>
+    `<text x="540" y="${titleTop + index * title.lineHeight}" text-anchor="middle" fill="${index === 0 ? palette.highlight : "#fff"}" font-family="DejaVu Sans, sans-serif" font-size="${title.fontSize}" font-weight="900" letter-spacing="-1">${escapeXml(line)}</text>`,
   ).join("");
-  const brand = escapeXml(options.brand);
-  const category = escapeXml(options.category);
-  const sourceName = escapeXml(options.sourceName.slice(0, 80));
-  const categoryWidth = Math.min(440, Math.max(170, options.category.length * 19 + 56));
-  const categoryLeft = WIDTH - categoryWidth - 48;
-  const photoBackground = options.photoJpeg
+  const summary = wrapWords(getSummary(options.summary), 64).slice(0, 3);
+  const summaryMarkup = summary.map((line, index) =>
+    `<text x="540" y="${790 + index * 36}" text-anchor="middle" fill="#fff" fill-opacity=".93" font-family="DejaVu Sans, sans-serif" font-size="25" font-weight="400">${escapeXml(line)}</text>`,
+  ).join("");
+  const brand = escapeXml(options.brand.trim().slice(0, 24));
+  const category = escapeXml(options.category.trim().toUpperCase().slice(0, 24));
+  const sourceName = escapeXml(options.sourceName.trim().slice(0, 48));
+  const categoryWidth = Math.min(420, Math.max(170, category.length * 20 + 64));
+  const categoryLeft = WIDTH - categoryWidth - 46;
+  const fallback = options.photoJpeg
     ? ""
-    : `<rect x="0" y="${PHOTO_TOP}" width="${WIDTH}" height="${PHOTO_HEIGHT}" fill="url(#fallback)" />
-       <circle cx="880" cy="270" r="175" fill="${palette.soft}" opacity=".18" />
-       <circle cx="220" cy="720" r="265" fill="none" stroke="${palette.soft}" stroke-width="20" opacity=".2" />
-       <text x="540" y="390" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="34" font-weight="700" letter-spacing="8">${options.isEntertainment ? "POP CULTURE" : "KABAR NUSANTARA"}</text>
-       <text x="540" y="492" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="78" font-weight="900" letter-spacing="3">${escapeXml(options.brand.toUpperCase())}</text>`;
+    : `<rect width="${WIDTH}" height="${HEIGHT}" fill="${palette.dark}"/><path d="M0 0H1080V1080H0Z" fill="url(#fallback)"/><circle cx="900" cy="210" r="260" fill="${palette.accent}" opacity=".22"/><circle cx="120" cy="900" r="330" fill="none" stroke="${palette.highlight}" stroke-width="22" opacity=".18"/>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <defs>
       <linearGradient id="fallback" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${palette.dark}"/><stop offset="100%" stop-color="${palette.accent}"/></linearGradient>
-      <linearGradient id="photoShade" x1="0" y1="0" x2="0" y2="1"><stop offset="48%" stop-color="#111827" stop-opacity="0"/><stop offset="100%" stop-color="#111827" stop-opacity=".8"/></linearGradient>
+      <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#06111d" stop-opacity=".57"/><stop offset="42%" stop-color="#06111d" stop-opacity=".22"/><stop offset="75%" stop-color="#06111d" stop-opacity=".58"/><stop offset="100%" stop-color="#06111d" stop-opacity=".91"/></linearGradient>
     </defs>
-    <rect x="0" y="${FOOTER_TOP}" width="${WIDTH}" height="${HEIGHT - FOOTER_TOP}" fill="${palette.light}" />
-    ${photoBackground}
-    ${options.photoJpeg ? `<rect x="0" y="${PHOTO_TOP}" width="${WIDTH}" height="${PHOTO_HEIGHT}" fill="url(#photoShade)" />` : ""}
-    <rect x="0" y="0" width="${WIDTH}" height="${HEADER_HEIGHT}" fill="${palette.dark}" />
-    <circle cx="88" cy="66" r="42" fill="${palette.accent}" />
-    <text x="88" y="81" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="45" font-weight="900">${escapeXml(options.brand.slice(0, 1).toUpperCase())}</text>
-    <text x="150" y="82" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="42" font-weight="800">${brand}</text>
-    <rect x="${categoryLeft}" y="38" width="${categoryWidth}" height="58" rx="29" fill="${palette.accent}" />
-    <text x="${categoryLeft + categoryWidth / 2}" y="76" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="800" letter-spacing="2">${category}</text>
-    <rect x="48" y="${PHOTO_TOP + PHOTO_HEIGHT - 72}" width="${Math.min(600, Math.max(220, options.sourceName.length * 16 + 44))}" height="48" rx="10" fill="#101b2d" fill-opacity=".82" />
-    <text x="70" y="${PHOTO_TOP + PHOTO_HEIGHT - 40}" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="600">${sourceName}</text>
-    <text x="54" y="${FOOTER_TOP + 86}" fill="${palette.dark}" font-family="DejaVu Sans, sans-serif" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1">${titleMarkup}</text>
-    <line x1="54" y1="1267" x2="1026" y2="1267" stroke="${palette.accent}" stroke-width="4" />
-    <text x="54" y="1310" fill="#53657a" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="700">RINGKASAN BERITA</text>
-    <text x="1026" y="1310" text-anchor="end" fill="#53657a" font-family="DejaVu Sans, sans-serif" font-size="23">${brand}</text>
+    ${fallback}
+    ${options.photoJpeg ? `<rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>` : ""}
+    <rect width="${WIDTH}" height="190" fill="#06111d" fill-opacity=".38"/>
+    <rect y="895" width="${WIDTH}" height="185" fill="#06111d" fill-opacity=".24"/>
+    <text x="178" y="93" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="37" font-weight="800">${brand}</text>
+    <text x="180" y="132" fill="#fff" fill-opacity=".78" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="600" letter-spacing="3">${options.isEntertainment ? "POP CULTURE" : "BERITA TERKINI"}</text>
+    <rect x="${categoryLeft}" y="48" width="${categoryWidth}" height="56" rx="28" fill="#fff" fill-opacity=".15" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
+    <text x="${categoryLeft + categoryWidth / 2}" y="84" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="800" letter-spacing="2">${category}</text>
+    <text x="540" y="337" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="700" letter-spacing="4">${options.isEntertainment ? "SOROTAN HIBURAN" : "KABAR HARI INI"}</text>
+    ${titleMarkup}
+    ${summaryMarkup}
+    <line x1="72" y1="936" x2="1008" y2="936" stroke="${palette.highlight}" stroke-width="3" stroke-opacity=".9"/>
+    <text x="72" y="989" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700" letter-spacing="1">${sourceName}</text>
+    <text x="1008" y="989" text-anchor="end" fill="#fff" fill-opacity=".82" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="600">${options.isEntertainment ? "POPBEEZ" : "NUSABEEZ"}</text>
   </svg>`;
 }
 
-/** Compose the article photo and an SVG card overlay directly with Sharp (no Satori/ImageResponse). */
+const logoBuffers = new Map<string, Promise<Buffer>>();
+async function loadBrandLogo(isEntertainment: boolean): Promise<Buffer> {
+  const file = isEntertainment ? "popbeez_icon.png" : "nusabeez_icon.png";
+  let pending = logoBuffers.get(file);
+  if (!pending) {
+    pending = readFile(resolve(process.cwd(), "public/brand", file));
+    logoBuffers.set(file, pending);
+  }
+  return pending;
+}
+
+/** Compose a full-bleed, square news card with Sharp and SVG; use the actual bundled page logo asset. */
 export async function renderOgCard(options: OgCardOptions): Promise<Buffer> {
   await ensureBundledFonts();
   const base = await sharp({
-    create: { width: WIDTH, height: HEIGHT, channels: 4, background: "#f3f7fc" },
+    create: { width: WIDTH, height: HEIGHT, channels: 4, background: "#101722" },
   }).png().toBuffer();
   const layers: Array<{ input: Buffer; left: number; top: number }> = [];
 
   if (options.photoJpeg?.byteLength) {
     const photo = await sharp(Buffer.from(options.photoJpeg), { limitInputPixels: 40_000_000 })
       .rotate()
-      .resize(WIDTH, PHOTO_HEIGHT, { fit: "cover", position: "centre" })
+      .resize(WIDTH, HEIGHT, { fit: "cover", position: "centre" })
       .jpeg({ quality: 88 })
       .toBuffer();
-    layers.push({ input: photo, left: 0, top: PHOTO_TOP });
+    layers.push({ input: photo, left: 0, top: 0 });
   }
 
+  const logo = await sharp(await loadBrandLogo(options.isEntertainment))
+    .resize(112, 112, { fit: "contain" })
+    .png()
+    .toBuffer();
   layers.push({ input: Buffer.from(buildSvg(options)), left: 0, top: 0 });
+  layers.push({ input: logo, left: 44, top: 34 });
   return sharp(base).composite(layers).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
 }
