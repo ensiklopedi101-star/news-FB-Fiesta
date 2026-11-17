@@ -6,7 +6,7 @@ import { fetchOgImage, fetchOgImageDataUrl, isVercelBlobImageUrl } from "../src/
 
 const pngBytes = new Uint8Array([137, 80, 78, 71]);
 
-test("normalizes a WebP source to JPEG for the OG renderer and sends the publisher referer", async () => {
+test("normalizes a WebP source to JPEG and sends the publisher referer", async () => {
   const sourcePng = await readFile(new URL("../public/brand/popbeez_icon.png", import.meta.url));
   const sourceWebp = await sharp(sourcePng).webp().toBuffer();
   let requestedUrl = "";

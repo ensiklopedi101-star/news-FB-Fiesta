@@ -9,13 +9,12 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 type Fetcher = typeof fetch;
 type FetchedImage = { bytes: Uint8Array; contentType: string };
 
-async function toJpegDataUrl(bytes: Uint8Array): Promise<string> {
-  const normalized = await sharp(Buffer.from(bytes), { limitInputPixels: 40_000_000 })
+async function toJpegBytes(bytes: Uint8Array): Promise<Buffer> {
+  return sharp(Buffer.from(bytes), { limitInputPixels: 40_000_000 })
     .rotate()
     .resize(1080, 660, { fit: "cover", position: "centre" })
     .jpeg({ quality: 86 })
     .toBuffer();
-  return `data:image/jpeg;base64,${normalized.toString("base64")}`;
 }
 
 async function readImage(response: Response): Promise<Uint8Array | null> {
@@ -146,19 +145,30 @@ export async function fetchOgImage(
   return null;
 }
 
-/** Normalize supported source formats to JPEG; next/og's data-URI parser does not support WebP dimensions. */
+/** Normalize supported source formats to JPEG bytes for the card compositor or image-only diagnostics. */
+export async function fetchOgImageJpeg(
+  rawImageUrl: string | null | undefined,
+  sourceUrl: string,
+  fetcher: Fetcher = fetch,
+  reportFailure?: (reason: string) => void,
+): Promise<Buffer | null> {
+  const image = await fetchOgImage(rawImageUrl, sourceUrl, fetcher, reportFailure);
+  if (!image) return null;
+  try {
+    return await toJpegBytes(image.bytes);
+  } catch {
+    reportFailure?.("image could not be decoded and normalized by Sharp");
+    return null;
+  }
+}
+
+/** Data-URI adapter retained for callers/tests that feed images to next/og. */
 export async function fetchOgImageDataUrl(
   rawImageUrl: string | null | undefined,
   sourceUrl: string,
   fetcher: Fetcher = fetch,
   reportFailure?: (reason: string) => void,
 ): Promise<string | null> {
-  const image = await fetchOgImage(rawImageUrl, sourceUrl, fetcher, reportFailure);
-  if (!image) return null;
-  try {
-    return await toJpegDataUrl(image.bytes);
-  } catch {
-    reportFailure?.("image could not be decoded and normalized by Sharp");
-    return null;
-  }
+  const normalized = await fetchOgImageJpeg(rawImageUrl, sourceUrl, fetcher, reportFailure);
+  return normalized ? `data:image/jpeg;base64,${normalized.toString("base64")}` : null;
 }

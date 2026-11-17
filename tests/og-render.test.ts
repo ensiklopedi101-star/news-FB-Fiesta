@@ -1,46 +1,46 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import React from "react";
-import { ImageResponse } from "next/og";
 import { test } from "node:test";
 import sharp from "sharp";
-import { fetchOgImageDataUrl } from "../src/lib/og-image";
+import { renderOgCard } from "../src/lib/og-card";
 
-test("ImageResponse renders an inlined PNG asset into a complete image response", async () => {
-  const bytes = await readFile(new URL("../public/brand/popbeez_icon.png", import.meta.url));
-  const imageData = `data:image/png;base64,${bytes.toString("base64")}`;
-  const response = new ImageResponse(
-    React.createElement(
-      "div",
-      { style: { display: "flex", width: 1080, height: 1350 } },
-      React.createElement("img", { src: imageData, width: 1080, height: 660, style: { width: "100%", height: "100%", objectFit: "cover" } }),
-    ),
-    { width: 1080, height: 1350 },
-  );
+const baseOptions = {
+  brand: "Nusabeez",
+  category: "NASIONAL",
+  title: "Judul berita dengan karakter khusus < aman & diuji sebagai SVG text",
+  sourceName: "Sumber Berita",
+  isEntertainment: false,
+};
 
-  const output = await response.arrayBuffer();
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("content-type"), "image/png");
-  assert.ok(output.byteLength > 0);
+test("Sharp card renderer outputs a complete JPEG and composites the source photo", async () => {
+  const greenPhoto = await sharp({
+    create: { width: 40, height: 30, channels: 3, background: { r: 20, g: 210, b: 70 } },
+  }).png().toBuffer();
+  const output = await renderOgCard({ ...baseOptions, photoJpeg: greenPhoto });
+  const metadata = await sharp(output).metadata();
+  const centerPhotoPixel = await sharp(output)
+    .extract({ left: 540, top: 400, width: 1, height: 1 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1080);
+  assert.equal(metadata.height, 1350);
+  assert.ok(centerPhotoPixel[1]! > centerPhotoPixel[0]! * 2);
+  assert.ok(centerPhotoPixel[1]! > centerPhotoPixel[2]!);
 });
 
-test("normalizes a WebP photo before passing it to next/og", async () => {
-  const png = await readFile(new URL("../public/brand/popbeez_icon.png", import.meta.url));
-  const webp = await sharp(png).webp().toBuffer();
-  const imageData = await fetchOgImageDataUrl(
-    "https://images.example/photo.webp",
-    "https://publisher.example/story",
-    async () => new Response(webp, { headers: { "content-type": "image/webp" } }),
-  );
+test("Sharp card renderer creates the branded fallback without a source photo", async () => {
+  const output = await renderOgCard({ ...baseOptions, photoJpeg: null });
+  const metadata = await sharp(output).metadata();
+  const centerFallbackPixel = await sharp(output)
+    .extract({ left: 540, top: 400, width: 1, height: 1 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
 
-  assert.ok(imageData?.startsWith("data:image/jpeg;base64,"));
-  const response = new ImageResponse(
-    React.createElement("div", { style: { display: "flex", width: 1080, height: 660 } },
-      React.createElement("img", { src: imageData, width: 1080, height: 660 })),
-    { width: 1080, height: 660 },
-  );
-
-  const output = await response.arrayBuffer();
-  assert.equal(response.status, 200);
-  assert.ok(output.byteLength > 0);
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1080);
+  assert.equal(metadata.height, 1350);
+  assert.ok(centerFallbackPixel.some((channel) => channel > 0));
 });
