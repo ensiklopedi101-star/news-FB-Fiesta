@@ -64,7 +64,8 @@ export async function GET(request: NextRequest) {
     const [queueRows, recentRows] = await Promise.all([
       db.select(articleFields).from(articles).where(eq(articles.status, "queued"))
         .orderBy(asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
-      db.select(articleFields).from(articles).where(ne(articles.status, "queued"))
+      db.select(articleFields).from(articles)
+        .where(and(ne(articles.status, "queued"), ne(articles.status, "expired")))
         .orderBy(desc(articles.createdAt)).limit(10),
     ]);
     const dashboardArticles = [

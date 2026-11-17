@@ -411,7 +411,7 @@ export default function Dashboard() {
         </section>
 
         <section className="panel articles-panel">
-          <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita berumur lebih dari 7 jam otomatis dikeluarkan; jika RSS tak mencantumkan waktu terbit, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.expired ?? 0} lewat batas</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
+          <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita berumur lebih dari 7 jam otomatis dikeluarkan; jika RSS tak mencantumkan waktu terbit, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
           {data?.articles.length ? <div className="article-list">{data.articles.map((article) => (
             <article className="article-row" key={article.id}>
               <div className="article-row-top">
