@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { ImageResponse } from "next/og";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -28,6 +29,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const image = await fetchOgImageDataUrl(article.imageUrl, article.sourceUrl, fetch, (reason) => {
     console.warn(`[og-image] Article image rejected for ${article.id}: ${reason}.`);
   });
+
+  // Diagnostic mode returns only the fetched, normalized article image without the OG layout.
+  if (new URL(request.url).searchParams.get("debug") === "image") {
+    if (!image) {
+      return new Response("Article image could not be fetched or decoded. Check the Vercel function logs for [og-image].", {
+        status: 422,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store, max-age=0" },
+      });
+    }
+    const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(image);
+    if (!match) {
+      return new Response("Unexpected normalized image format.", {
+        status: 500,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store, max-age=0" },
+      });
+    }
+    return new Response(Buffer.from(match[1], "base64"), {
+      headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store, max-age=0" },
+    });
+  }
+
   const localOrigin = process.env.APP_URL || new URL(request.url).origin;
   const localLogo = new URL(`/brand/${isEntertainment ? "popbeez_icon.png" : "nusabeez_icon.png"}`, localOrigin).toString();
   const customLogo = isEntertainment ? process.env.PAGE_LOGO_ENTERTAINMENT_URL : process.env.PAGE_LOGO_NEWS_URL;
