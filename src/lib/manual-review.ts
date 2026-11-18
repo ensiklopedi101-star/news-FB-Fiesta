@@ -64,6 +64,19 @@ export function parseManualReview(rawText: string): ManualReview | null {
   }
 }
 
+/** Choose a useful publisher Referer for user-supplied image URLs instead of pretending Facebook sourced them. */
+export function manualImageReferer(imageUrl: string): string {
+  const image = new URL(imageUrl);
+  const host = image.hostname.toLowerCase();
+  if (host === "soompi.io" || host.endsWith(".soompi.io")) return "https://www.soompi.com/";
+  // Jetpack/Photon proxies keep the upstream host as the first path segment.
+  if (/^i[0-3]\.wp\.com$/.test(host)) {
+    const upstream = image.pathname.split("/").find(Boolean);
+    if (upstream && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(upstream)) return `https://${upstream}/`;
+  }
+  return `${image.origin}/`;
+}
+
 export function buildManualReviewCaption(review: ManualReview): string {
   const rows = review.items.map((item, index) => {
     return `${["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"][index]} ${index === 0 ? "JUARA MINGGU INI: " : ""}${item.title} — ⭐ ${item.rating.toFixed(1)}/10\n• Genre: ${item.genre}${item.reason ? `\n• Kenapa wajib nonton: ${item.reason}` : ""}${item.suitableFor ? `\n• Cocok untuk: ${item.suitableFor}` : ""}`;

@@ -67,7 +67,7 @@ async function claimNextArticle(): Promise<Article | null> {
   return claimed ?? null;
 }
 
-async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
+export async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
   const now = Date.now();
   const cutoff = new Date(now - PUBLISH_POLICY.maxPerHour * 60 * 60 * 1000);
   const db = getDb();
@@ -97,8 +97,8 @@ async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: st
   if (nextAllowedAt <= now) return null;
   return {
     detail: recent.length >= PUBLISH_POLICY.maxPerHour
-      ? "Batas publikasi tercapai: maksimal 2 artikel dalam 60 menit."
-      : "Jeda publikasi minimum 15 menit belum terpenuhi.",
+      ? `Batas publikasi tercapai: maksimal ${PUBLISH_POLICY.maxPerHour} artikel dalam 60 menit.`
+      : `Jeda publikasi minimum ${PUBLISH_POLICY.minimumGapMinutes} menit belum terpenuhi.`,
     nextAllowedAt: new Date(nextAllowedAt).toISOString(),
   };
 }

@@ -147,3 +147,29 @@ test("entertainment cards load the existing Popbeez logo asset", async () => {
   assert.equal(metadata.width, 1080);
   assert.equal(metadata.height, 1080);
 });
+
+test("review slide keeps a long uppercase title inside the dark panel and preserves the poster", async () => {
+  const photo = await sharp({
+    create: { width: 40, height: 80, channels: 3, background: { r: 20, g: 190, b: 90 } },
+  }).png().toBuffer();
+  const output = await renderOgCard({
+    ...baseOptions,
+    brand: "Popbeez",
+    category: "DRAMA",
+    isEntertainment: true,
+    photoJpeg: photo,
+    reviewSlide: {
+      number: 3,
+      total: 6,
+      headline: "5 Drama Rating Tertinggi Minggu Ini",
+      mediaType: "DRAMA",
+      item: { title: "Drama Dengan Judul Sangat Panjang Sekali Tanpa Henti", rating: 9.1, genre: "Romansa", reason: "", suitableFor: "", imageUrl: "https://images.example.test/long.jpg" },
+    },
+  });
+  const borderPixel = await sharp(output).extract({ left: 585, top: 500, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+  const photoPixel = await sharp(output).extract({ left: 900, top: 500, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+
+  assert.ok(photoPixel[1]! > photoPixel[0]! * 2);
+  assert.ok(photoPixel[1]! > photoPixel[2]! * 2);
+  assert.ok(borderPixel[0]! < 60 && borderPixel[1]! < 60 && borderPixel[2]! < 60);
+});

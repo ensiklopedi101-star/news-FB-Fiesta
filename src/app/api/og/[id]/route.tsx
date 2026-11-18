@@ -4,7 +4,7 @@ import { articles } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderOgCard } from "@/lib/og-card";
 import { imageForCarouselSlide } from "@/lib/carousel-image";
-import { parseManualReview } from "@/lib/manual-review";
+import { manualImageReferer, parseManualReview } from "@/lib/manual-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,9 +57,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       : article.postFormat === "carousel"
         ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
         : article.imageUrl;
-    let photoJpeg = await fetchOgImageJpeg(requestedImage, article.sourceUrl, fetch, (reason) => {
+    const imageReferer = manualReview && requestedImage ? manualImageReferer(requestedImage) : article.sourceUrl;
+    let photoJpeg = await fetchOgImageJpeg(requestedImage, imageReferer, fetch, (reason) => {
       console.warn(`[og-image] Article image rejected for ${article.id}: ${reason}.`);
     });
+    // Some publishers reject every cross-origin Referer; retry anonymously before giving up on a manual image.
+    if (!photoJpeg && manualReview && requestedImage) {
+      photoJpeg = await fetchOgImageJpeg(requestedImage, "", fetch, (reason) => {
+        console.warn(`[og-image] Manual image rejected without Referer for ${article.id}: ${reason}.`);
+      });
+    }
     let photoJpegSecondary: Uint8Array | null = null;
     if (!manualReview && article.postFormat === "single" && article.manualImageUrls.length === 2 && requestedImage === article.manualImageUrls[0]) {
       photoJpegSecondary = await fetchOgImageJpeg(article.manualImageUrls[1], article.sourceUrl, fetch, (reason) => {
@@ -67,7 +74,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       });
     }
     if (!photoJpeg && requestedImage !== article.imageUrl && article.imageUrl) {
-      photoJpeg = await fetchOgImageJpeg(article.imageUrl, article.sourceUrl, fetch, (reason) => {
+      photoJpeg = await fetchOgImageJpeg(article.imageUrl, manualReview ? manualImageReferer(article.imageUrl) : article.sourceUrl, fetch, (reason) => {
         console.warn(`[og-image] Cover fallback rejected for ${article.id}: ${reason}.`);
       });
     }

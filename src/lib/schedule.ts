@@ -1,6 +1,6 @@
 export const PUBLISH_POLICY = {
-  maxPerHour: 2,
-  minimumGapMinutes: 15,
+  maxPerHour: 5,
+  minimumGapMinutes: 12,
   harvestEveryHours: 4,
   maxArticlesPerHarvest: 50,
 } as const;
