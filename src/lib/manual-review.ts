@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 export const MANUAL_REVIEW_MARKER = "popbeez-manual-review-v1";
+export const MANUAL_REVIEW_SOURCE_NAME = "Review manual Popbeez";
 export const reviewMediaTypes = ["FILM", "DRAMA", "MUSIK"] as const;
 export type ReviewMediaType = (typeof reviewMediaTypes)[number];
 

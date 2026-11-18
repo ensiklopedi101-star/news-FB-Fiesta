@@ -4,8 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { isAuthorized } from "@/lib/auth";
-import { createManualReview, buildManualReviewCaption, manualImageReferer } from "@/lib/manual-review";
-import { getPublishingPause } from "@/lib/pipeline";
+import { createManualReview, buildManualReviewCaption, MANUAL_REVIEW_SOURCE_NAME, manualImageReferer } from "@/lib/manual-review";
 import { enqueueBufferFacebookPost } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
@@ -39,9 +38,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "APP_URL tidak valid." }, { status: 503 });
   }
 
-  const pause = await getPublishingPause();
-  if (pause) return NextResponse.json({ error: pause.detail, nextAllowedAt: pause.nextAllowedAt }, { status: 429 });
-
   const id = randomUUID();
   const createdAt = new Date();
   const originalImages = review.items.map((item) => item.imageUrl);
@@ -56,7 +52,7 @@ export async function POST(request: NextRequest) {
     const db = getDb();
     await db.insert(articles).values({
       id,
-      sourceName: "Review manual Popbeez",
+      sourceName: MANUAL_REVIEW_SOURCE_NAME,
       category: review.mediaType,
       pageKey: "entertainment",
       sourceUrl: "https://www.facebook.com/portalbeez",
