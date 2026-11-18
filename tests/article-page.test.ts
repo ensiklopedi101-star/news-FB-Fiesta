@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractArticlePageData, MAX_ARTICLE_SNIPPET_CHARS } from "../src/lib/article-page";
+import { extractArticlePageData, MAX_ARTICLE_PAGE_HTML_BYTES, MAX_ARTICLE_SNIPPET_CHARS, readLimitedHtml } from "../src/lib/article-page";
 
 test("extracts at most two article paragraphs and resolves a safe og:image", () => {
   const html = `
@@ -35,6 +35,18 @@ test("extracts distinct in-article photos while ignoring logos, ads, and tiny de
   </body>`;
   const result = extractArticlePageData(html, "https://news.example/story");
   assert.deepEqual(result.imageUrls, ["https://news.example/photos/hero.jpg", "https://news.example/photos/second.jpg", "https://news.example/photos/third.jpg"]);
+});
+
+test("keeps metadata from the bounded HTML prefix when a publisher page exceeds the read limit", async () => {
+  const prefix = '<html><head><meta property="og:image" content="https://cdn.example/soompi-cover.jpg"></head><body>';
+  const oversizedHtml = `${prefix}${"x".repeat(MAX_ARTICLE_PAGE_HTML_BYTES + 100)}`;
+  const response = new Response(oversizedHtml, {
+    headers: { "content-type": "text/html", "content-length": String(Buffer.byteLength(oversizedHtml)) },
+  });
+  const partialHtml = await readLimitedHtml(response);
+  assert.ok(partialHtml);
+  assert.equal(Buffer.byteLength(partialHtml), MAX_ARTICLE_PAGE_HTML_BYTES);
+  assert.equal(extractArticlePageData(partialHtml, "https://www.soompi.com/article/example").imageUrl, "https://cdn.example/soompi-cover.jpg");
 });
 
 test("caps extracted article text at 1,500 characters", () => {

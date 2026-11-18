@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import { load } from "cheerio";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 
-const MAX_HTML_BYTES = 1_000_000;
+export const MAX_ARTICLE_PAGE_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 2;
 const ARTICLE_TIMEOUT_MS = 4_000;
 const ARTICLE_PAGE_BUDGET_MS = 6_000;
@@ -140,27 +140,27 @@ function extractPageData(html: string, pageUrl: string): ArticlePageData {
   return { text, imageUrl, imageUrls };
 }
 
-async function readLimitedHtml(response: Response): Promise<string | null> {
-  const declaredLength = Number(response.headers.get("content-length") ?? 0);
-  if (declaredLength > MAX_HTML_BYTES || !response.body) {
-    await response.body?.cancel().catch(() => undefined);
-    return null;
-  }
+export async function readLimitedHtml(response: Response): Promise<string | null> {
+  if (!response.body) return null;
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
-    while (true) {
+    while (total < MAX_ARTICLE_PAGE_HTML_BYTES) {
       const { done, value } = await reader.read();
       if (done) break;
-      total += value.byteLength;
-      if (total > MAX_HTML_BYTES) {
-        await reader.cancel();
-        return null;
+      const available = MAX_ARTICLE_PAGE_HTML_BYTES - total;
+      if (value.byteLength > available) {
+        chunks.push(value.subarray(0, available));
+        total += available;
+        await reader.cancel().catch(() => undefined);
+        break;
       }
       chunks.push(value);
+      total += value.byteLength;
     }
+    if (total >= MAX_ARTICLE_PAGE_HTML_BYTES) await reader.cancel().catch(() => undefined);
   } finally {
     reader.releaseLock();
   }
