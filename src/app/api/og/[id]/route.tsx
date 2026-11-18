@@ -52,19 +52,24 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   } : undefined;
 
   try {
-    // The cover remains the hero; factual slides use distinct article gallery images when available.
-    const requestedImage = manualReview
-      ? manualReview.items[requestedSlide === 1 ? 0 : requestedSlide - 2]?.imageUrl ?? article.imageUrl
-      : article.postFormat === "carousel"
-        ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
-        : article.imageUrl;
+    // The review cover is a plain pink slide; ranked cards use their own posters.
+    const plainReviewCover = manualReview !== null && requestedSlide === 1;
+    const requestedImage = plainReviewCover
+      ? null
+      : manualReview
+        ? manualReview.items[requestedSlide - 2]?.imageUrl ?? article.imageUrl
+        : article.postFormat === "carousel"
+          ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
+          : article.imageUrl;
     const imageReferer = manualReview && requestedImage ? manualImageReferer(requestedImage) : article.sourceUrl;
     let imageFailure = "";
     const reportImageFailure = (reason: string) => {
       imageFailure = reason;
       console.warn(`[og-image] Article image rejected for ${article.id}: ${reason}.`);
     };
-    let photoJpeg = await fetchOgImageJpeg(requestedImage, imageReferer, fetch, reportImageFailure);
+    let photoJpeg = plainReviewCover
+      ? null
+      : await fetchOgImageJpeg(requestedImage, imageReferer, fetch, reportImageFailure);
     // Some publishers reject every cross-origin Referer; retry anonymously before giving up on a manual image.
     if (!photoJpeg && manualReview && requestedImage) {
       photoJpeg = await fetchOgImageJpeg(requestedImage, "", fetch, (reason) => {
@@ -78,7 +83,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         console.warn(`[og-image] Secondary manual image rejected for ${article.id}: ${reason}.`);
       });
     }
-    if (!photoJpeg && requestedImage !== article.imageUrl && article.imageUrl) {
+    if (!plainReviewCover && !photoJpeg && requestedImage !== article.imageUrl && article.imageUrl) {
       photoJpeg = await fetchOgImageJpeg(article.imageUrl, manualReview ? manualImageReferer(article.imageUrl) : article.sourceUrl, fetch, (reason) => {
         console.warn(`[og-image] Cover fallback rejected for ${article.id}: ${reason}.`);
       });
@@ -86,6 +91,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     // Diagnostic mode returns the normalized photo bytes directly, without any card rendering.
     if (debugImage) {
+      if (plainReviewCover) {
+        return new Response("Slide 1 adalah cover pink tanpa foto sumber.", {
+          status: 422,
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store, max-age=0" },
+        });
+      }
       if (!photoJpeg) {
         return new Response(`Article image could not be fetched or decoded (${imageFailure || "unknown reason"}). Check the Vercel function logs for [og-image].`, {
           status: 422,

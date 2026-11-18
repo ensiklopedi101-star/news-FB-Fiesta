@@ -182,8 +182,8 @@ function buildReviewSvg(review: NonNullable<OgCardOptions["reviewSlide"]>): stri
     <rect x="0" y="0" width="590" height="1080" fill="#08080a"/>
     <rect x="595" y="38" width="445" height="1004" fill="none" stroke="#fff" stroke-width="3" opacity=".85"/>
     <path d="M45 148H565" stroke="#f20b55" stroke-width="3"/><path d="M45 920H565" stroke="#fff" stroke-width="2" opacity=".45"/>
-    <text x="78" y="95" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="33" font-weight="900" letter-spacing="2">POPBEEZ</text>
-    <text x="78" y="142" fill="#fff" fill-opacity=".66" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="700" letter-spacing="4">FILM · DRAMA · MUSIK</text>
+    <text x="178" y="95" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="33" font-weight="900" letter-spacing="2">POPBEEZ</text>
+    <text x="180" y="142" fill="#fff" fill-opacity=".66" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="700" letter-spacing="4">FILM · DRAMA · MUSIK</text>
     <g clip-path="url(#review-text-panel)">${eyebrow}${headline}${coverSub}${ratingMarkup}</g>
     <path d="M912 72l65 65-65 65M1000 72l-65 65 65 65" fill="none" stroke="#fff" stroke-width="12" opacity=".8"/>
     <text x="78" y="986" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="800" letter-spacing="2">GESER · ${review.number}/${review.total}</text>
@@ -209,15 +209,58 @@ export async function renderOgCard(options: OgCardOptions): Promise<Buffer> {
   if (options.reviewSlide) {
     const base = await sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#f20b55" } }).png().toBuffer();
     const layers: Array<{ input: Buffer; left: number; top: number }> = [];
-    if (options.photoJpeg?.byteLength) {
-      const photo = await sharp(Buffer.from(options.photoJpeg), { limitInputPixels: 40_000_000 })
+    const coverSlide = options.reviewSlide.number === 1;
+    // The cover is intentionally a plain pink slide; only the ranked cards carry a poster.
+    if (!coverSlide && options.photoJpeg?.byteLength) {
+      const panelWidth = 445;
+      const panelHeight = 1_004;
+      const photo = sharp(Buffer.from(options.photoJpeg), { limitInputPixels: 40_000_000 }).rotate();
+      const metadata = await photo.metadata();
+      const sourceWidth = metadata.width ?? panelWidth;
+      const sourceHeight = metadata.height ?? panelHeight;
+      // Show about twice as much of the source as a tight cover crop (a 50% zoom-out).
+      const coverScale = Math.max(panelWidth / sourceWidth, panelHeight / sourceHeight);
+      const zoomOutScale = coverScale / 2;
+      const renderedWidth = Math.max(1, Math.round(sourceWidth * zoomOutScale));
+      const renderedHeight = Math.max(1, Math.round(sourceHeight * zoomOutScale));
+      const rendered = await photo.clone()
+        .resize(renderedWidth, renderedHeight, { fit: "fill" })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+      const cropWidth = Math.min(panelWidth, renderedWidth);
+      const cropHeight = Math.min(panelHeight, renderedHeight);
+      const foreground = await sharp(rendered, { limitInputPixels: 40_000_000 })
+        .extract({
+          left: Math.floor((renderedWidth - cropWidth) / 2),
+          top: Math.floor((renderedHeight - cropHeight) / 2),
+          width: cropWidth,
+          height: cropHeight,
+        })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+      const background = await sharp(Buffer.from(options.photoJpeg), { limitInputPixels: 40_000_000 })
         .rotate()
-        .resize(445, 1_004, { fit: "cover", position: "centre" })
+        .resize(panelWidth, panelHeight, { fit: "cover", position: "centre" })
+        .blur(26)
+        .modulate({ brightness: 0.45 })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+      const panel = await sharp(background)
+        .composite([{
+          input: foreground,
+          left: Math.floor((panelWidth - cropWidth) / 2),
+          top: Math.floor((panelHeight - cropHeight) / 2),
+        }])
         .jpeg({ quality: 88 })
         .toBuffer();
-      layers.push({ input: photo, left: 595, top: 38 });
+      layers.push({ input: panel, left: 595, top: 38 });
     }
     layers.push({ input: Buffer.from(buildReviewSvg(options.reviewSlide)), left: 0, top: 0 });
+    const logo = await sharp(await loadBrandLogo(options.isEntertainment))
+      .resize(112, 112, { fit: "contain" })
+      .png()
+      .toBuffer();
+    layers.push({ input: logo, left: 44, top: 34 });
     return sharp(base).composite(layers).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
   }
   const base = await sharp({

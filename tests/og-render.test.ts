@@ -173,3 +173,24 @@ test("review slide keeps a long uppercase title inside the dark panel and preser
   assert.ok(photoPixel[1]! > photoPixel[2]! * 2);
   assert.ok(borderPixel[0]! < 60 && borderPixel[1]! < 60 && borderPixel[2]! < 60);
 });
+
+test("review cover uses a plain pink panel without a poster and shows the Popbeez logo", async () => {
+  const photo = await sharp({
+    create: { width: 40, height: 80, channels: 3, background: { r: 20, g: 190, b: 90 } },
+  }).png().toBuffer();
+  const output = await renderOgCard({
+    ...baseOptions,
+    brand: "Popbeez",
+    category: "DRAMA",
+    isEntertainment: true,
+    photoJpeg: photo,
+    reviewSlide: { number: 1, total: 6, headline: "5 Drama Rating Tertinggi Minggu Ini", mediaType: "DRAMA" },
+  });
+  const panelPixel = await sharp(output).extract({ left: 800, top: 500, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+  const logoPixel = await sharp(output).extract({ left: 100, top: 90, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+
+  // Plain pink panel, not the green source photo.
+  assert.ok(panelPixel[0]! > panelPixel[1]! * 2);
+  // The bee logo is composited over the black text panel.
+  assert.ok(logoPixel[0]! + logoPixel[1]! + logoPixel[2]! > 120);
+});
