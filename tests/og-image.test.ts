@@ -27,6 +27,18 @@ test("normalizes a WebP source to JPEG and sends the publisher referer", async (
   assert.deepEqual([...Buffer.from(result!.split(",")[1], "base64").subarray(0, 3)], [0xff, 0xd8, 0xff]);
 });
 
+test("fetches a Soompi CDN image using its resize query string unchanged", async () => {
+  const sourceUrl = "https://6.soompi.io/wp-content/uploads/image/cover.png?s=900x600&e=t";
+  let requestedUrl = "";
+  const image = await fetchOgImage(sourceUrl, "https://www.soompi.com/article/example", async (input) => {
+    requestedUrl = String(input);
+    return new Response(pngBytes, { headers: { "content-type": "image/png" } });
+  });
+
+  assert.equal(requestedUrl, sourceUrl);
+  assert.deepEqual(image?.bytes, pngBytes);
+});
+
 test("follows safe redirects but rejects unsafe redirect destinations", async () => {
   const visited: string[] = [];
   const result = await fetchOgImage(
