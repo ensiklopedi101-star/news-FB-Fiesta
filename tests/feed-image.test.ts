@@ -37,6 +37,14 @@ test("finds lazy-loaded images in description when an RSS item has no media fiel
   assert.equal(image, "https://publisher.example/photos/story.webp");
 });
 
+test("extracts Markdown image URLs in RSS.app feed descriptions", () => {
+  const image = extractFeedImageUrl({
+    content: "<![CDATA[News summary\\n\\n![](https://i.mydramalist.com/lBB3KN_2f.jpg)\\n\\nMore text]]>",
+  }, "https://rss.app/articles/example");
+
+  assert.equal(image, "https://i.mydramalist.com/lBB3KN_2f.jpg");
+});
+
 test("uses RSS content images after rejecting non-image enclosures and unsafe URLs", () => {
   const image = extractFeedImageUrl({
     enclosure: { url: "https://cdn.example/audio.mp3", type: "audio/mpeg" },

@@ -56,6 +56,14 @@ function urlsFromHtml(value: unknown): string[] {
   return urls;
 }
 
+function urlsFromMarkdown(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  const urls: string[] = [];
+  const pattern = /!\[[^\]]*\]\(<?(https?:\/\/[^\s)>]+)>?(?:\s+['"][^'"]*['"])?\)/gi;
+  for (const match of value.matchAll(pattern)) urls.push(match[1]);
+  return urls;
+}
+
 const MAX_ARTICLE_IMAGES = 3;
 const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|ads?|banner|tracking|pixel|button|social|share)/i;
 
@@ -89,7 +97,7 @@ export function extractFeedImageUrls(item: Record<string, unknown>, sourceUrl: s
 
   const htmlFields = [item.contentEncoded, item["content:encoded"], item.content, item.description, item.summary, item.contentSnippet];
   for (const field of htmlFields) {
-    for (const candidate of urlsFromHtml(field)) {
+    for (const candidate of [...urlsFromHtml(field), ...urlsFromMarkdown(field)]) {
       add(candidate);
       if (urls.length === MAX_ARTICLE_IMAGES) return urls;
     }

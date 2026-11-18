@@ -49,6 +49,10 @@ VALUES
     'https://koalasplayground.com/feed/', 'en', ARRAY[]::text[], true
   ),
   (
+    'MyDramaList News', 'DRAMA', 'entertainment',
+    'https://rss.app/feeds/ZOcW23h2FO2a0PI2.xml', 'en', ARRAY[]::text[], true
+  ),
+  (
     'HanCinema', 'DRAMA', 'entertainment',
     'https://feeds.feedburner.com/hancinema/AUJj', 'en', ARRAY[]::text[], false
   ),
