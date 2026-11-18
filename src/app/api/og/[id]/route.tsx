@@ -9,6 +9,7 @@ import { manualImageReferer, parseManualReview } from "@/lib/manual-review";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -58,12 +59,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
         : article.imageUrl;
     const imageReferer = manualReview && requestedImage ? manualImageReferer(requestedImage) : article.sourceUrl;
-    let photoJpeg = await fetchOgImageJpeg(requestedImage, imageReferer, fetch, (reason) => {
+    let imageFailure = "";
+    const reportImageFailure = (reason: string) => {
+      imageFailure = reason;
       console.warn(`[og-image] Article image rejected for ${article.id}: ${reason}.`);
-    });
+    };
+    let photoJpeg = await fetchOgImageJpeg(requestedImage, imageReferer, fetch, reportImageFailure);
     // Some publishers reject every cross-origin Referer; retry anonymously before giving up on a manual image.
     if (!photoJpeg && manualReview && requestedImage) {
       photoJpeg = await fetchOgImageJpeg(requestedImage, "", fetch, (reason) => {
+        imageFailure = reason;
         console.warn(`[og-image] Manual image rejected without Referer for ${article.id}: ${reason}.`);
       });
     }
@@ -82,7 +87,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // Diagnostic mode returns the normalized photo bytes directly, without any card rendering.
     if (debugImage) {
       if (!photoJpeg) {
-        return new Response("Article image could not be fetched or decoded. Check the Vercel function logs for [og-image].", {
+        return new Response(`Article image could not be fetched or decoded (${imageFailure || "unknown reason"}). Check the Vercel function logs for [og-image].`, {
           status: 422,
           headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store, max-age=0" },
         });

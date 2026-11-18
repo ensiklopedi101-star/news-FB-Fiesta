@@ -39,6 +39,41 @@ test("fetches a Soompi CDN image using its resize query string unchanged", async
   assert.deepEqual(image?.bytes, pngBytes);
 });
 
+test("retries a hotlink-blocked image through the public proxy with browser headers", async () => {
+  const visited: string[] = [];
+  const image = await fetchOgImage(
+    "https://www.dramabeans.com/wp-content/uploads/2026/11/poster.jpg",
+    "https://www.dramabeans.com/2026/11/story/",
+    async (input, init) => {
+      const url = String(input);
+      visited.push(url);
+      assert.match(new Headers(init?.headers).get("user-agent") ?? "", /Mozilla\/5\.0/);
+      if (!url.startsWith("https://images.weserv.nl/")) return new Response(null, { status: 403 });
+      return new Response(pngBytes, { headers: { "content-type": "image/jpeg" } });
+    },
+  );
+
+  assert.deepEqual(image?.bytes, pngBytes);
+  assert.equal(visited.length, 2);
+  const proxy = new URL(visited[1]!);
+  assert.equal(proxy.host, "images.weserv.nl");
+  assert.equal(proxy.searchParams.get("url"), "www.dramabeans.com/wp-content/uploads/2026/11/poster.jpg");
+});
+
+test("does not proxy a Vercel Blob URL that returns 403", async () => {
+  let requestCount = 0;
+  const image = await fetchOgImage(
+    "https://store.public.blob.vercel-storage.com/article-images/one.jpg",
+    "https://www.example.com/story",
+    async () => {
+      requestCount += 1;
+      return new Response(null, { status: 403 });
+    },
+  );
+  assert.equal(image, null);
+  assert.equal(requestCount, 1);
+});
+
 test("follows safe redirects but rejects unsafe redirect destinations", async () => {
   const visited: string[] = [];
   const result = await fetchOgImage(
