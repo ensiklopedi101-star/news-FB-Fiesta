@@ -42,7 +42,7 @@ function proxiedImageUrl(raw: string): string | null {
 async function toJpegBytes(bytes: Uint8Array): Promise<Buffer> {
   return sharp(Buffer.from(bytes), { limitInputPixels: 40_000_000 })
     .rotate()
-    .resize(1080, 660, { fit: "cover", position: "centre" })
+    .resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 86 })
     .toBuffer();
 }
