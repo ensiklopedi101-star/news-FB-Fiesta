@@ -1,8 +1,9 @@
 import "server-only";
-import { and, asc, desc, eq, gt, isNull, like, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, like, lt, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
+import { MANUAL_REVIEW_SOURCE_NAME } from "@/lib/manual-review";
 import { writeNewsCopy } from "@/lib/ai";
 import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
@@ -67,19 +68,19 @@ async function claimNextArticle(): Promise<Article | null> {
   return claimed ?? null;
 }
 
-export async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
+async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
   const now = Date.now();
   const cutoff = new Date(now - PUBLISH_POLICY.maxPerHour * 60 * 60 * 1000);
   const db = getDb();
   const [facebookPublished, bufferQueued] = await Promise.all([
     db.select({ occurredAt: articles.publishedAt })
       .from(articles)
-      .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff)))
+      .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff), ne(articles.sourceName, MANUAL_REVIEW_SOURCE_NAME)))
       .orderBy(desc(articles.publishedAt))
       .limit(PUBLISH_POLICY.maxPerHour),
     db.select({ occurredAt: articles.updatedAt })
       .from(articles)
-      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff)))
+      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff), ne(articles.sourceName, MANUAL_REVIEW_SOURCE_NAME)))
       .orderBy(desc(articles.updatedAt))
       .limit(PUBLISH_POLICY.maxPerHour),
   ]);

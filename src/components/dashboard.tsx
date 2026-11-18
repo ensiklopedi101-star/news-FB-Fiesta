@@ -433,7 +433,7 @@ export default function Dashboard() {
       <section className="panel readiness-panel">
         <div className="panel-heading"><div><p className="eyebrow">PEMERIKSAAN LAYANAN</p><h2>Apa yang sudah siap?</h2></div><span className="muted">Refresh otomatis tiap menit</span></div>
         <div className="check-grid">{Object.entries(integrationLabels).map(([key, label]) => <div className="check-item" key={key}><span className={checks[key] ? "check-dot good" : "check-dot"} />{label}<strong>{checks[key] ? "Siap" : "Belum"}</strong></div>)}</div>
-        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher: maks. {data?.schedule.maxPerHour ?? 5} pengiriman/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 12} menit. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
+        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. {data?.schedule.maxPerHour ?? 5} pengiriman/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 12} menit. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
         {feedPages.size > 0 && [...feedPages].some((key) => key === "news" || key === "entertainment") && (
           <p className="muted small-note">Halaman tujuan aktif: {[...feedPages].map((key) => key === "news" ? "Berita" : "Hiburan").join(" · ")}</p>
         )}
