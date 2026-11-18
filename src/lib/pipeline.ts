@@ -162,7 +162,8 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
     }
-    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${article.sourceUrl}`;
+    const followLink = article.pageKey === "entertainment" ? "\n\nIkuti Popbeez: https://www.facebook.com/portalbeez" : "";
+    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${article.sourceUrl}${followLink}`;
     carouselSlides = article.postFormat === "carousel" ? copy.carouselSlides : null;
     await db.update(articles)
       .set({

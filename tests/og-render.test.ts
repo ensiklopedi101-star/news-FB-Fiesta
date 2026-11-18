@@ -58,6 +58,43 @@ test("renders a carousel information slide as a square branded JPEG", async () =
   assert.equal(metadata.height, 1080);
 });
 
+test("entertainment single-image cards show a Facebook follow CTA in the footer", async () => {
+  const output = await renderOgCard({
+    ...baseOptions,
+    brand: "Popbeez",
+    category: "DRAMA",
+    isEntertainment: true,
+    photoJpeg: null,
+  });
+  const iconPixel = await sharp(output)
+    .extract({ left: 774, top: 978, width: 1, height: 1 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  assert.ok(iconPixel[2]! > iconPixel[0]! * 2);
+  assert.ok(iconPixel[2]! > iconPixel[1]!);
+});
+
+test("carousel follow CTA slide renders the Facebook icon", async () => {
+  const output = await renderOgCard({
+    ...baseOptions,
+    brand: "Popbeez",
+    category: "DRAMA",
+    isEntertainment: true,
+    photoJpeg: null,
+    slide: { number: 4, total: 4, label: "IKUTI POPBEEZ", isFollowCta: true },
+  });
+  const iconPixel = await sharp(output)
+    .extract({ left: 505, top: 612, width: 1, height: 1 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  assert.ok(iconPixel[2]! > iconPixel[0]! * 2);
+  assert.ok(iconPixel[2]! > iconPixel[1]!);
+});
+
 test("entertainment cards load the existing Popbeez logo asset", async () => {
   const output = await renderOgCard({
     ...baseOptions,
