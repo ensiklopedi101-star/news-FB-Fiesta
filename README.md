@@ -7,7 +7,7 @@ Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS
 ## Yang sudah dibuat
 
 - Dashboard admin untuk mengelola feed RSS langsung di aplikasi; tiap feed diarahkan ke channel `news` atau `entertainment` dan disimpan di tabel `rss_sources`.
-- Preset satu-klik untuk sumber hiburan dari daftar awal, termasuk filter kata kunci per feed; feed Google News dan HanCinema masuk nonaktif untuk ditinjau terlebih dahulu.
+- Preset satu-klik hiburan mencakup sumber khusus C-Drama (DramaPanda C-News, Overseasidol), donghua (Yu Alexius, My Donghua Review), dan K-pop/idol (Soompi Music, Yonhap Culture/K-pop), beserta filter kata kunci per feed. Google News dan HanCinema tetap nonaktif untuk ditinjau terlebih dahulu.
 - Panen RSS setiap 4 jam terpisah dari jadwal publikasi; artikel hasil panen masuk antrean Neon, bukan langsung diposting.
 - Deduplicasi URL sumber dengan SHA-256 dan unique index di Neon; setiap artikel menyimpan `page_key` tujuan.
 - Saat panen, sistem mencoba mengambil 1–2 paragraf artikel dan `og:image` dengan batas waktu, ukuran, HTTPS, dan redirect; jika gagal/diblokir, memakai cuplikan RSS.

@@ -12,12 +12,29 @@ VALUES
     true
   ),
   (
+    'Soompi K-Pop', 'K-POP', 'entertainment',
+    'https://www.soompi.com/category/music/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'Yonhap Culture and K-Pop', 'K-POP', 'entertainment',
+    'https://en.yna.co.kr/RSS/culture.xml', 'en',
+    ARRAY['k-pop', 'kpop', 'idol', 'boy band', 'girl group', 'Korean pop', 'comeback', 'debut'], true
+  ),
+  (
     'Dramabeans', 'DRAMA', 'entertainment',
     'https://www.dramabeans.com/feed/', 'en', ARRAY[]::text[], true
   ),
   (
     'DramaPanda', 'DRAMA', 'entertainment',
     'https://dramapanda.com/feed/', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'DramaPanda C-News', 'C-DRAMA', 'entertainment',
+    'https://dramapanda.com/category/c-news/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'Overseasidol C-Drama', 'C-DRAMA', 'entertainment',
+    'https://overseasidol.com/en/drama-movie/c-drama-en/feed/', 'en', ARRAY[]::text[], true
   ),
   (
     'Koala''s Playground', 'DRAMA', 'entertainment',
@@ -36,6 +53,14 @@ VALUES
     'MyAnimeList News', 'DONGHUA', 'entertainment',
     'https://myanimelist.net/rss/news.xml', 'en',
     ARRAY['chinese', 'donghua', 'tencent', 'bilibili', 'youku', 'iqiyi'], true
+  ),
+  (
+    'Yu Alexius Chinese Anime', 'DONGHUA', 'entertainment',
+    'https://yualexius.com/category/chinese-anime/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'My Donghua Review', 'DONGHUA', 'entertainment',
+    'https://mydonghuareview.com/category/news/feed/', 'en', ARRAY[]::text[], true
   ),
   (
     'Anime News Network', 'MANGA', 'entertainment',
