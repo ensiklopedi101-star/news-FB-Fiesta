@@ -6,6 +6,10 @@ INSERT INTO public.rss_sources
   (name, category, page_key, feed_url, language, keywords, active)
 VALUES
   (
+    'Soompi All News', 'ENTERTAINMENT', 'entertainment',
+    'https://www.soompi.com/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
     'Soompi Drama', 'DRAMA', 'entertainment',
     'https://www.soompi.com/category/tvfilm/drama/feed', 'en',
     ARRAY['drama', 'k-drama', 'c-drama', 'actor', 'actress', 'cast', 'episode', 'teaser'],
@@ -19,6 +23,10 @@ VALUES
     'Yonhap Culture and K-Pop', 'K-POP', 'entertainment',
     'https://en.yna.co.kr/RSS/culture.xml', 'en',
     ARRAY['k-pop', 'kpop', 'idol', 'boy band', 'girl group', 'Korean pop', 'comeback', 'debut'], true
+  ),
+  (
+    'Seoulbeats', 'K-POP', 'entertainment',
+    'https://seoulbeats.com/feed/', 'en', ARRAY[]::text[], true
   ),
   (
     'Dramabeans', 'DRAMA', 'entertainment',

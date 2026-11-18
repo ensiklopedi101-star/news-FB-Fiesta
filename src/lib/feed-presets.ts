@@ -10,7 +10,9 @@ export type FeedPreset = {
 
 /** Starter sources based on the user's list. Google News feeds are disabled until the user reviews their usage terms. */
 export const feedPresets: FeedPreset[] = [
+  { name: "Soompi All News", category: "ENTERTAINMENT", pageKey: "entertainment", feedUrl: "https://www.soompi.com/feed", language: "en", keywords: [], active: true },
   { name: "Soompi Drama", category: "DRAMA", pageKey: "entertainment", feedUrl: "https://www.soompi.com/category/tvfilm/drama/feed", language: "en", keywords: ["drama", "k-drama", "c-drama", "actor", "actress", "cast", "episode", "teaser"], active: true },
+  { name: "Seoulbeats", category: "K-POP", pageKey: "entertainment", feedUrl: "https://seoulbeats.com/feed/", language: "en", keywords: [], active: true },
   { name: "Soompi K-Pop", category: "K-POP", pageKey: "entertainment", feedUrl: "https://www.soompi.com/category/music/feed", language: "en", keywords: [], active: true },
   { name: "Yonhap Culture and K-Pop", category: "K-POP", pageKey: "entertainment", feedUrl: "https://en.yna.co.kr/RSS/culture.xml", language: "en", keywords: ["k-pop", "kpop", "idol", "boy band", "girl group", "Korean pop", "comeback", "debut"], active: true },
   { name: "Dramabeans", category: "DRAMA", pageKey: "entertainment", feedUrl: "https://www.dramabeans.com/feed/", language: "en", keywords: [], active: true },
