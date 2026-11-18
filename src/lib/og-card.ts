@@ -30,7 +30,7 @@ export type OgCardOptions = {
   sourceName: string;
   isEntertainment: boolean;
   photoJpeg?: Uint8Array | null;
-  slide?: { number: number; total: number; label: string; text?: string };
+  slide?: { number: number; total: number; label: string; text?: string; isFollowCta?: boolean };
 };
 
 function escapeXml(value: string): string {
@@ -82,20 +82,27 @@ function buildSvg(options: OgCardOptions): string {
   ).join("");
   const slideText = options.slide?.text?.trim();
   const slideLines = slideText ? wrapWords(slideText, 34).slice(0, 6) : [];
-  const slideContentMarkup = slideLines.length
+  const followSlideMarkup = options.slide?.isFollowCta
+    ? `<text x="540" y="474" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">IKUTI POPBEEZ</text><circle cx="540" cy="612" r="58" fill="#1877F2"/><text x="540" y="642" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="94" font-weight="900">f</text><text x="540" y="740" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="31" font-weight="700">Ikuti untuk update hiburan</text><text x="540" y="802" text-anchor="middle" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="600">facebook.com/portalbeez</text>`
+    : "";
+  const slideContentMarkup = followSlideMarkup || (slideLines.length
     ? `<text x="540" y="474" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">${escapeXml(options.slide?.label ?? "INTI BERITA")}</text>${slideLines.map((line, index) => `<text x="540" y="${560 + index * 51}" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="800">${escapeXml(line)}</text>`).join("")}`
-    : titleMarkup;
+    : titleMarkup);
   const slideIndicator = options.slide
     ? `<text x="540" y="875" text-anchor="middle" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="800" letter-spacing="3">GESER · ${options.slide.number}/${options.slide.total}</text>`
     : "";
   const brand = escapeXml(options.brand.trim().slice(0, 24));
   const category = escapeXml(options.category.trim().toUpperCase().slice(0, 24));
-  const sourceName = escapeXml(options.sourceName.trim().slice(0, 48));
+  const showFollowFooter = options.isEntertainment && (!options.slide || options.slide.isFollowCta === true);
+  const sourceName = escapeXml(options.sourceName.trim().slice(0, showFollowFooter ? 30 : 48));
   const categoryWidth = Math.min(420, Math.max(170, category.length * 20 + 64));
   const categoryLeft = WIDTH - categoryWidth - 46;
   const fallback = options.photoJpeg
     ? ""
     : `<rect width="${WIDTH}" height="${HEIGHT}" fill="${palette.dark}"/><path d="M0 0H1080V1080H0Z" fill="url(#fallback)"/><circle cx="900" cy="210" r="260" fill="${palette.accent}" opacity=".22"/><circle cx="120" cy="900" r="330" fill="none" stroke="${palette.highlight}" stroke-width="22" opacity=".18"/>`;
+  const footerIdentity = showFollowFooter
+    ? `<circle cx="785" cy="978" r="17" fill="#1877F2"/><text x="785" y="987" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="900">f</text><text x="1008" y="985" text-anchor="end" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="800" letter-spacing=".5">FOLLOW @PORTALBEEZ</text>`
+    : `<text x="1008" y="989" text-anchor="end" fill="#fff" fill-opacity=".82" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="600">${options.isEntertainment ? "POPBEEZ" : "NUSABEEZ"}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <defs>
@@ -115,7 +122,7 @@ function buildSvg(options: OgCardOptions): string {
     ${slideIndicator}
     <line x1="72" y1="936" x2="1008" y2="936" stroke="${palette.highlight}" stroke-width="3" stroke-opacity=".9"/>
     <text x="72" y="989" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700" letter-spacing="1">${sourceName}</text>
-    <text x="1008" y="989" text-anchor="end" fill="#fff" fill-opacity=".82" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="600">${options.isEntertainment ? "POPBEEZ" : "NUSABEEZ"}</text>
+    ${footerIdentity}
   </svg>`;
 }
 

@@ -31,11 +31,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return new Response("Invalid carousel slide", { status: 400 });
   }
   const carouselLabels = ["FAKTA UTAMA", "RINCIAN BERITA", "IKUT BERBAGI PENDAPAT"];
+  const isFollowCtaSlide = isEntertainment && requestedSlide === 4;
   const slide = article.postFormat === "carousel" ? {
     number: requestedSlide,
     total: 4,
-    label: requestedSlide === 1 ? "COVER" : carouselLabels[requestedSlide - 2]!,
-    ...(requestedSlide > 1 ? { text: article.carouselSlides?.[requestedSlide - 2] ?? "Ringkasan sedang disiapkan." } : {}),
+    label: isFollowCtaSlide ? "IKUTI POPBEEZ" : requestedSlide === 1 ? "COVER" : carouselLabels[requestedSlide - 2]!,
+    ...(requestedSlide > 1 && !isFollowCtaSlide ? { text: article.carouselSlides?.[requestedSlide - 2] ?? "Ringkasan sedang disiapkan." } : {}),
+    ...(isFollowCtaSlide ? { isFollowCta: true } : {}),
   } : undefined;
 
   try {
