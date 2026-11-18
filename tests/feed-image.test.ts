@@ -54,6 +54,14 @@ test("rejects RSS.app's default logo as a source image", () => {
   assert.deepEqual(images, ["https://i.mydramalist.com/lBB3KN_2f.jpg"]);
 });
 
+test("keeps Soompi CDN resize query parameters from RSS image links", () => {
+  const image = extractFeedImageUrl({
+    contentEncoded: '<img src="https://6.soompi.io/wp-content/uploads/image/tiger-cover.png?s=900x600&amp;e=t" alt="article image">',
+  }, "https://www.soompi.com/article/example");
+
+  assert.equal(image, "https://6.soompi.io/wp-content/uploads/image/tiger-cover.png?s=900x600&e=t");
+});
+
 test("upgrades HTTP Soompi uploads images while rejecting non-image enclosures", () => {
   const image = extractFeedImageUrl({
     enclosure: { url: "https://cdn.example/audio.mp3", type: "audio/mpeg" },
