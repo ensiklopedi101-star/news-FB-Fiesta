@@ -140,36 +140,51 @@ function reviewTextLines(value: string, maxCharacters: number, maxLines: number)
 
 function buildReviewSvg(review: NonNullable<OgCardOptions["reviewSlide"]>): string {
   const pink = "#f20b55";
+  const yellow = "#ffd12e";
   const mediaLabel = review.mediaType === "FILM" ? "FILM" : review.mediaType === "DRAMA" ? "DRAMA" : "MUSIK";
   const cover = review.number === 1;
   const item = review.item;
-  const titleLines = reviewTextLines(cover ? review.headline : (item?.title ?? "Judul belum tersedia"), cover ? 16 : 18, cover ? 5 : 3);
-  const titleFont = cover ? 61 : 44;
-  const titleStart = cover ? 310 : 260;
-  const headline = titleLines.map((line, index) => `<text x="76" y="${titleStart + index * (titleFont + 10)}" fill="${index === 0 ? pink : "#fff"}" font-family="DejaVu Sans, sans-serif" font-size="${titleFont}" font-weight="900" letter-spacing="-1">${escapeXml(line)}</text>`).join("");
+  const rawTitle = cover ? review.headline : (item?.title ?? "Judul belum tersedia").toLocaleUpperCase("id-ID");
+  const titleLines = reviewTextLines(rawTitle, cover ? 14 : 16, cover ? 5 : 3);
+  const titleFont = cover ? 51 : 44;
+  const titleLineHeight = cover ? 61 : 52;
+  // Keep the headline well below the eyebrow and fully inside the dark text panel.
+  const titleStart = cover ? 355 : 285;
+  const headline = titleLines.map((line, index) => `<text x="76" y="${titleStart + index * titleLineHeight}" fill="${cover && index === 0 ? pink : "#fff"}" font-family="DejaVu Sans, sans-serif" font-size="${titleFont}" font-weight="900" letter-spacing="-1">${escapeXml(line)}</text>`).join("");
   const genre = item ? reviewTextLines(item.genre, 38, 2) : [];
   const reason = item?.reason ? reviewTextLines(item.reason, 39, 4) : [];
   const suitable = item?.suitableFor ? reviewTextLines(item.suitableFor, 38, 2) : [];
-  const genreMarkup = genre.map((line, index) => `<text x="78" y="${550 + index * 30}" fill="#fff" fill-opacity=".83" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="600">${escapeXml(line)}</text>`).join("");
-  const reasonMarkup = reason.map((line, index) => `<text x="78" y="${645 + index * 27}" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="500">${escapeXml(line)}</text>`).join("");
-  const suitableStart = 785 + reason.length * 27;
-  const suitableMarkup = suitable.map((line, index) => `<text x="78" y="${suitableStart + index * 27}" fill="#fff" fill-opacity=".85" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="500">${escapeXml(line)}</text>`).join("");
+  const ratingY = titleStart + titleLines.length * titleLineHeight + 26;
+  const genreHeaderY = ratingY + 54;
+  const genreTextY = genreHeaderY + 34;
+  const genreMarkup = genre.map((line, index) => `<text x="78" y="${genreTextY + index * 28}" fill="#fff" fill-opacity=".83" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="600">${escapeXml(line)}</text>`).join("");
+  let detailY = genreTextY + genre.length * 28 + 24;
+  const reasonMarkup = reason.length
+    ? `<text x="78" y="${detailY}" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="900" letter-spacing="2">KENAPA WAJIB DITONTON</text>${reason.map((line, index) => `<text x="78" y="${detailY + 28 + index * 25}" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="500">${escapeXml(line)}</text>`).join("")}`
+    : "";
+  if (reason.length) detailY += 28 + reason.length * 25 + 18;
+  const suitableMarkup = suitable.length
+    ? `<text x="78" y="${detailY}" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="900" letter-spacing="2">COCOK UNTUK</text>${suitable.map((line, index) => `<text x="78" y="${detailY + 27 + index * 25}" fill="#fff" fill-opacity=".85" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="500">${escapeXml(line)}</text>`).join("")}`
+    : "";
   const eyebrow = cover
     ? `<text x="78" y="244" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="900" letter-spacing="4">REKOMENDASI MINGGU INI</text>`
     : `<text x="78" y="205" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="25" font-weight="900" letter-spacing="3">NOMOR ${review.number - 1} · ${mediaLabel}</text>`;
   const ratingMarkup = !cover && item
-    ? `<text x="78" y="${titleStart + titleLines.length * (titleFont + 10) + 24}" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="36" font-weight="900">★ ${item.rating.toFixed(1)} / 10</text><text x="78" y="520" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="900" letter-spacing="2">GENRE</text>${genreMarkup}<text x="78" y="618" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="900" letter-spacing="2">KENAPA WAJIB DITONTON</text>${reasonMarkup}${item.suitableFor ? `<text x="78" y="${suitableStart - 22}" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="900" letter-spacing="2">COCOK UNTUK</text>${suitableMarkup}` : ""}`
+    ? `<text x="78" y="${ratingY}" fill="${yellow}" font-family="DejaVu Sans, sans-serif" font-size="36" font-weight="900">★ ${item.rating.toFixed(1)} / 10</text><text x="78" y="${genreHeaderY}" fill="${pink}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="900" letter-spacing="2">GENRE</text>${genreMarkup}${reasonMarkup}${suitableMarkup}`
     : "";
+  const subLines = cover ? reviewTextLines("Geser untuk lihat lima pilihan dengan rating tertinggi", 31, 2) : [];
+  const subY = titleStart + titleLines.length * titleLineHeight + 28;
   const coverSub = cover
-    ? `<text x="78" y="${titleStart + titleLines.length * (titleFont + 10) + 38}" fill="#fff" fill-opacity=".84" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="600">Geser untuk lihat lima pilihan dengan rating tertinggi</text><rect x="78" y="${titleStart + titleLines.length * (titleFont + 10) + 76}" width="245" height="7" rx="3" fill="${pink}"/>`
+    ? `${subLines.map((line, index) => `<text x="78" y="${subY + index * 30}" fill="#fff" fill-opacity=".84" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="600">${escapeXml(line)}</text>`).join("")}<rect x="78" y="${subY + subLines.length * 30 + 14}" width="245" height="7" rx="3" fill="${pink}"/>`
     : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-    <rect x="0" y="0" width="625" height="1080" fill="#08080a"/>
+    <defs><clipPath id="review-text-panel"><rect x="0" y="0" width="578" height="1080"/></clipPath></defs>
+    <rect x="0" y="0" width="590" height="1080" fill="#08080a"/>
     <rect x="595" y="38" width="445" height="1004" fill="none" stroke="#fff" stroke-width="3" opacity=".85"/>
     <path d="M45 148H565" stroke="#f20b55" stroke-width="3"/><path d="M45 920H565" stroke="#fff" stroke-width="2" opacity=".45"/>
     <text x="78" y="95" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="33" font-weight="900" letter-spacing="2">POPBEEZ</text>
     <text x="78" y="142" fill="#fff" fill-opacity=".66" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="700" letter-spacing="4">FILM · DRAMA · MUSIK</text>
-    ${eyebrow}${headline}${coverSub}${ratingMarkup}
+    <g clip-path="url(#review-text-panel)">${eyebrow}${headline}${coverSub}${ratingMarkup}</g>
     <path d="M912 72l65 65-65 65M1000 72l-65 65 65 65" fill="none" stroke="#fff" stroke-width="12" opacity=".8"/>
     <text x="78" y="986" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="800" letter-spacing="2">GESER · ${review.number}/${review.total}</text>
     <text x="1000" y="986" text-anchor="end" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="800">IKUTI @PORTALBEEZ</text>

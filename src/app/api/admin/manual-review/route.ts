@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { isAuthorized } from "@/lib/auth";
-import { createManualReview, buildManualReviewCaption } from "@/lib/manual-review";
+import { createManualReview, buildManualReviewCaption, manualImageReferer } from "@/lib/manual-review";
+import { getPublishingPause } from "@/lib/pipeline";
 import { enqueueBufferFacebookPost } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
@@ -37,11 +38,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "APP_URL tidak valid." }, { status: 503 });
   }
 
+  const pause = await getPublishingPause();
+  if (pause) return NextResponse.json({ error: pause.detail, nextAllowedAt: pause.nextAllowedAt }, { status: 429 });
+
   const id = randomUUID();
   const createdAt = new Date();
   const originalImages = review.items.map((item) => item.imageUrl);
   const storedImages = await Promise.all(originalImages.map(async (url, index) =>
-    await storeArticleImageInBlob(`${id}-review-${index + 1}`, url, "https://www.facebook.com/portalbeez") ?? url));
+    await storeArticleImageInBlob(`${id}-review-${index + 1}`, url, manualImageReferer(url)) ?? url));
   review.items = review.items.map((item, index) => ({ ...item, imageUrl: storedImages[index]! }));
   const title = review.headline;
   const caption = buildManualReviewCaption(review);
