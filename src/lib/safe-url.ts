@@ -1,3 +1,14 @@
+export function isKnownAggregatorBrandImage(raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  try {
+    const url = new URL(raw);
+    return ["rss.app", "www.rss.app"].includes(url.hostname.toLowerCase())
+      && /(?:^|\/)rss-app(?:-logo|-icon)?\.(?:png|jpe?g|webp|svg)$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function isSafePublicImageUrl(raw: string | null | undefined): raw is string {
   if (!raw) return false;
   try {

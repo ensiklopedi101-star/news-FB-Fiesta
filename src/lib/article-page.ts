@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { load } from "cheerio";
-import { isSafePublicImageUrl } from "@/lib/safe-url";
+import { isKnownAggregatorBrandImage, isSafePublicImageUrl } from "@/lib/safe-url";
 
 export const MAX_ARTICLE_PAGE_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 2;
@@ -115,7 +115,7 @@ function extractPageData(html: string, pageUrl: string): ArticlePageData {
   const addImage = (raw: string | undefined, label = "") => {
     if (!raw || DECORATIVE_IMAGE_WORDS.test(label)) return;
     const safe = toSafeHttpsUrl(raw, pageUrl);
-    if (safe && !DECORATIVE_IMAGE_WORDS.test(new URL(safe).pathname) && !imageUrls.includes(safe) && imageUrls.length < MAX_ARTICLE_IMAGES) imageUrls.push(safe);
+    if (safe && !isKnownAggregatorBrandImage(safe) && !DECORATIVE_IMAGE_WORDS.test(new URL(safe).pathname) && !imageUrls.includes(safe) && imageUrls.length < MAX_ARTICLE_IMAGES) imageUrls.push(safe);
   };
   // Preserve publisher-declared hero image as the primary, then use only images inside article content.
   for (const selector of ["meta[property='og:image']", "meta[property='og:image:secure_url']", "meta[name='twitter:image']"]) {

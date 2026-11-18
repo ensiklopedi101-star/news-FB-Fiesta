@@ -6,6 +6,7 @@ import { fetchRecentStories } from "@/lib/feeds";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
 import { isVercelBlobImageUrl } from "@/lib/og-image";
+import { isKnownAggregatorBrandImage } from "@/lib/safe-url";
 import { choosePostFormat } from "@/lib/queue-policy";
 
 const MAX_ARTICLES_PER_HARVEST = PUBLISH_POLICY.maxArticlesPerHarvest;
@@ -53,11 +54,15 @@ export async function harvestLatestStories() {
   const imageTargets = new Map<string, { id: string; story: (typeof candidates)[number]; imageUrls: string[] }>();
   for (const row of queuedCandidates) {
     const story = storiesByHash.get(row.urlHash);
-    const imageUrls = [...new Set([row.imageUrl, ...(row.imageUrls ?? []), ...(story?.imageUrls ?? [])].filter((url): url is string => Boolean(url)))].slice(0, 3);
+    const freshImages = [...new Set([story?.imageUrl, ...(story?.imageUrls ?? [])]
+      .filter((url): url is string => Boolean(url) && !isKnownAggregatorBrandImage(url)))];
+    const existingImages = [row.imageUrl, ...(row.imageUrls ?? [])]
+      .filter((url): url is string => Boolean(url) && !isKnownAggregatorBrandImage(url));
+    const imageUrls = [...new Set(freshImages.length ? freshImages : existingImages)].slice(0, 3);
     if (!story || imageUrls.length === 0) continue;
     try {
       await db.update(articles)
-        .set({ imageUrl: row.imageUrl || imageUrls[0]!, imageUrls, updatedAt: new Date() })
+        .set({ imageUrl: story.imageUrl && !isKnownAggregatorBrandImage(story.imageUrl) ? story.imageUrl : imageUrls[0]!, imageUrls, updatedAt: new Date() })
         .where(and(eq(articles.id, row.id), eq(articles.status, "queued")));
     } catch {
       console.error(`[harvest] Article image gallery could not be saved to Neon for article ${row.id}.`);

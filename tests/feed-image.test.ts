@@ -45,6 +45,15 @@ test("extracts Markdown image URLs in RSS.app feed descriptions", () => {
   assert.equal(image, "https://i.mydramalist.com/lBB3KN_2f.jpg");
 });
 
+test("rejects RSS.app's default logo as a source image", () => {
+  const images = extractFeedImageUrls({
+    mediaThumbnail: { $: { url: "https://rss.app/static/img/images/rss-app.png", type: "image/png" } },
+    content: "![](https://i.mydramalist.com/lBB3KN_2f.jpg)",
+  }, "https://rss.app/articles/example");
+
+  assert.deepEqual(images, ["https://i.mydramalist.com/lBB3KN_2f.jpg"]);
+});
+
 test("uses RSS content images after rejecting non-image enclosures and unsafe URLs", () => {
   const image = extractFeedImageUrl({
     enclosure: { url: "https://cdn.example/audio.mp3", type: "audio/mpeg" },

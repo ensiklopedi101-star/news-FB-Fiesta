@@ -37,6 +37,18 @@ test("extracts distinct in-article photos while ignoring logos, ads, and tiny de
   assert.deepEqual(result.imageUrls, ["https://news.example/photos/hero.jpg", "https://news.example/photos/second.jpg", "https://news.example/photos/third.jpg"]);
 });
 
+test("filters RSS.app's generic brand image but keeps editorial photos from the article", () => {
+  const result = extractArticlePageData(`
+    <head><meta property="og:image" content="https://rss.app/static/img/images/rss-app.png"></head>
+    <article><img src="https://i.mydramalist.com/lBB3KN_2f.jpg" width="900" height="600">
+      <p>MyDramaList story content with enough detail to be extracted as a real source article summary.</p>
+    </article>`,
+  "https://rss.app/articles/example");
+
+  assert.equal(result.imageUrl, "https://i.mydramalist.com/lBB3KN_2f.jpg");
+  assert.deepEqual(result.imageUrls, ["https://i.mydramalist.com/lBB3KN_2f.jpg"]);
+});
+
 test("keeps metadata from the bounded HTML prefix when a publisher page exceeds the read limit", async () => {
   const prefix = '<html><head><meta property="og:image" content="https://cdn.example/soompi-cover.jpg"></head><body>';
   const oversizedHtml = `${prefix}${"x".repeat(MAX_ARTICLE_PAGE_HTML_BYTES + 100)}`;
