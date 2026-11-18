@@ -6,6 +6,8 @@ function usableImageUrl(candidate: unknown, baseUrl: string): string | null {
   try {
     const url = new URL(candidate, baseUrl);
     if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return null;
+    // Upgrade legacy publisher thumbnail links to HTTPS rather than dropping them outright.
+    if (url.protocol === "http:") url.protocol = "https:";
     const absolute = url.toString();
     return isSafePublicImageUrl(absolute) ? absolute : null;
   } catch {
@@ -65,7 +67,7 @@ function urlsFromMarkdown(value: unknown): string[] {
 }
 
 const MAX_ARTICLE_IMAGES = 3;
-const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|ads?|banner|tracking|pixel|button|social|share)/i;
+const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|(?:^|[\\/_.-])ads?(?:[\\/_.-]|$)|banner|tracking|pixel|button|social|share)/i;
 
 function looksDecorative(url: string): boolean {
   try {

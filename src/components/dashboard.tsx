@@ -24,6 +24,7 @@ type Article = {
   sourceUrl: string;
   imageUrl: string | null;
   imageUrls: string[];
+  manualImageUrls: string[];
   status: string;
   facebookPostId: string | null;
   errorMessage: string | null;
@@ -35,6 +36,13 @@ type Article = {
   publishedAt: string | null;
   queuePosition: number | null;
 };
+
+type ReviewDraftItem = { title: string; rating: string; genre: string; reason: string; suitableFor: string; imageUrl: string };
+type ReviewMediaType = "FILM" | "DRAMA" | "MUSIK";
+
+function blankReviewItem(): ReviewDraftItem {
+  return { title: "", rating: "", genre: "", reason: "", suitableFor: "", imageUrl: "" };
+}
 
 type DashboardData = {
   checkedAt: string;
@@ -51,7 +59,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; mediaFormat?: string; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -112,6 +120,10 @@ export default function Dashboard() {
   const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([]);
   const [bufferMappings, setBufferMappings] = useState<ApiResult["mappings"]>(undefined);
   const [aiDiagnostic, setAiDiagnostic] = useState<AiDiagnostic | null>(null);
+  const [imageDrafts, setImageDrafts] = useState<Record<string, string>>({});
+  const [reviewHeadline, setReviewHeadline] = useState("");
+  const [reviewMediaType, setReviewMediaType] = useState<ReviewMediaType>("DRAMA");
+  const [reviewItems, setReviewItems] = useState<ReviewDraftItem[]>(() => Array.from({ length: 5 }, blankReviewItem));
 
   const api = useCallback(async (url: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
@@ -195,6 +207,58 @@ export default function Dashboard() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal menghapus feed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveManualImages(event: FormEvent<HTMLFormElement>, article: Article) {
+    event.preventDefault();
+    const imageUrls = (imageDrafts[article.id] ?? article.manualImageUrls.join("\n"))
+      .split(/\n+/).map((url) => url.trim()).filter(Boolean);
+    if (imageUrls.length > 2) {
+      setMessage("Maksimal dua tautan gambar untuk satu postingan.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/api/admin/articles/images", {
+        method: "PATCH",
+        body: JSON.stringify({ id: article.id, imageUrls }),
+      });
+      setMessage(imageUrls.length ? `Tautan gambar manual disimpan (${imageUrls.length}).` : "Gambar manual dihapus; gambar RSS akan digunakan lagi saat tersedia.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal menyimpan tautan gambar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitManualReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!window.confirm("Review ini akan dikirim ke antrean Buffer untuk halaman Popbeez. Pastikan rating dan semua informasi sudah benar. Lanjutkan?")) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/manual-review", {
+        method: "POST",
+        body: JSON.stringify({
+          headline: reviewHeadline,
+          mediaType: reviewMediaType,
+          items: reviewItems.map((item) => ({ ...item, rating: Number(item.rating) })),
+        }),
+      });
+      setMessage(result.error
+        ? `Status Buffer belum pasti: ${result.error}`
+        : result.mediaFormat === "single"
+          ? "Review tersimpan, tetapi Buffer hanya menerima cover satu gambar. Periksa batas carousel channel Buffer."
+          : `Review “${result.title ?? reviewHeadline}” masuk ke antrean Buffer dalam format carousel enam slide.`);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal membuat review manual.");
+      await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -402,6 +466,31 @@ export default function Dashboard() {
         <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
       </section>
 
+      <section className="panel manual-review-panel">
+        <div className="panel-heading"><div><p className="eyebrow">KONTEN MANUAL</p><h2>Buat review mingguan</h2><p className="muted small-note">Isi lima pilihan film, drama, atau musik. Rating tertinggi otomatis menjadi nomor 1. Hasilnya satu carousel terpadu: cover lalu lima kartu rekomendasi.</p></div><span className="format-tag carousel">Popbeez · 6 slide</span></div>
+        <form className="manual-review-form" onSubmit={submitManualReview}>
+          <div className="form-grid review-heading-grid">
+            <label className="full-field">Judul posting<input value={reviewHeadline} onChange={(event) => setReviewHeadline(event.target.value)} required minLength={5} maxLength={100} placeholder="Contoh: 5 Drama Rating Tertinggi Minggu Ini" /></label>
+            <label>Jenis rekomendasi<select value={reviewMediaType} onChange={(event) => setReviewMediaType(event.target.value as ReviewMediaType)}><option value="FILM">Film</option><option value="DRAMA">Drama</option><option value="MUSIK">Musik</option></select></label>
+          </div>
+          <div className="manual-review-items">
+            {reviewItems.map((item, index) => <fieldset className="manual-review-item" key={index}>
+              <legend>Judul kandidat {index + 1} <span>(urutan akhir ditentukan rating)</span></legend>
+              <div className="form-grid">
+                <label className="full-field">Judul film / drama / musik<input value={item.title} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, title: event.target.value } : entry))} required maxLength={120} placeholder="Nama judul" /></label>
+                <label>Rating (0–10)<input type="number" value={item.rating} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, rating: event.target.value } : entry))} required min="0" max="10" step="0.1" placeholder="8.7" /></label>
+                <label>Genre<input value={item.genre} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, genre: event.target.value } : entry))} required maxLength={100} placeholder="Romansa, komedi" /></label>
+                <label className="full-field">Link gambar (HTTPS)<input type="url" value={item.imageUrl} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, imageUrl: event.target.value } : entry))} required placeholder="https://.../poster.jpg" /></label>
+                <label className="full-field">Kenapa wajib nonton? (opsional)<input value={item.reason} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, reason: event.target.value } : entry))} maxLength={240} placeholder="Satu kalimat tentang daya tariknya" /></label>
+                <label className="full-field">Cocok untuk siapa? (opsional)<input value={item.suitableFor} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, suitableFor: event.target.value } : entry))} maxLength={160} placeholder="Penonton yang suka tontonan ringan" /></label>
+              </div>
+            </fieldset>)}
+          </div>
+          <button type="submit" className="primary-button" disabled={busy}>{busy ? "Menyusun carousel…" : "Buat review & kirim ke antrean Buffer"}</button>
+          <p className="muted small-note">Pastikan kamu memiliki izin menggunakan tautan gambar. Pengiriman ini langsung memasukkan post ke antrean Buffer; rating dan urutan berasal dari data yang kamu isi.</p>
+        </form>
+      </section>
+
       <div className="dashboard-columns">
         <section className="panel feeds-panel">
           <div className="panel-heading"><div><p className="eyebrow">SUMBER BERITA</p><h2>Feed RSS</h2></div><button className="secondary-button" type="button" disabled={busy} onClick={() => void importPresets()}>Tambahkan preset hiburan</button></div>
@@ -436,14 +525,17 @@ export default function Dashboard() {
 
         <section className="panel articles-panel">
           <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya, tetapi tidak mengubah post yang sudah masuk Buffer. Berita berumur lebih dari 7 jam dikeluarkan; tanpa waktu terbit RSS, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
-          {data?.articles.length ? <div className="article-list">{data.articles.map((article) => (
-            <article className="article-row" key={article.id}>
+          {data?.articles.length ? <div className="article-list">{data.articles.map((article) => {
+            const isManualReview = article.sourceName === "Review manual Popbeez";
+            const previewSlides = isManualReview && article.postFormat === "carousel" ? [1, 2, 3, 4, 5, 6] : article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1];
+            const slideTotal = isManualReview ? 6 : 4;
+            return <article className="article-row" key={article.id}>
               <div className="article-row-top">
                 {article.queuePosition && <span className="queue-position">#{article.queuePosition}</span>}
                 {article.status === "queued" && article.priorityAt && <span className="status-tag priority">PRIORITAS</span>}
                 <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
                 <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
-                <span className={`format-tag ${article.postFormat}`}>{article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
+                <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
                 {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
                 {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
               </div>
@@ -452,25 +544,30 @@ export default function Dashboard() {
               {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
               <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
                 <div className="article-preview-gallery">
-                  {(article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1]).map((slideNumber) => {
-                    const slideUrl = article.postFormat === "carousel" ? `/api/og/${article.id}?slide=${slideNumber}` : `/api/og/${article.id}`;
+                  {previewSlides.map((slideNumber) => {
+                    const hasSlides = isManualReview ? article.postFormat === "carousel" : article.postFormat === "carousel" && article.carouselSlides?.length === 3;
+                    const slideUrl = hasSlides ? `/api/og/${article.id}?slide=${slideNumber}` : `/api/og/${article.id}`;
                     return <a href={slideUrl} target="_blank" rel="noreferrer" key={slideNumber} aria-label={`Buka slide ${slideNumber} news card: ${article.title}`}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={slideUrl} alt={`Pratinjau slide ${slideNumber}: ${article.title}`} loading="lazy" />
-                      {article.postFormat === "carousel" && <span>{slideNumber}/4</span>}
+                      {hasSlides && <span>{slideNumber}/{slideTotal}</span>}
                     </a>;
                   })}
                 </div>
                 <div className="article-card-details">
                   <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? `${article.imageUrls?.length ?? 1} foto sumber terdeteksi` : "Belum ada gambar sumber"}</strong>
-                  {article.postFormat === "carousel" && article.carouselSlides?.length !== 3 && <small className="muted">Empat slide dibuat saat berita diproses.</small>}
+                  {!isManualReview && article.postFormat === "carousel" && article.carouselSlides?.length !== 3 && <small className="muted">Empat slide dibuat saat berita diproses.</small>}
                   <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Buka news card ukuran penuh ↗</a>
                   {article.imageUrl && <a className="article-source" href={article.imageUrl} target="_blank" rel="noreferrer">Buka foto sumber ↗</a>}
                 </div>
               </div>
+              {article.status === "queued" && !isManualReview && <form className="manual-image-form" onSubmit={(event) => void saveManualImages(event, article)}>
+                <label>Gambar untuk news card (maksimal 2 URL HTTPS, satu per baris)<textarea value={imageDrafts[article.id] ?? article.manualImageUrls.join("\n")} onChange={(event) => setImageDrafts((current) => ({ ...current, [article.id]: event.target.value }))} rows={2} placeholder="https://.../gambar-1.jpg&#10;https://.../gambar-2.jpg" /></label>
+                <button type="submit" className="secondary-button" disabled={busy}>Simpan gambar manual</button>
+              </form>}
               <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka artikel sumber ↗</a>
             </article>
-          ))}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
+          })}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>
           {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Kirim 1 berita ke Buffer"}</button>}
           {!canPublish && <p className="muted small-note">Tombol pengiriman aktif setelah feed, minimal satu penyedia AI, URL aplikasi, pengaman cron, Buffer API key, dan ID channel Buffer untuk setiap halaman tujuan siap.</p>}

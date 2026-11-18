@@ -32,6 +32,7 @@ CREATE TABLE "articles" (
   "raw_text" text DEFAULT '' NOT NULL,
   "image_url" text,
   "image_urls" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "manual_image_urls" jsonb DEFAULT '[]'::jsonb NOT NULL,
   "caption" text,
   "status" "article_status" DEFAULT 'queued' NOT NULL,
   "facebook_post_id" text,

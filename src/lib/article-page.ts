@@ -18,6 +18,8 @@ export type ArticlePageData = {
 function toSafeHttpsUrl(candidate: string, baseUrl?: string): string | null {
   try {
     const url = baseUrl ? new URL(candidate, baseUrl) : new URL(candidate);
+    // Some legacy RSS/page metadata still advertises http thumbnails; retry those over TLS.
+    if (url.protocol === "http:") url.protocol = "https:";
     return isSafePublicImageUrl(url.toString()) ? url.toString() : null;
   } catch {
     return null;
@@ -107,7 +109,39 @@ function extractSnippet($: ReturnType<typeof load>): string | null {
 }
 
 const MAX_ARTICLE_IMAGES = 3;
-const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|ads?|banner|tracking|pixel|button|social|share|related)/i;
+const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|(?:^|[\\/_.-])ads?(?:[\\/_.-]|$)|banner|tracking|pixel|button|social|share|related)/i;
+
+function bestSrcsetUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  return raw.split(",").map((candidate) => {
+    const [url, descriptor = ""] = candidate.trim().split(/\s+/);
+    const amount = Number.parseFloat(descriptor);
+    const weight = descriptor.endsWith("w") ? amount : descriptor.endsWith("x") ? amount * 1_000 : 0;
+    return { url, weight };
+  }).filter((candidate) => candidate.url).sort((a, b) => b.weight - a.weight)[0]?.url;
+}
+
+function jsonLdImageUrls(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(jsonLdImageUrls);
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const urls: string[] = [];
+  for (const key of ["image", "thumbnailUrl", "contentUrl"] as const) {
+    const candidate = record[key];
+    if (typeof candidate === "string") urls.push(candidate);
+    else if (Array.isArray(candidate)) urls.push(...candidate.flatMap(jsonLdImageUrls));
+    else if (candidate && typeof candidate === "object") {
+      const entry = candidate as Record<string, unknown>;
+      if (typeof entry.url === "string") urls.push(entry.url);
+      if (typeof entry.contentUrl === "string") urls.push(entry.contentUrl);
+    }
+  }
+  // Article pages sometimes embed image objects below @graph or nested publisher metadata.
+  for (const [key, child] of Object.entries(record)) {
+    if (!["image", "thumbnailUrl", "contentUrl"].includes(key) && child && typeof child === "object") urls.push(...jsonLdImageUrls(child));
+  }
+  return urls;
+}
 
 function extractPageData(html: string, pageUrl: string): ArticlePageData {
   const $ = load(html);
@@ -117,21 +151,39 @@ function extractPageData(html: string, pageUrl: string): ArticlePageData {
     const safe = toSafeHttpsUrl(raw, pageUrl);
     if (safe && !isKnownAggregatorBrandImage(safe) && !DECORATIVE_IMAGE_WORDS.test(new URL(safe).pathname) && !imageUrls.includes(safe) && imageUrls.length < MAX_ARTICLE_IMAGES) imageUrls.push(safe);
   };
-  // Preserve publisher-declared hero image as the primary, then use only images inside article content.
+  // Prioritize publisher-declared hero images and structured metadata before in-article variants.
   for (const selector of ["meta[property='og:image']", "meta[property='og:image:secure_url']", "meta[name='twitter:image']"]) {
     addImage($(selector).first().attr("content"));
   }
+  $("script[type='application/ld+json']").each((_, script) => {
+    try {
+      for (const imageUrl of jsonLdImageUrls(JSON.parse($(script).text()) as unknown)) addImage(imageUrl);
+    } catch {
+      // Ignore malformed third-party JSON-LD and continue with ordinary metadata.
+    }
+  });
   const roots = $("article [itemprop='articleBody'], [itemprop='articleBody'], article, main, .article-content, .entry-content, .post-content");
   roots.each((_, root) => {
     if (imageUrls.length >= MAX_ARTICLE_IMAGES) return;
-    $(root).find("img").each((__, element) => {
+    $(root).find("picture source, img").each((__, element) => {
       const image = $(element);
       const context = `${image.attr("alt") ?? ""} ${image.attr("class") ?? ""} ${image.parent().attr("class") ?? ""} ${image.parent().attr("id") ?? ""}`;
       if (DECORATIVE_IMAGE_WORDS.test(context)) return;
+      if (image.is("img") && image.parent("picture").length) {
+        const hasUsableSource = image.parent("picture").find("source").toArray().some((source) => {
+          const sourceElement = $(source);
+          const sourceUrl = bestSrcsetUrl(sourceElement.attr("data-srcset") || sourceElement.attr("srcset"));
+          const safeSourceUrl = toSafeHttpsUrl(sourceUrl ?? "", pageUrl);
+          return Boolean(safeSourceUrl && !DECORATIVE_IMAGE_WORDS.test(new URL(safeSourceUrl).pathname));
+        });
+        if (hasUsableSource) return;
+      }
       const width = Number(image.attr("width") ?? image.attr("data-width") ?? 0);
       const height = Number(image.attr("height") ?? image.attr("data-height") ?? 0);
       if ((width > 0 && width < 180) || (height > 0 && height < 120)) return;
-      addImage(image.attr("data-src") || image.attr("data-lazy-src") || image.attr("src"), context);
+      const raw = bestSrcsetUrl(image.attr("data-srcset") || image.attr("data-lazy-srcset") || image.attr("srcset"))
+        || image.attr("data-src") || image.attr("data-lazy-src") || image.attr("data-original") || image.attr("src");
+      addImage(raw, context);
       if (imageUrls.length >= MAX_ARTICLE_IMAGES) return false;
     });
   });

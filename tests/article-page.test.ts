@@ -37,6 +37,23 @@ test("extracts distinct in-article photos while ignoring logos, ads, and tiny de
   assert.deepEqual(result.imageUrls, ["https://news.example/photos/hero.jpg", "https://news.example/photos/second.jpg", "https://news.example/photos/third.jpg"]);
 });
 
+test("extracts larger lazy-loaded Soompi-style images from JSON-LD and srcset", () => {
+  const html = `<html><head><script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    image: { "@type": "ImageObject", url: "https://0.soompi.io/wp-content/uploads/2026/11/hero.jpg" },
+  })}</script></head><body><article><div class="article-body">
+    <picture><source srcset="https://0.soompi.io/wp-content/uploads/photo-small.jpg 480w, https://0.soompi.io/wp-content/uploads/photo-large.jpg 1200w">
+    <img data-lazy-src="https://0.soompi.io/wp-content/uploads/photo-thumb.jpg" width="900" height="600" alt="Drama cast"></picture>
+    <p>Artikel Soompi berisi paragraf cukup panjang yang memberikan detail untuk ringkasan dan sekaligus menguji ekstraksi gambar versi resolusi tinggi.</p>
+  </div></article></body></html>`;
+  const result = extractArticlePageData(html, "https://www.soompi.com/article/example");
+
+  assert.equal(result.imageUrl, "https://0.soompi.io/wp-content/uploads/2026/11/hero.jpg");
+  assert.ok(result.imageUrls.includes("https://0.soompi.io/wp-content/uploads/photo-large.jpg"));
+  assert.ok(!result.imageUrls.includes("https://0.soompi.io/wp-content/uploads/photo-thumb.jpg"));
+});
+
 test("filters RSS.app's generic brand image but keeps editorial photos from the article", () => {
   const result = extractArticlePageData(`
     <head><meta property="og:image" content="https://rss.app/static/img/images/rss-app.png"></head>
@@ -70,7 +87,7 @@ test("caps extracted article text at 1,500 characters", () => {
   assert.ok(result.text.length <= MAX_ARTICLE_SNIPPET_CHARS);
 });
 
-test("rejects insecure and credential-bearing og:image URLs", () => {
+test("upgrades legacy HTTP image links to HTTPS and rejects credential-bearing URLs", () => {
   const httpImage = extractArticlePageData(
     '<meta property="og:image" content="http://images.example/cover.jpg"><article><p>Paragraf berita ini lebih dari cukup untuk lolos ekstraksi artikel.</p></article>',
     "https://news.example/article",
@@ -80,6 +97,6 @@ test("rejects insecure and credential-bearing og:image URLs", () => {
     "https://news.example/article",
   );
 
-  assert.equal(httpImage.imageUrl, null);
+  assert.equal(httpImage.imageUrl, "https://images.example/cover.jpg");
   assert.equal(credentialImage.imageUrl, null);
 });

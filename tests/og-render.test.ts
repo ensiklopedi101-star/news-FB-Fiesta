@@ -30,6 +30,17 @@ test("Sharp card renderer outputs a complete JPEG and composites the source phot
   assert.ok(centerPhotoPixel[1]! > centerPhotoPixel[2]!);
 });
 
+test("composes two manually supplied photos side-by-side into one news card", async () => {
+  const redPhoto = await sharp({ create: { width: 30, height: 40, channels: 3, background: { r: 220, g: 25, b: 25 } } }).png().toBuffer();
+  const bluePhoto = await sharp({ create: { width: 30, height: 40, channels: 3, background: { r: 25, g: 45, b: 220 } } }).png().toBuffer();
+  const output = await renderOgCard({ ...baseOptions, photoJpeg: redPhoto, photoJpegSecondary: bluePhoto });
+  const left = await sharp(output).extract({ left: 250, top: 350, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+  const right = await sharp(output).extract({ left: 800, top: 350, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+
+  assert.ok(left[0]! > left[2]! * 2);
+  assert.ok(right[2]! > right[0]! * 2);
+});
+
 test("Sharp card renderer creates the branded fallback without a source photo", async () => {
   const output = await renderOgCard({ ...baseOptions, photoJpeg: null });
   const metadata = await sharp(output).metadata();
@@ -93,6 +104,33 @@ test("carousel follow CTA slide renders the Facebook icon", async () => {
 
   assert.ok(iconPixel[2]! > iconPixel[0]! * 2);
   assert.ok(iconPixel[2]! > iconPixel[1]!);
+});
+
+test("renders a unified manual review slide with the poster in a framed panel", async () => {
+  const photo = await sharp({
+    create: { width: 40, height: 80, channels: 3, background: { r: 20, g: 90, b: 210 } },
+  }).png().toBuffer();
+  const output = await renderOgCard({
+    ...baseOptions,
+    brand: "Popbeez",
+    category: "DRAMA",
+    isEntertainment: true,
+    photoJpeg: photo,
+    reviewSlide: {
+      number: 2,
+      total: 6,
+      headline: "5 Drama Rating Tertinggi Minggu Ini",
+      mediaType: "DRAMA",
+      item: { title: "Drama Peringkat Satu", rating: 9.4, genre: "Romansa, Komedi", reason: "Cerita dan chemistry pemeran utamanya menarik.", suitableFor: "Pencinta drama ringan.", imageUrl: "https://images.example.test/drama.jpg" },
+    },
+  });
+  const metadata = await sharp(output).metadata();
+  const photoPixel = await sharp(output).extract({ left: 800, top: 500, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1080);
+  assert.equal(metadata.height, 1080);
+  assert.ok(photoPixel[2]! > photoPixel[0]! * 2);
 });
 
 test("entertainment cards load the existing Popbeez logo asset", async () => {

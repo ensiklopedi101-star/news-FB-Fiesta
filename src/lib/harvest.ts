@@ -48,7 +48,7 @@ export async function harvestLatestStories() {
     .returning({ id: articles.id, urlHash: articles.urlHash })));
 
   const storiesByHash = new Map(candidates.map((story) => [story.urlHash, story]));
-  const queuedCandidates = await db.select({ id: articles.id, urlHash: articles.urlHash, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls })
+  const queuedCandidates = await db.select({ id: articles.id, urlHash: articles.urlHash, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls, manualImageUrls: articles.manualImageUrls })
     .from(articles)
     .where(and(inArray(articles.urlHash, candidates.map((story) => story.urlHash)), eq(articles.status, "queued")));
   const imageTargets = new Map<string, { id: string; story: (typeof candidates)[number]; imageUrls: string[] }>();
@@ -58,11 +58,12 @@ export async function harvestLatestStories() {
       .filter((url): url is string => Boolean(url) && !isKnownAggregatorBrandImage(url)))];
     const existingImages = [row.imageUrl, ...(row.imageUrls ?? [])]
       .filter((url): url is string => Boolean(url) && !isKnownAggregatorBrandImage(url));
-    const imageUrls = [...new Set(freshImages.length ? freshImages : existingImages)].slice(0, 3);
+    const manualImages = (row.manualImageUrls ?? []).filter((url): url is string => Boolean(url) && !isKnownAggregatorBrandImage(url));
+    const imageUrls = [...new Set(manualImages.length ? manualImages : freshImages.length ? freshImages : existingImages)].slice(0, manualImages.length ? 2 : 3);
     if (!story || imageUrls.length === 0) continue;
     try {
       await db.update(articles)
-        .set({ imageUrl: story.imageUrl && !isKnownAggregatorBrandImage(story.imageUrl) ? story.imageUrl : imageUrls[0]!, imageUrls, updatedAt: new Date() })
+        .set({ imageUrl: manualImages[0] ?? (story.imageUrl && !isKnownAggregatorBrandImage(story.imageUrl) ? story.imageUrl : imageUrls[0]!), imageUrls, ...(manualImages.length ? { manualImageUrls: imageUrls } : {}), updatedAt: new Date() })
         .where(and(eq(articles.id, row.id), eq(articles.status, "queued")));
     } catch {
       console.error(`[harvest] Article image gallery could not be saved to Neon for article ${row.id}.`);

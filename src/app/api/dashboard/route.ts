@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
       sourceUrl: articles.sourceUrl,
       imageUrl: articles.imageUrl,
       imageUrls: articles.imageUrls,
+      manualImageUrls: articles.manualImageUrls,
       status: articles.status,
       facebookPostId: articles.facebookPostId,
       errorMessage: articles.errorMessage,
@@ -125,7 +126,7 @@ export async function GET(request: NextRequest) {
     console.error("[dashboard]", error instanceof Error ? error.message : error);
     return NextResponse.json({
       ok: false,
-      error: "Skema database belum lengkap. Pastikan DATABASE_URL mengarah ke Neon yang benar, lalu jalankan migrasi yang belum diterapkan secara berurutan sampai drizzle/0007_queue_priority.sql dan muat ulang dashboard.",
+      error: "Skema database belum lengkap. Pastikan DATABASE_URL mengarah ke Neon yang benar, lalu jalankan migrasi yang belum diterapkan secara berurutan sampai drizzle/0008_manual_images.sql dan muat ulang dashboard.",
     }, { status: 503 });
   }
 }
