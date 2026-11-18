@@ -35,6 +35,7 @@ Setiap siklus panen memproses maksimal 50 kandidat berita ke antrean `queued` di
 8. Jalankan [`drizzle/0005_carousel_experiment.sql`](./drizzle/0005_carousel_experiment.sql) untuk menyimpan varian format dan teks slide carousel.
 9. Jalankan [`drizzle/0006_article_image_gallery.sql`](./drizzle/0006_article_image_gallery.sql) untuk menyimpan hingga tiga foto artikel per berita; gambar utama yang sudah ada akan disalin sebagai fallback.
 10. Jalankan [`drizzle/0007_queue_priority.sql`](./drizzle/0007_queue_priority.sql) untuk menambahkan pengaturan prioritas antrean.
+11. Jalankan [`drizzle/0008_manual_images.sql`](./drizzle/0008_manual_images.sql) untuk mengaktifkan penggantian gambar manual pada artikel antrean.
 11. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.

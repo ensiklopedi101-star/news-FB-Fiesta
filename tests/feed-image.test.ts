@@ -54,13 +54,13 @@ test("rejects RSS.app's default logo as a source image", () => {
   assert.deepEqual(images, ["https://i.mydramalist.com/lBB3KN_2f.jpg"]);
 });
 
-test("uses RSS content images after rejecting non-image enclosures and unsafe URLs", () => {
+test("upgrades HTTP Soompi uploads images while rejecting non-image enclosures", () => {
   const image = extractFeedImageUrl({
     enclosure: { url: "https://cdn.example/audio.mp3", type: "audio/mpeg" },
-    contentEncoded: '<img src="http://cdn.example/insecure.jpg"><img src="https://cdn.example/valid.jpg">',
-  }, articleUrl);
+    contentEncoded: '<img src="http://0.soompi.io/wp-content/uploads/2026/11/article-photo.jpg">',
+  }, "https://www.soompi.com/article/example");
 
-  assert.equal(image, "https://cdn.example/valid.jpg");
+  assert.equal(image, "https://0.soompi.io/wp-content/uploads/2026/11/article-photo.jpg");
 });
 
 test("accepts media:group nested image entries and srcset candidates", () => {
