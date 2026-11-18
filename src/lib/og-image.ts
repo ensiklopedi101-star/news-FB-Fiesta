@@ -9,6 +9,36 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 type Fetcher = typeof fetch;
 type FetchedImage = { bytes: Uint8Array; contentType: string };
 
+// Public image CDNs often reject default Node.js requests and Facebook-style Referers.
+const IMAGE_REQUEST_HEADERS = {
+  accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9,id;q=0.8",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+};
+
+function imageHost(raw: string): string {
+  try {
+    return new URL(raw).host;
+  } catch {
+    return "unknown host";
+  }
+}
+
+/**
+ * Last-resort public image proxy for publishers that reject datacenter requests with 401/403.
+ * The source URL is validated before it is handed to the proxy.
+ */
+function proxiedImageUrl(raw: string): string | null {
+  if (!isSafePublicImageUrl(raw)) return null;
+  try {
+    const source = new URL(raw);
+    const target = `${source.host}${source.pathname}${source.search}`;
+    return `https://images.weserv.nl/?url=${encodeURIComponent(target)}&output=jpg&q=88&w=1080`;
+  } catch {
+    return null;
+  }
+}
+
 async function toJpegBytes(bytes: Uint8Array): Promise<Buffer> {
   return sharp(Buffer.from(bytes), { limitInputPixels: 40_000_000 })
     .rotate()
@@ -82,6 +112,8 @@ export async function fetchOgImage(
   } catch {
     // A missing or malformed source URL should not prevent attempting the image.
   }
+  const sourceHost = imageHost(rawImageUrl);
+  let viaProxy = false;
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     let response: Response;
@@ -89,14 +121,14 @@ export async function fetchOgImage(
       response = await fetcher(currentUrl, {
         redirect: "manual",
         headers: {
-          accept: "image/jpeg,image/png,image/webp",
-          ...(referer ? { referer } : {}),
+          ...IMAGE_REQUEST_HEADERS,
+          ...(referer && !viaProxy ? { referer } : {}),
         },
         signal: AbortSignal.timeout(6000),
         cache: "no-store",
       });
     } catch {
-      reportFailure?.("request failed or timed out");
+      reportFailure?.(`request failed or timed out for ${sourceHost}`);
       return null;
     }
 
@@ -126,7 +158,16 @@ export async function fetchOgImage(
 
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      reportFailure?.(`image server returned HTTP ${response.status}`);
+      // A hotlink block is the most common failure; retry once through a public proxy.
+      if ((response.status === 401 || response.status === 403) && !viaProxy && !isVercelBlobImageUrl(currentUrl)) {
+        const proxied = proxiedImageUrl(currentUrl);
+        if (proxied) {
+          viaProxy = true;
+          currentUrl = proxied;
+          continue;
+        }
+      }
+      reportFailure?.(`image server returned HTTP ${response.status} for ${sourceHost}`);
       return null;
     }
     const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
