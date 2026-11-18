@@ -7,6 +7,7 @@ import { writeNewsCopy } from "@/lib/ai";
 import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
+import { indonesianTranslationUrl } from "@/lib/translation-url";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -162,8 +163,11 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
     }
+    const captionSourceUrl = article.pageKey === "entertainment"
+      ? indonesianTranslationUrl(article.sourceUrl)
+      : article.sourceUrl;
     const followLink = article.pageKey === "entertainment" ? "\n\nIkuti Popbeez: https://www.facebook.com/portalbeez" : "";
-    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${article.sourceUrl}${followLink}`;
+    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${captionSourceUrl}${followLink}`;
     carouselSlides = article.postFormat === "carousel" ? copy.carouselSlides : null;
     await db.update(articles)
       .set({
