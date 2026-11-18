@@ -4,6 +4,8 @@ import { feedPresets } from "../src/lib/feed-presets";
 
 test("provides active, focused presets for C-dramas, donghua, and K-pop idols", () => {
   const required = [
+    ["Soompi All News", "ENTERTAINMENT"],
+    ["Seoulbeats", "K-POP"],
     ["DramaPanda C-News", "C-DRAMA"],
     ["Overseasidol C-Drama", "C-DRAMA"],
     ["Yu Alexius Chinese Anime", "DONGHUA"],

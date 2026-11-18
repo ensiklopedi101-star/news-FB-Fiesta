@@ -417,7 +417,7 @@ export default function Dashboard() {
             </div>
             <button type="submit" className="secondary-button" disabled={busy}>{busy ? "Menyimpan…" : "+ Tambahkan feed"}</button>
           </form>
-          <p className="muted small-note">Preset hiburan mencakup C-Drama, donghua, dan K-pop/idol. Feed Google News dan HanCinema tetap nonaktif untuk ditinjau sebelum digunakan.</p>
+          <p className="muted small-note">Preset hiburan mencakup C-Drama, donghua, K-pop/idol, Soompi All News, dan Seoulbeats. Feed Google News dan HanCinema tetap nonaktif untuk ditinjau sebelum digunakan.</p>
 
           <div className="feed-list">
             {data?.feeds.length ? data.feeds.map((feed) => (
