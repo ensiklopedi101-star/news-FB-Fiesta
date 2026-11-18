@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import { isSafePublicImageUrl } from "@/lib/safe-url";
+import { isKnownAggregatorBrandImage, isSafePublicImageUrl } from "@/lib/safe-url";
 
 function usableImageUrl(candidate: unknown, baseUrl: string): string | null {
   if (typeof candidate !== "string" || !candidate.trim()) return null;
@@ -70,7 +70,7 @@ const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert
 function looksDecorative(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return DECORATIVE_IMAGE_WORDS.test(`${parsed.pathname} ${parsed.search}`);
+    return isKnownAggregatorBrandImage(url) || DECORATIVE_IMAGE_WORDS.test(`${parsed.pathname} ${parsed.search}`);
   } catch {
     return true;
   }
