@@ -194,3 +194,33 @@ test("review cover uses a plain pink panel without a poster and shows the Popbee
   // The bee logo is composited over the black text panel.
   assert.ok(logoPixel[0]! + logoPixel[1]! + logoPixel[2]! > 120);
 });
+
+test("entertainment cards drop the kicker line while news cards keep theirs", async () => {
+  const darkPhoto = await sharp({ create: { width: 60, height: 60, channels: 3, background: { r: 8, g: 8, b: 10 } } }).png().toBuffer();
+  const entertainment = await renderOgCard({
+    brand: "Popbeez",
+    category: "K-ENTERTAINMENT",
+    title: "Drama sejarah Korea kembali meramaikan layar",
+    sourceName: "Korea Times",
+    isEntertainment: true,
+    photoJpeg: darkPhoto,
+  });
+  const news = await renderOgCard({ ...baseOptions, photoJpeg: darkPhoto });
+
+  const brightPixels = async (image: Buffer) => {
+    const { data, info } = await sharp(image)
+      .extract({ left: 300, top: 300, width: 480, height: 70 })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let count = 0;
+    for (let index = 0; index < data.length; index += info.channels) {
+      if (data[index]! > 200 && data[index + 1]! > 200 && data[index + 2]! > 200) count += 1;
+    }
+    return count;
+  };
+
+  // The band where "SOROTAN HIBURAN" used to sit must stay empty on Popbeez cards.
+  assert.equal(await brightPixels(entertainment), 0);
+  assert.ok(await brightPixels(news) > 0);
+});
