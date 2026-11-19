@@ -125,7 +125,40 @@ test("adds the source link as a comment on the published post", async () => {
   await addPageComment("entertainment", "1234567890_777", "🔗 Sumber: https://pop.beez.id/s/abc12345");
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]!.url, "https://graph.facebook.com/v23.0/1234567890/1234567890_777/comments");
+  // The post id already contains the page prefix; the page node must not be added again.
+  assert.equal(calls[0]!.url, "https://graph.facebook.com/v23.0/1234567890_777/comments");
   assert.equal(calls[0]!.fields.get("message"), "🔗 Sumber: https://pop.beez.id/s/abc12345");
   assert.equal(calls[0]!.fields.get("access_token"), "page-token-secret");
+});
+
+test("comments on the object id exactly as returned, without duplicating the page node", async () => {
+  configurePage();
+  const calls: string[] = [];
+  globalThis.fetch = (async (input) => {
+    calls.push(String(input));
+    return Response.json({ id: "comment-2" });
+  }) as typeof fetch;
+
+  // Real id from a failed production comment (pageId_postId).
+  await addPageComment("entertainment", "1468363823021623_122107301613546041", "🔗 Sumber: https://popbeez.hivecomp.my.id/s/abc12345");
+  // Photo-only ids have no underscore and must still be addressed from the Graph root.
+  await addPageComment("entertainment", "987654321", "🔗 Sumber: https://popbeez.hivecomp.my.id/s/def67890");
+
+  assert.deepEqual(calls, [
+    "https://graph.facebook.com/v23.0/1468363823021623_122107301613546041/comments",
+    "https://graph.facebook.com/v23.0/987654321/comments",
+  ]);
+  for (const url of calls) assert.ok(!url.includes("/v23.0/1234567890/"), `page node duplicated in ${url}`);
+});
+
+test("refuses to comment when the stored post id is empty", async () => {
+  configurePage();
+  let called = false;
+  globalThis.fetch = (async () => {
+    called = true;
+    return Response.json({ id: "comment-3" });
+  }) as typeof fetch;
+
+  await assert.rejects(() => addPageComment("entertainment", "   ", "x"), /ID postingan Facebook kosong/);
+  assert.equal(called, false);
 });

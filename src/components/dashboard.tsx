@@ -285,6 +285,21 @@ export default function Dashboard() {
     }
   }
 
+  async function retrySourceComment(article: Article) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/api/admin/retry-comment", { method: "POST", body: JSON.stringify({ id: article.id }) });
+      setMessage("Komentar sumber berhasil dikirim ulang.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal mengirim ulang komentar sumber.");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleArticlePriority(article: Article) {
     const priority = !article.priorityAt;
     setBusy(true);
@@ -423,6 +438,7 @@ export default function Dashboard() {
     const previewSlides = isManualReview && article.postFormat === "carousel" ? [1, 2, 3, 4, 5, 6] : article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1];
     const slideTotal = isManualReview ? 6 : 4;
     const postUrl = facebookPostUrl(article.facebookPostId);
+    const commentFailed = article.status === "published" && Boolean(article.errorMessage?.startsWith("Posting berhasil; komentar sumber gagal:"));
     return (
       <article className="article-row" key={article.id}>
         <div className="article-row-top">
@@ -433,6 +449,7 @@ export default function Dashboard() {
           <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
           {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
           {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
+          {commentFailed && <button type="button" className="retry-comment-button" disabled={busy} onClick={() => void retrySourceComment(article)}>Kirim ulang komentar sumber</button>}
         </div>
         <strong>{article.title}</strong>
         <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>

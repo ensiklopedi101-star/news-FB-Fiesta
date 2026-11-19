@@ -140,7 +140,7 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
 - `GET /api/cron` — proses satu artikel dan kirim ke antrean Buffer; mematuhi batas 2 pengiriman/jam dan jeda 15 menit. Wajib header `Authorization: Bearer <CRON_SECRET>`. Buffer mengatur waktu publikasi akhir.
 - `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
-- `POST /api/admin/retry-comment` — mengulang komentar sumber untuk postingan yang sudah terbit. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
+- `POST /api/admin/retry-comment` — mengulang komentar sumber untuk postingan yang sudah terbit. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`. Komentar dikirim ke `POST /<graph-version>/<post-id>/comments`; id postingan dari Facebook sudah memuat ID halaman, jadi ID halaman tidak boleh ditambahkan lagi (kalau ditambahkan, Graph menjawab `Unknown path components`). Dashboard menampilkan tombol **Kirim ulang komentar sumber** pada post yang komentarnya gagal.
 - `GET /api/og/{articleId}` — gambar news card untuk artikel tersimpan.
 
 Contoh uji manual:
