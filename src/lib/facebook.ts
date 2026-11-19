@@ -51,12 +51,20 @@ export function usesDirectFacebookPublishing(pageKey: PageKey): boolean {
   return pageKey === "entertainment" && isFacebookPublishingEnabled(pageKey);
 }
 
-function getGraphBase(pageKey: PageKey) {
+/**
+ * `root` is the versioned Graph root; `url` is the page-scoped node used for
+ * publishing. Object ids returned by Facebook (for example `1234567890_777`)
+ * already carry the page prefix, so they must be addressed from `root` and not
+ * appended to `url` — that produced `/<pageId>/<pageId>_<postId>/comments`
+ * and Graph answered "Unknown path components".
+ */
+function getGraphConfig(pageKey: PageKey) {
   const version = graphVersion();
   const pageId = pageIdFor(pageKey);
   const token = pageTokenFor(pageKey);
   if (!pageId || !token) throw new Error(`ID atau Page Access Token untuk halaman ${pageKey} belum diatur.`);
-  return { url: `https://graph.facebook.com/${version}/${encodeURIComponent(pageId)}`, token };
+  const root = `https://graph.facebook.com/${version}`;
+  return { root, url: `${root}/${encodeURIComponent(pageId)}`, token };
 }
 
 function redact(message: string, token: string) {
@@ -95,7 +103,7 @@ export async function publishFacebookPagePost(input: {
   imageUrls: string[];
   caption: string;
 }): Promise<{ postId: string; mediaFormat: "single" | "carousel" }> {
-  const { url, token } = getGraphBase(input.pageKey);
+  const { url, token } = getGraphConfig(input.pageKey);
   const imageUrls = input.imageUrls.filter(Boolean);
   if (!imageUrls.length) throw new Error("Tidak ada gambar untuk diterbitkan ke Facebook.");
 
@@ -149,8 +157,10 @@ export async function createFacebookPhotoPost(input: {
 }
 
 export async function addPageComment(pageKey: PageKey, postId: string, message: string): Promise<void> {
-  const { url, token } = getGraphBase(pageKey);
-  await postForm(`${url}/${encodeURIComponent(postId)}/comments`, {
+  const { root, token } = getGraphConfig(pageKey);
+  const objectId = postId.trim();
+  if (!objectId) throw new Error("ID postingan Facebook kosong; komentar tidak bisa dikirim.");
+  await postForm(`${root}/${encodeURIComponent(objectId)}/comments`, {
     message,
     access_token: token,
   }, token);
