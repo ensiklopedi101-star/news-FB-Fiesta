@@ -195,7 +195,7 @@ test("review cover uses a plain pink panel without a poster and shows the Popbee
   assert.ok(logoPixel[0]! + logoPixel[1]! + logoPixel[2]! > 120);
 });
 
-test("entertainment cards drop the kicker line while news cards keep theirs", async () => {
+test("cards render without the kicker line above the headline", async () => {
   const darkPhoto = await sharp({ create: { width: 60, height: 60, channels: 3, background: { r: 8, g: 8, b: 10 } } }).png().toBuffer();
   const entertainment = await renderOgCard({
     brand: "Popbeez",
@@ -220,7 +220,7 @@ test("entertainment cards drop the kicker line while news cards keep theirs", as
     return count;
   };
 
-  // The band where "SOROTAN HIBURAN" used to sit must stay empty on Popbeez cards.
+  // The band where "SOROTAN HIBURAN"/"KABAR HARI INI" used to sit stays empty on both brands.
   assert.equal(await brightPixels(entertainment), 0);
-  assert.ok(await brightPixels(news) > 0);
+  assert.equal(await brightPixels(news), 0);
 });
