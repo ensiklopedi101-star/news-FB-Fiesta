@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { articleSection, facebookPostUrl, isLivePost, splitArticleSections } from "../src/lib/article-sections";
 
-test("rows that already left the dashboard are separated from the ones that did not", () => {
+test("only queued rows stay in the queue panel, everything processed moves to 'sudah terbit'", () => {
   const rows = [
     { id: "a", status: "queued" },
     { id: "b", status: "ready" },
@@ -13,10 +13,8 @@ test("rows that already left the dashboard are separated from the ones that did 
   ];
   const sections = splitArticleSections(rows);
   assert.deepEqual(sections.queue.map((row) => row.id), ["a"]);
-  assert.deepEqual(sections.sending.map((row) => row.id), ["d"]);
-  assert.deepEqual(sections.failed.map((row) => row.id), ["e"]);
-  // `ready` means Buffer accepted the post, so it belongs to "sudah terbit".
-  assert.deepEqual(sections.done.map((row) => row.id), ["b", "c", "f"]);
+  // `ready` = Buffer accepted it, `processing` = in-flight, `failed` = needs a retry.
+  assert.deepEqual(sections.done.map((row) => row.id), ["b", "c", "d", "e", "f"]);
 });
 
 test("input order is preserved inside every section", () => {
@@ -30,8 +28,6 @@ test("expired and removed rows stay hidden from both lists", () => {
   assert.equal(articleSection("scheduled"), null);
   const sections = splitArticleSections([{ status: "expired" }, { status: "removed" }, { status: "published" }]);
   assert.equal(sections.queue.length, 0);
-  assert.equal(sections.sending.length, 0);
-  assert.equal(sections.failed.length, 0);
   assert.equal(sections.done.length, 1);
 });
 

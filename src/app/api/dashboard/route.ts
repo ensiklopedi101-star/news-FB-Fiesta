@@ -68,24 +68,19 @@ export async function GET(request: NextRequest) {
       publishedAt: articles.publishedAt,
       updatedAt: articles.updatedAt,
     };
-    // Two groups keep the dashboard readable: rows that still have to leave it
-    // (queue, in-flight, failed) and rows that already left it (`ready` = accepted
-    // by Buffer and waiting for its slot, `published` = live on Facebook). The
-    // client splits them again with `splitArticleSections` from
-    // `@/lib/article-sections`.
-    const [queueRows, pendingRows, doneRows] = await Promise.all([
+    // Two groups keep the dashboard readable: rows still waiting in the local
+    // queue, and rows a publisher cycle already handled (in-flight, accepted by
+    // Buffer, live on Facebook, or failed). The client splits them again with
+    // `splitArticleSections` from `@/lib/article-sections`.
+    const [queueRows, doneRows] = await Promise.all([
       db.select(articleFields).from(articles).where(eq(articles.status, "queued"))
         .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
       db.select(articleFields).from(articles)
-        .where(inArray(articles.status, ["processing", "failed"]))
-        .orderBy(asc(articles.updatedAt)).limit(25),
-      db.select(articleFields).from(articles)
-        .where(inArray(articles.status, ["ready", "published"]))
+        .where(inArray(articles.status, ["processing", "ready", "published", "failed"]))
         .orderBy(desc(sql`coalesce(${articles.publishedAt}, ${articles.updatedAt})`)).limit(20),
     ]);
     const dashboardArticles = [
       ...queueRows.map((article, index) => ({ ...article, queuePosition: index + 1 })),
-      ...pendingRows.map((article) => ({ ...article, queuePosition: null })),
       ...doneRows.map((article) => ({ ...article, queuePosition: null })),
     ];
 

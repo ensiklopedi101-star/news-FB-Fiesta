@@ -1,18 +1,17 @@
 /**
- * Dashboard queues are shown as two lists: what still has to leave the
- * dashboard ("belum terbit") and what has already left it ("sudah terbit").
- * `ready` counts as done because Buffer accepted the post and publishes it on
- * the channel schedule; only the direct Facebook path flips to `published`.
- * These helpers keep that decision in one place.
+ * The dashboard shows two lists: what still sits in the local queue ("belum
+ * terbit") and everything that already went through the publisher ("sudah
+ * terbit"): in-flight, accepted by Buffer, live on Facebook, or failed. Keeping
+ * failed/processing rows out of the queue keeps that panel short.
  */
-export type ArticleSectionKey = "queue" | "sending" | "failed" | "done";
+export type ArticleSectionKey = "queue" | "done";
 
 const SECTION_BY_STATUS: Record<string, ArticleSectionKey> = {
   queued: "queue",
-  processing: "sending",
-  failed: "failed",
+  processing: "done",
   ready: "done",
   published: "done",
+  failed: "done",
 };
 
 /** Returns the section an article belongs to, or null for expired/removed rows that stay hidden. */
@@ -23,16 +22,12 @@ export function articleSection(status: string): ArticleSectionKey | null {
 export type ArticleSections<T> = {
   /** Still waiting for the local publisher: numbered #1, #2, … */
   queue: T[];
-  /** Being processed right now by a publisher cycle. */
-  sending: T[];
-  /** Attempts exhausted; needs a manual retry or removal. */
-  failed: T[];
-  /** Left the dashboard: live on Facebook, or accepted by Buffer and waiting for its slot. */
+  /** Processed by a publisher cycle: sent, live, or failed. */
   done: T[];
 };
 
 export function splitArticleSections<T extends { status: string }>(articles: readonly T[]): ArticleSections<T> {
-  const sections: ArticleSections<T> = { queue: [], sending: [], failed: [], done: [] };
+  const sections: ArticleSections<T> = { queue: [], done: [] };
   for (const article of articles) {
     const section = articleSection(article.status);
     if (section) sections[section].push(article);
