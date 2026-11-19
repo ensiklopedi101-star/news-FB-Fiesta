@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
+  addPageComment,
   FacebookNetworkError,
   getFacebookConfigurationGaps,
   publishFacebookPagePost,
@@ -111,4 +112,20 @@ test("redacts the page token from Graph API errors and flags network failures", 
     () => publishFacebookPagePost({ pageKey: "entertainment", imageUrls: ["https://images.example/one.jpg"], caption: "x" }),
     (error: Error) => error instanceof FacebookNetworkError,
   );
+});
+
+test("adds the source link as a comment on the published post", async () => {
+  configurePage();
+  const calls: Array<{ url: string; fields: URLSearchParams }> = [];
+  globalThis.fetch = (async (input, init) => {
+    calls.push({ url: String(input), fields: new URLSearchParams(String(init?.body)) });
+    return Response.json({ id: "comment-1" });
+  }) as typeof fetch;
+
+  await addPageComment("entertainment", "1234567890_777", "🔗 Sumber: https://pop.beez.id/s/abc12345");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, "https://graph.facebook.com/v23.0/1234567890/1234567890_777/comments");
+  assert.equal(calls[0]!.fields.get("message"), "🔗 Sumber: https://pop.beez.id/s/abc12345");
+  assert.equal(calls[0]!.fields.get("access_token"), "page-token-secret");
 });

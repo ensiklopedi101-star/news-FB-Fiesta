@@ -3,6 +3,7 @@ import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 export const MANUAL_REVIEW_MARKER = "popbeez-manual-review-v1";
 export const MANUAL_REVIEW_SOURCE_NAME = "Review manual Popbeez";
+export const MANUAL_REVIEW_FOLLOW_COMMENT = "Ikuti Popbeez untuk rekomendasi film & drama berikutnya: https://www.facebook.com/portalbeez";
 export const reviewMediaTypes = ["FILM", "DRAMA", "MUSIK"] as const;
 export type ReviewMediaType = (typeof reviewMediaTypes)[number];
 
@@ -83,5 +84,6 @@ export function buildManualReviewCaption(review: ManualReview): string {
     return `${["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"][index]} ${index === 0 ? "JUARA MINGGU INI: " : ""}${item.title} — ⭐ ${item.rating.toFixed(1)}/10\n• Genre: ${item.genre}${item.reason ? `\n• Kenapa wajib nonton: ${item.reason}` : ""}${item.suitableFor ? `\n• Cocok untuk: ${item.suitableFor}` : ""}`;
   }).join("\n\n");
   const typeLabel = review.mediaType.toLocaleLowerCase("id-ID");
-  return `🏆 ${review.headline}! 🎬✨\n\nBingung mau pilih ${typeLabel} untuk ditonton? Ini lima rekomendasi berdasarkan rating yang dicantumkan.\n\n${rows}\n\n💬 Mana yang paling bikin penasaran? Tulis nomornya di kolom komentar ya! 👇\n\nIkuti Popbeez: https://www.facebook.com/portalbeez\n\n#Rekomendasi${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #Review${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #WatchlistMingguIni`;
+  // No links in the caption: the follow link goes into the first comment instead.
+  return `🏆 ${review.headline}! 🎬✨\n\nBingung mau pilih ${typeLabel} untuk ditonton? Ini lima rekomendasi berdasarkan rating yang dicantumkan.\n\n${rows}\n\n💬 Mana yang paling bikin penasaran? Tulis nomornya di kolom komentar ya! 👇\n\n#Rekomendasi${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #Review${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #WatchlistMingguIni`;
 }

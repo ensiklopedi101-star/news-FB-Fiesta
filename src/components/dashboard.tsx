@@ -240,7 +240,7 @@ export default function Dashboard() {
 
   async function submitManualReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!window.confirm("Review ini akan dikirim ke antrean Buffer untuk halaman Popbeez. Pastikan rating dan semua informasi sudah benar. Lanjutkan?")) return;
+    if (!window.confirm("Review ini akan diterbitkan ke halaman Popbeez. Tautan mengikuti aturan komentar pertama. Pastikan rating dan semua informasi sudah benar. Lanjutkan?")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -372,12 +372,12 @@ export default function Dashboard() {
   }
 
   async function publishOne() {
-    if (!window.confirm("Ini akan mengirim satu artikel sungguhan ke antrean Buffer. Buffer dapat menerbitkannya otomatis sesuai jadwal channel. Lanjutkan?")) return;
+    if (!window.confirm("Ini akan menerbitkan satu artikel sungguhan ke halaman tujuan. Posting langsung terbit di Facebook; jika memakai Buffer, post masuk antrean sesuai jadwal channel. Lanjutkan?")) return;
     setBusy(true);
     setMessage("");
     try {
       const result = await api("/api/cron");
-      setMessage(result.result === "queued" && result.title ? `Masuk antrean Buffer: ${result.title}` : result.title ? `Berhasil diproses: ${result.title}` : result.detail || "Siklus selesai.");
+      setMessage(result.result === "published" && result.title ? `Terbit di Facebook: ${result.title}` : result.result === "queued" && result.title ? `Masuk antrean Buffer: ${result.title}` : result.title ? `Berhasil diproses: ${result.title}` : result.detail || "Siklus selesai.");
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Pipeline gagal.");
@@ -490,8 +490,8 @@ export default function Dashboard() {
               </div>
             </fieldset>)}
           </div>
-          <button type="submit" className="primary-button" disabled={busy}>{busy ? "Menyusun carousel…" : "Buat review & kirim ke antrean Buffer"}</button>
-          <p className="muted small-note">Pastikan kamu memiliki izin menggunakan tautan gambar. Pengiriman ini langsung memasukkan post ke antrean Buffer; rating dan urutan berasal dari data yang kamu isi. Jika review sudah terlanjur masuk Buffer dan perlu diperbaiki, hapus dulu update tersebut di antrean Buffer, lalu kirim ulang sekali dari formulir ini. Jangan mengirim dua kali tanpa menghapus yang lama supaya tidak ada duplikat.</p>
+          <button type="submit" className="primary-button" disabled={busy}>{busy ? "Menyusun carousel…" : "Terbitkan review"}</button>
+          <p className="muted small-note">Pastikan kamu memiliki izin menggunakan tautan gambar. Caption review tidak memuat tautan; tautan follow ditaruh di komentar pertama. Rating dan urutan berasal dari data yang kamu isi. Jika review perlu diperbaiki setelah terbit, hapus dulu post lama di Facebook/Buffer, lalu terbitkan ulang sekali. Jangan menerbitkan dua kali tanpa menghapus yang lama supaya tidak ada duplikat.</p>
         </form>
       </section>
 
@@ -573,7 +573,7 @@ export default function Dashboard() {
             </article>
           })}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>
-          {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Kirim 1 berita ke Buffer"}</button>}
+          {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Terbitkan"}</button>}
           {!canPublish && <p className="muted small-note">Tombol pengiriman aktif setelah feed, minimal satu penyedia AI, URL aplikasi, pengaman cron, Buffer API key, dan ID channel Buffer untuk setiap halaman tujuan siap.</p>}
         </section>
       </div>

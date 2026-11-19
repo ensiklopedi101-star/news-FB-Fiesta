@@ -7,10 +7,11 @@ import { MANUAL_REVIEW_SOURCE_NAME } from "@/lib/manual-review";
 import { writeNewsCopy } from "@/lib/ai";
 import { getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
-import { FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
+import { addPageComment, FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
 import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
 import { indonesianTranslationUrl } from "@/lib/translation-url";
+import { shortenArticleUrl } from "@/lib/shortlink";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -183,11 +184,17 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
     }
-    const captionSourceUrl = article.pageKey === "entertainment"
+    const sourceLinkTarget = article.pageKey === "entertainment"
       ? indonesianTranslationUrl(article.sourceUrl)
       : article.sourceUrl;
+    const shareLink = await shortenArticleUrl(sourceLinkTarget, article.id);
     const followLink = article.pageKey === "entertainment" ? "\n\nIkuti Popbeez: https://www.facebook.com/portalbeez" : "";
-    const caption = `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${captionSourceUrl}${followLink}`;
+    // Direct Graph posts keep the caption link-free so Meta does not suppress reach;
+    // the source link is posted as the first comment right after publishing.
+    const caption = directFacebook
+      ? `${copy.caption}\n\n📰 ${article.sourceName}`
+      : `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${shareLink}${followLink}`;
+    const firstComment = directFacebook ? `🔗 Sumber: ${shareLink}${followLink}` : "";
     carouselSlides = article.postFormat === "carousel" ? copy.carouselSlides : null;
     await db.update(articles)
       .set({
@@ -231,6 +238,21 @@ export async function runNewsPipeline(): Promise<RunResult> {
         })
         .where(eq(articles.id, article.id));
       logStage("facebook-published");
+
+      if (firstComment) {
+        try {
+          await addPageComment(article.pageKey, result.postId, firstComment);
+          logStage("facebook-comment-added");
+        } catch (commentError) {
+          const commentMessage = commentError instanceof Error ? commentError.message : "Komentar sumber gagal dikirim.";
+          await db.update(articles)
+            .set({ errorMessage: `Posting berhasil; komentar sumber gagal: ${commentMessage}`.slice(0, 1_000), updatedAt: new Date() })
+            .where(eq(articles.id, article.id));
+          console.error(`[pipeline] komentar sumber gagal untuk ${article.id}:`, commentMessage);
+          logStage("facebook-comment-failed");
+        }
+      }
+
       return {
         result: "published",
         articleId: article.id,

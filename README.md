@@ -15,11 +15,11 @@ Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS
 - News card satu gambar atau eksperimen carousel empat slide pada `/api/og/{articleId}`; 50% artikel baru mendapat varian carousel secara stabil berdasarkan hash URL, 50% tetap satu gambar sebagai pembanding. Slide carousel memuat cover, dua fakta ringkas bersumber, dan pertanyaan komunitas. Dashboard menandai format aktual; performa jangkauan/engagement masih perlu dibandingkan manual melalui Facebook Insights hingga Meta API tersedia. Logo Nusabeez/Popbeez tertanam dari aset proyek.
 - Deteksi gambar RSS mencakup enclosure, Media RSS (termasuk media:group), `content:encoded`, description/summary, gambar lazy-load, dan srcset; fallback halaman artikel memakai `og:image`, lalu latar fallback lokal.
 - Dashboard menampilkan pratinjau aktual news card, indikator apakah foto sumber ditemukan, status token Blob, serta hasil panen berupa jumlah foto terdeteksi dan berhasil disimpan ke Blob.
-- Mengirim foto + caption ke antrean Buffer pada channel Facebook Page sesuai `page_key`; Buffer menerbitkan otomatis mengikuti jadwal channel. URL sumber disertakan di akhir caption agar kompatibel dengan paket Buffer tanpa fitur komentar pertama.
+- Halaman hiburan (Popbeez) menerbitkan langsung ke Facebook Graph API: caption bebas tautan, lalu tautan sumber/terjemahan dan tautan follow dikirim sebagai komentar pertama. Halaman berita memakai Buffer, dan tautan sumber di caption-nya memakai short link domain sendiri agar tidak terlihat seperti tautan luar yang panjang. Buffer pada paket tanpa fitur komentar pertama tetap menaruh tautan di caption.
 - Endpoint cron yang dilindungi `CRON_SECRET`, endpoint health check, dan endpoint untuk memasukkan ulang artikel gagal.
 - Penjadwalan panen RSS dan pemicu publisher dilakukan oleh cron-job.org melalui endpoint aplikasi yang dilindungi `CRON_SECRET`; tidak menggunakan GitHub Actions.
 
-Setiap siklus panen memproses maksimal 50 kandidat berita ke antrean `queued` di Neon; deduplikasi URL mencegah artikel yang sama masuk dua kali. Saat panen, sistem mencoba mengambil maksimal dua paragraf isi artikel (maks. 1.500 karakter) dan foto `og:image`; jika gagal atau diblokir, sistem tetap memakai teks/gambar RSS. Publisher mengirim maksimal satu artikel per siklus ke antrean Buffer, tidak mengambil feed saat proses rilis, dan menerapkan batas maksimal **2 pengiriman dalam 60 menit** dengan jeda minimum **15 menit**. Dengan antrean penuh, batas teoritisnya 48 post Buffer per hari; Buffer sendiri menerbitkannya sesuai slot jadwal channel. Pastikan feed menyediakan konten yang cukup dan atur jadwal Buffer sesuai volume yang diinginkan. Feed yang gagal dicatat di dashboard. Hanya berita yang berumur maksimal 7 jam sejak waktu terbit sumber yang dipertahankan; berita lebih lama otomatis dikeluarkan dari antrean. Jika feed RSS tidak menyediakan waktu terbit, umur dihitung sejak berita masuk ke sistem. Dashboard menampilkan nomor urutan antrean dan memungkinkan berita yang masih berstatus antre untuk dikeluarkan secara manual.
+Setiap siklus panen memproses maksimal 50 kandidat berita ke antrean `queued` di Neon; deduplikasi URL mencegah artikel yang sama masuk dua kali. Saat panen, sistem mencoba mengambil maksimal dua paragraf isi artikel (maks. 1.500 karakter) dan foto `og:image`; jika gagal atau diblokir, sistem tetap memakai teks/gambar RSS. Publisher mengirim maksimal satu artikel per siklus ke antrean Buffer, tidak mengambil feed saat proses rilis, dan menerapkan batas maksimal **5 pengiriman dalam 60 menit** dengan jeda minimum **12 menit** untuk publikasi otomatis. Dengan antrean penuh, batas teoritisnya 120 post per hari; Buffer sendiri menerbitkannya sesuai slot jadwal channel. Pastikan feed menyediakan konten yang cukup dan atur jadwal Buffer sesuai volume yang diinginkan. Feed yang gagal dicatat di dashboard. Hanya berita yang berumur maksimal 7 jam sejak waktu terbit sumber yang dipertahankan; berita lebih lama otomatis dikeluarkan dari antrean. Jika feed RSS tidak menyediakan waktu terbit, umur dihitung sejak berita masuk ke sistem. Dashboard menampilkan nomor urutan antrean dan memungkinkan berita yang masih berstatus antre untuk dikeluarkan secara manual.
 
 ## 1. Siapkan database Neon (kamu yang memasang)
 
@@ -36,6 +36,7 @@ Setiap siklus panen memproses maksimal 50 kandidat berita ke antrean `queued` di
 9. Jalankan [`drizzle/0006_article_image_gallery.sql`](./drizzle/0006_article_image_gallery.sql) untuk menyimpan hingga tiga foto artikel per berita; gambar utama yang sudah ada akan disalin sebagai fallback.
 10. Jalankan [`drizzle/0007_queue_priority.sql`](./drizzle/0007_queue_priority.sql) untuk menambahkan pengaturan prioritas antrean.
 11. Jalankan [`drizzle/0008_manual_images.sql`](./drizzle/0008_manual_images.sql) untuk mengaktifkan penggantian gambar manual pada artikel antrean.
+12. Jalankan [`drizzle/0009_short_links.sql`](./drizzle/0009_short_links.sql) untuk mengaktifkan short link domain sendiri (`/s/<slug>`) dan penghitungan klik.
 11. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
@@ -56,7 +57,8 @@ Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kand
 - `BUFFER_API_KEY`: API key Buffer (Bearer token), simpan hanya sebagai environment variable Vercel.
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
-- `APP_URL`: URL HTTPS deployment publik tanpa slash di akhir. Buffer mengambil news card dari URL ini.
+- `APP_URL`: URL HTTPS deployment publik tanpa slash di akhir. Buffer/Facebook mengambil news card dan short link dari URL ini.
+- `SHORTLINK_BASE_URL`: opsional, domain pendek sendiri (HTTPS) yang diarahkan ke project Vercel yang sama, misalnya `https://pop.beez.id`. Jika kosong, short link memakai `APP_URL`.
 - `BLOB_READ_WRITE_TOKEN`: token akses Vercel Blob. Buat Blob Store pada project Vercel; Vercel akan memasang token ini sebagai environment variable. Proses panen menyimpan gambar artikel baru ke Blob dan memperbarui `articles.image_url` di Neon. Endpoint OG menormalkan gambar ke JPEG sebelum `ImageResponse` merendernya. Tidak ada migrasi schema.
 - `PAGE_BRAND_NEWS`, `PAGE_BRAND_ENTERTAINMENT`: nama yang dicetak pada kartu masing-masing Page.
 - Logo default tersedia di `public/brand/nusabeez_icon.png` dan `public/brand/popbeez_icon.png`; URL custom per Page bisa diatur lewat `PAGE_LOGO_NEWS_URL` atau `PAGE_LOGO_ENTERTAINMENT_URL`, dengan `PAGE_LOGO_URL` sebagai fallback bersama.
@@ -97,6 +99,17 @@ Jika `FB_ENTERTAINMENT_PAGE_ID` dan `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN` diisi, 
 4. Review manual Popbeez (enam slide) ikut memakai jalur langsung dan tidak dibatasi kuota Buffer.
 
 Halaman berita tetap memakai Buffer. Jika dua variabel hiburan itu kosong, halaman hiburan otomatis kembali ke Buffer sehingga aplikasi tetap berjalan. Token dan Page ID hanya disimpan sebagai environment variable Vercel, bukan di Neon atau repositori.
+
+### Short link domain sendiri
+
+Aplikasi menyimpan short link di tabel `short_links` (Neon) dan mengarahkannya lewat route `/s/<slug>`:
+
+1. Tambahkan domain pendek ke project Vercel yang sama, lalu set `SHORTLINK_BASE_URL` ke domain itu.
+2. Jalankan migrasi `drizzle/0009_short_links.sql`.
+3. Setiap tautan sumber yang dipakai untuk caption/komentar otomatis dibuatkan slug deterministik, sehingga URL yang sama memakai short link dan penghitung klik yang sama.
+4. Jumlah klik tersimpan di kolom `clicks` dan `last_clicked_at` pada `short_links`; bisa dibaca langsung dari Neon.
+
+Jika tabel atau domain belum siap, aplikasi otomatis memakai URL asli sehingga publikasi tidak gagal.
 
 Aplikasi membuat post dengan mode **Add to Queue**. Pastikan channel Facebook Page Buffer diatur untuk auto-publishing, bukan notifikasi manual, jika ingin publikasi otomatis. Batas/rencana API dan ketersediaannya mengikuti akun Buffer. Tidak perlu membuat Meta App/Page Access Token untuk alur posting lewat Buffer. Daftar RSS tetap dikelola di dashboard aplikasi dan disimpan di Neon; feed Google News/HanCinema yang dipreset nonaktif harus ditinjau dulu.
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildManualReviewCaption, createManualReview, manualImageReferer, parseManualReview } from "../src/lib/manual-review";
+import { buildManualReviewCaption, createManualReview, MANUAL_REVIEW_FOLLOW_COMMENT, manualImageReferer, parseManualReview } from "../src/lib/manual-review";
 
 const sample = {
   headline: "5 Drama Rating Tertinggi Minggu Ini",
@@ -20,11 +20,12 @@ test("sorts manual review entries by descending rating and persists the same ord
   assert.deepEqual(parseManualReview(JSON.stringify(review))?.items.map((item) => item.title), review.items.map((item) => item.title));
 });
 
-test("manual review caption keeps numbered winners and a Popbeez follow CTA", () => {
+test("manual review caption keeps numbered winners without external links", () => {
   const caption = buildManualReviewCaption(createManualReview(sample));
   assert.match(caption, /1️⃣ JUARA MINGGU INI: Drama A/);
   assert.match(caption, /5️⃣ Drama B/);
-  assert.match(caption, /https:\/\/www\.facebook\.com\/portalbeez/);
+  assert.doesNotMatch(caption, /https?:\/\//);
+  assert.match(MANUAL_REVIEW_FOLLOW_COMMENT, /https:\/\/www\.facebook\.com\/portalbeez/);
 });
 
 test("manual review requires exactly five items and safe HTTPS image links", () => {
