@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { facebookPostUrl, splitArticleSections } from "@/lib/article-sections";
 
 type Feed = {
   id: string;
@@ -34,6 +35,7 @@ type Article = {
   postFormat: "single" | "carousel";
   carouselSlides: string[] | null;
   publishedAt: string | null;
+  updatedAt: string;
   queuePosition: number | null;
 };
 
@@ -411,6 +413,59 @@ export default function Dashboard() {
   const checks = data?.integrations ?? {};
   const feedPages = new Set(data?.feeds.filter((feed) => feed.active).map((feed) => feed.pageKey) ?? []);
   const canPublish = Boolean(data?.readyToPublish);
+  const sections = splitArticleSections(data?.articles ?? []);
+  const pendingCount = sections.queue.length + sections.waiting.length + sections.failed.length;
+
+  function renderArticleCard(article: Article) {
+    const isManualReview = article.sourceName === "Review manual Popbeez";
+    const previewSlides = isManualReview && article.postFormat === "carousel" ? [1, 2, 3, 4, 5, 6] : article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1];
+    const slideTotal = isManualReview ? 6 : 4;
+    const postUrl = facebookPostUrl(article.facebookPostId);
+    return (
+      <article className="article-row" key={article.id}>
+        <div className="article-row-top">
+          {article.queuePosition && <span className="queue-position">#{article.queuePosition}</span>}
+          {article.status === "queued" && article.priorityAt && <span className="status-tag priority">PRIORITAS</span>}
+          <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
+          <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
+          <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
+          {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
+          {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
+        </div>
+        <strong>{article.title}</strong>
+        <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
+        {article.status === "published" && <div className="article-meta published-meta">Terbit di Facebook: {formatDate(article.publishedAt)}</div>}
+        {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
+        <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
+          <div className="article-preview-gallery">
+            {previewSlides.map((slideNumber) => {
+              const hasSlides = isManualReview ? article.postFormat === "carousel" : article.postFormat === "carousel" && article.carouselSlides?.length === 3;
+              const slideUrl = hasSlides ? `/api/og/${article.id}?slide=${slideNumber}` : `/api/og/${article.id}`;
+              return <a href={slideUrl} target="_blank" rel="noreferrer" key={slideNumber} aria-label={`Buka slide ${slideNumber} news card: ${article.title}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={slideUrl} alt={`Pratinjau slide ${slideNumber}: ${article.title}`} loading="lazy" />
+                {hasSlides && <span>{slideNumber}/{slideTotal}</span>}
+              </a>;
+            })}
+          </div>
+          <div className="article-card-details">
+            <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? `${article.imageUrls?.length ?? 1} foto sumber terdeteksi` : "Belum ada gambar sumber"}</strong>
+            {!isManualReview && article.postFormat === "carousel" && article.carouselSlides?.length !== 3 && <small className="muted">Empat slide dibuat saat berita diproses.</small>}
+            <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Buka news card ukuran penuh ↗</a>
+            {article.imageUrl && <a className="article-source" href={article.imageUrl} target="_blank" rel="noreferrer">Buka foto sumber ↗</a>}
+          </div>
+        </div>
+        {article.status === "queued" && !isManualReview && <form className="manual-image-form" onSubmit={(event) => void saveManualImages(event, article)}>
+          <label>Gambar untuk news card (maksimal 2 URL HTTPS, satu per baris)<textarea value={imageDrafts[article.id] ?? article.manualImageUrls.join("\n")} onChange={(event) => setImageDrafts((current) => ({ ...current, [article.id]: event.target.value }))} rows={2} placeholder="https://.../gambar-1.jpg&#10;https://.../gambar-2.jpg" /></label>
+          <button type="submit" className="secondary-button" disabled={busy}>Simpan gambar manual</button>
+        </form>}
+        <div className="article-links">
+          <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka artikel sumber ↗</a>
+          {article.status === "published" && postUrl && <a className="article-source" href={postUrl} target="_blank" rel="noreferrer">Buka post Facebook ↗</a>}
+        </div>
+      </article>
+    );
+  }
 
   return (
     <main className="dashboard-shell">
@@ -429,7 +484,11 @@ export default function Dashboard() {
 
       <section className="stat-grid" aria-label="Statistik artikel">
         <article className="stat-card"><span>Total artikel tersimpan</span><strong>{data?.stats.articles ?? 0}</strong><small>Semua kategori</small></article>
-        <article className="stat-card"><span>Masuk antrean Buffer hari ini</span><strong>{data?.stats.bufferQueuedToday ?? 0}</strong><small>Buffer akan menerbitkan sesuai jadwal Page</small></article>
+        <article className="stat-card"><span>Antre sekarang</span><strong>{data?.stats.queued ?? 0}</strong><small>Belum dikirim ke Buffer/Facebook</small></article>
+        <article className="stat-card"><span>Menunggu jadwal</span><strong>{data?.stats.ready ?? 0}</strong><small>Sudah dikirim, belum tayang</small></article>
+        <article className="stat-card"><span>Terbit hari ini</span><strong>{data?.stats.publishedToday ?? 0}</strong><small>Sudah tayang di halaman</small></article>
+        <article className="stat-card"><span>Total terbit</span><strong>{data?.stats.published ?? 0}</strong><small>Sepanjang riwayat</small></article>
+        <article className="stat-card"><span>Masuk antrean Buffer hari ini</span><strong>{data?.stats.bufferQueuedToday ?? 0}</strong><small>Buffer menerbitkan sesuai jadwal Page</small></article>
         <article className="stat-card"><span>Feed aktif</span><strong>{data?.stats.enabledFeeds ?? 0}</strong><small>{data?.stats.totalFeeds ?? 0} feed tersimpan</small></article>
         <article className="stat-card"><span>Perlu perhatian</span><strong className={(data?.stats.failed ?? 0) > 0 ? "number-alert" : ""}>{data?.stats.failed ?? 0}</strong><small>Artikel gagal diproses</small></article>
       </section>
@@ -528,55 +587,35 @@ export default function Dashboard() {
         </section>
 
         <section className="panel articles-panel">
-          <div className="panel-heading"><div><p className="eyebrow">URUTAN PUBLIKASI</p><h2>Antrean berita</h2><p className="muted small-note">Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya, tetapi tidak mengubah post yang sudah masuk Buffer. Berita berumur lebih dari 7 jam dikeluarkan; tanpa waktu terbit RSS, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{data?.stats.queued ?? 0} antre</span><span>{data?.stats.published ?? 0} terbit</span></div></div>
-          {data?.articles.length ? <div className="article-list">{data.articles.map((article) => {
-            const isManualReview = article.sourceName === "Review manual Popbeez";
-            const previewSlides = isManualReview && article.postFormat === "carousel" ? [1, 2, 3, 4, 5, 6] : article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1];
-            const slideTotal = isManualReview ? 6 : 4;
-            return <article className="article-row" key={article.id}>
-              <div className="article-row-top">
-                {article.queuePosition && <span className="queue-position">#{article.queuePosition}</span>}
-                {article.status === "queued" && article.priorityAt && <span className="status-tag priority">PRIORITAS</span>}
-                <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
-                <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
-                <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
-                {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
-                {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
-              </div>
-              <strong>{article.title}</strong>
-              <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
-              {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
-              <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
-                <div className="article-preview-gallery">
-                  {previewSlides.map((slideNumber) => {
-                    const hasSlides = isManualReview ? article.postFormat === "carousel" : article.postFormat === "carousel" && article.carouselSlides?.length === 3;
-                    const slideUrl = hasSlides ? `/api/og/${article.id}?slide=${slideNumber}` : `/api/og/${article.id}`;
-                    return <a href={slideUrl} target="_blank" rel="noreferrer" key={slideNumber} aria-label={`Buka slide ${slideNumber} news card: ${article.title}`}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={slideUrl} alt={`Pratinjau slide ${slideNumber}: ${article.title}`} loading="lazy" />
-                      {hasSlides && <span>{slideNumber}/{slideTotal}</span>}
-                    </a>;
-                  })}
-                </div>
-                <div className="article-card-details">
-                  <strong className={article.imageUrl ? "image-status present" : "image-status missing"}>{article.imageUrl ? `${article.imageUrls?.length ?? 1} foto sumber terdeteksi` : "Belum ada gambar sumber"}</strong>
-                  {!isManualReview && article.postFormat === "carousel" && article.carouselSlides?.length !== 3 && <small className="muted">Empat slide dibuat saat berita diproses.</small>}
-                  <a className="article-source" href={`/api/og/${article.id}`} target="_blank" rel="noreferrer">Buka news card ukuran penuh ↗</a>
-                  {article.imageUrl && <a className="article-source" href={article.imageUrl} target="_blank" rel="noreferrer">Buka foto sumber ↗</a>}
-                </div>
-              </div>
-              {article.status === "queued" && !isManualReview && <form className="manual-image-form" onSubmit={(event) => void saveManualImages(event, article)}>
-                <label>Gambar untuk news card (maksimal 2 URL HTTPS, satu per baris)<textarea value={imageDrafts[article.id] ?? article.manualImageUrls.join("\n")} onChange={(event) => setImageDrafts((current) => ({ ...current, [article.id]: event.target.value }))} rows={2} placeholder="https://.../gambar-1.jpg&#10;https://.../gambar-2.jpg" /></label>
-                <button type="submit" className="secondary-button" disabled={busy}>Simpan gambar manual</button>
-              </form>}
-              <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka artikel sumber ↗</a>
-            </article>
-          })}</div> : <div className="empty-state"><strong>Belum ada artikel.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
+          <div className="panel-heading"><div><p className="eyebrow">BELUM TERBIT</p><h2>Antrean & menunggu jadwal</h2><p className="muted small-note">Bagian ini hanya berisi artikel yang belum tayang. Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya, tetapi tidak mengubah post yang sudah masuk Buffer. Berita berumur lebih dari 7 jam dikeluarkan; tanpa waktu terbit RSS, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{sections.queue.length} antre</span><span>{sections.waiting.length} menunggu jadwal</span></div></div>
+
+          {sections.queue.length > 0 && <div className="article-group">
+            <div className="group-heading"><strong>Antrean lokal</strong><span>Dikirim satu per siklus publisher, dimulai dari nomor #{sections.queue[0]?.queuePosition ?? 1}.</span></div>
+            <div className="article-list">{sections.queue.map((article) => renderArticleCard(article))}</div>
+          </div>}
+
+          {sections.waiting.length > 0 && <div className="article-group">
+            <div className="group-heading"><strong>Sudah dikirim, menunggu jadwal</strong><span>Buffer/Facebook menerbitkannya sesuai slot jadwal halaman, jadi belum tayang saat ini.</span></div>
+            <div className="article-list">{sections.waiting.map((article) => renderArticleCard(article))}</div>
+          </div>}
+
+          {sections.failed.length > 0 && <div className="article-group">
+            <div className="group-heading"><strong>Gagal diproses</strong><span>Periksa pesan galat, lalu coba lagi atau keluarkan dari antrean.</span></div>
+            <div className="article-list">{sections.failed.map((article) => renderArticleCard(article))}</div>
+          </div>}
+
+          {pendingCount === 0 && <div className="empty-state"><strong>Belum ada artikel menunggu.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
+
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>
           {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Terbitkan"}</button>}
           {!canPublish && <p className="muted small-note">Tombol pengiriman aktif setelah feed, minimal satu penyedia AI, URL aplikasi, pengaman cron, Buffer API key, dan ID channel Buffer untuk setiap halaman tujuan siap.</p>}
         </section>
       </div>
+
+      <section className="panel published-panel">
+        <div className="panel-heading"><div><p className="eyebrow">SUDAH TERBIT</p><h2>Terbit di halaman</h2><p className="muted small-note">Post yang sudah tayang, terbaru di atas (maksimal 15). Label <code>Antrean Buffer</code> berarti post sudah diterima Buffer dan menunggu slotnya, belum tayang.</p></div><div className="queue-counts"><span>{data?.stats.publishedToday ?? 0} terbit hari ini</span><span>{data?.stats.published ?? 0} total terbit</span></div></div>
+        {sections.published.length > 0 ? <div className="article-list">{sections.published.map((article) => renderArticleCard(article))}</div> : <div className="empty-state"><strong>Belum ada post terbit.</strong><span>Setelah publisher mengirim artikel dan Buffer/Facebook menayangkannya, post akan muncul di sini.</span></div>}
+      </section>
 
       <footer className="dashboard-footer"><span>News FB Fiesta · Neon Postgres</span><span>Posting otomatis dapat menerbitkan konten sungguhan. Periksa feed dan izin gambar sebelum mengaktifkan jadwal.</span></footer>
     </main>
