@@ -85,6 +85,24 @@ export const shortLinks = pgTable(
   ],
 );
 
+export const quizEditions = pgTable(
+  "quiz_editions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    posterKeys: jsonb("poster_keys").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    reviewIds: jsonb("review_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    imageUrl: text("image_url"),
+    caption: text("caption"),
+    facebookPostId: text("facebook_post_id"),
+    errorMessage: text("error_message"),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("quiz_editions_created_idx").on(table.createdAt)],
+);
+
 export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
+export type QuizEdition = typeof quizEditions.$inferSelect;

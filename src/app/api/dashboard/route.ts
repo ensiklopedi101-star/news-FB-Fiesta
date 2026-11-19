@@ -4,7 +4,8 @@ import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { slotStateAt } from "@/lib/publish-slots";
-import { articles, publisherState, rssSources } from "@/lib/schema";
+import { quizIntervalDays, QUIZ_SCHEDULE_LABEL } from "@/lib/quiz";
+import { articles, publisherState, quizEditions, rssSources } from "@/lib/schema";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
 
@@ -85,6 +86,22 @@ export async function GET(request: NextRequest) {
       ...doneRows.map((article) => ({ ...article, queuePosition: null })),
     ];
 
+    // The quiz table arrives with drizzle/0010; the dashboard must keep working before that migration runs.
+    let lastQuiz: { postedAt: Date | null; imageUrl: string | null; facebookPostId: string | null; posterKeys: string[]; errorMessage: string | null } | null = null;
+    let quizSchemaReady = true;
+    try {
+      const [row] = await db.select({
+        postedAt: quizEditions.postedAt,
+        imageUrl: quizEditions.imageUrl,
+        facebookPostId: quizEditions.facebookPostId,
+        posterKeys: quizEditions.posterKeys,
+        errorMessage: quizEditions.errorMessage,
+      }).from(quizEditions).orderBy(desc(quizEditions.createdAt)).limit(1);
+      lastQuiz = row ?? null;
+    } catch {
+      quizSchemaReady = false;
+    }
+
     const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0, expired: 0, removed: 0 };
     for (const row of groupedStatuses) statusCounts[row.status] = row.value;
 
@@ -123,6 +140,16 @@ export async function GET(request: NextRequest) {
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       schedule: PUBLISH_POLICY,
       publishSchedule: slotStateAt(new Date()),
+      quiz: {
+        lastPostedAt: lastQuiz?.postedAt ?? null,
+        lastImageUrl: lastQuiz?.imageUrl ?? null,
+        lastPostId: lastQuiz?.facebookPostId ?? null,
+        lastError: lastQuiz?.errorMessage ?? null,
+        tiles: lastQuiz?.posterKeys.length ?? 0,
+        intervalDays: quizIntervalDays(),
+        schedule: QUIZ_SCHEDULE_LABEL,
+        schemaReady: quizSchemaReady,
+      },
       stats: {
         articles: articleTotal.value,
         publishedToday: publishedToday.value,
