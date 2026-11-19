@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { PUBLISH_POLICY } from "@/lib/schedule";
+import { slotStateAt } from "@/lib/publish-slots";
 import { articles, publisherState, rssSources } from "@/lib/schema";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
@@ -121,6 +122,7 @@ export async function GET(request: NextRequest) {
       },
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       schedule: PUBLISH_POLICY,
+      publishSchedule: slotStateAt(new Date()),
       stats: {
         articles: articleTotal.value,
         publishedToday: publishedToday.value,

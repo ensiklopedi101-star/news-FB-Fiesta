@@ -52,6 +52,7 @@ type DashboardData = {
   integrations: Record<string, boolean>;
   aiModels: { groq: string; gemini: string };
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
+  publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
   articles: Article[];
@@ -61,7 +62,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -395,8 +396,8 @@ export default function Dashboard() {
     setBusy(true);
     setMessage("");
     try {
-      const result = await api("/api/cron");
-      setMessage(result.result === "published" && result.title ? `Terbit di Facebook: ${result.title}` : result.result === "queued" && result.title ? `Masuk antrean Buffer: ${result.title}` : result.title ? `Berhasil diproses: ${result.title}` : result.detail || "Siklus selesai.");
+      const result = await api("/api/cron?force=1");
+      setMessage(result.result === "published" && result.title ? `Terbit di Facebook: ${result.title}` : result.result === "queued" && result.title ? `Masuk antrean Buffer: ${result.title}` : result.result === "outside-slot" ? (result.detail ?? "Di luar jadwal tayang.") : result.title ? `Berhasil diproses: ${result.title}` : result.detail || "Siklus selesai.");
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Pipeline gagal.");
@@ -430,6 +431,7 @@ export default function Dashboard() {
   const checks = data?.integrations ?? {};
   const feedPages = new Set(data?.feeds.filter((feed) => feed.active).map((feed) => feed.pageKey) ?? []);
   const canPublish = Boolean(data?.readyToPublish);
+  const publishSchedule = data?.publishSchedule;
   const sections = splitArticleSections(data?.articles ?? []);
   const liveCount = sections.done.filter((article) => isLivePost(article.status)).length;
   const failedCount = sections.done.filter((article) => article.status === "failed").length;
@@ -519,6 +521,14 @@ export default function Dashboard() {
         <div className="panel-heading"><div><p className="eyebrow">PEMERIKSAAN LAYANAN</p><h2>Apa yang sudah siap?</h2></div><span className="muted">Refresh otomatis tiap menit</span></div>
         <div className="check-grid">{Object.entries(integrationLabels).map(([key, label]) => <div className="check-item" key={key}><span className={checks[key] ? "check-dot good" : "check-dot"} />{label}<strong>{checks[key] ? "Siap" : "Belum"}</strong></div>)}</div>
         <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. {data?.schedule.maxPerHour ?? 5} pengiriman/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 12} menit. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
+        <div className="slot-row">
+          <div className="slot-head">
+            <strong>{publishSchedule?.enabled ? (publishSchedule.active ? `Jendela aktif: slot ${publishSchedule.activeSlot} WITA` : "Di luar jadwal tayang") : "Jadwal slot dimatikan"}</strong>
+            <span>{publishSchedule?.enabled && publishSchedule.nextSlot ? `Slot berikutnya ${publishSchedule.nextSlot} WITA · ${publishSchedule.minutesUntilNextSlot} menit lagi` : "Publisher otomatis boleh jalan kapan saja"}</span>
+          </div>
+          {(publishSchedule?.slots.length ?? 0) > 0 && <div className="slot-chips">{publishSchedule?.slots.map((slot) => <span key={slot} className={slot === publishSchedule.activeSlot ? "slot-chip active" : "slot-chip"}>{slot}</span>)}</div>}
+          <small className="muted small-note">Jam dalam WITA (UTC+8, tanpa DST). Publisher otomatis hanya mengirim dalam {publishSchedule?.graceMinutes ?? 14} menit setelah jam slot, meski cron berjalan setiap 15 menit. Tombol “Terbitkan” manual dan review manual melewati jadwal ini.</small>
+        </div>
         {feedPages.size > 0 && [...feedPages].some((key) => key === "news" || key === "entertainment") && (
           <p className="muted small-note">Halaman tujuan aktif: {[...feedPages].map((key) => key === "news" ? "Berita" : "Hiburan").join(" · ")}</p>
         )}
