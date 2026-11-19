@@ -93,6 +93,8 @@ function articleStatusLabel(article: Article) {
   if (article.status === "ready" && article.facebookPostId?.startsWith("facebook:pending:")) return "Perlu cek Facebook";
   if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:")) return "Antrean Buffer";
   if (article.status === "ready") return "Siap";
+  if (article.status === "queued") return "Antre";
+  if (article.status === "processing") return "Sedang dikirim";
   if (article.status === "published") return "Terbit";
   if (article.status === "expired") return "Kedaluwarsa";
   if (article.status === "removed") return "Dihapus";
@@ -429,9 +431,9 @@ export default function Dashboard() {
   const feedPages = new Set(data?.feeds.filter((feed) => feed.active).map((feed) => feed.pageKey) ?? []);
   const canPublish = Boolean(data?.readyToPublish);
   const sections = splitArticleSections(data?.articles ?? []);
-  const pendingCount = sections.queue.length + sections.sending.length + sections.failed.length;
   const liveCount = sections.done.filter((article) => isLivePost(article.status)).length;
-  const waitingSlotCount = sections.done.length - liveCount;
+  const failedCount = sections.done.filter((article) => article.status === "failed").length;
+  const waitingSlotCount = sections.done.length - liveCount - failedCount;
 
   function renderArticleCard(article: Article) {
     const isManualReview = article.sourceName === "Review manual Popbeez";
@@ -607,24 +609,14 @@ export default function Dashboard() {
         </section>
 
         <section className="panel articles-panel">
-          <div className="panel-heading"><div><p className="eyebrow">BELUM TERBIT</p><h2>Antrean yang belum dikirim</h2><p className="muted small-note">Bagian ini hanya berisi artikel yang belum dikirim ke Buffer/Facebook. Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya. Berita berumur lebih dari 7 jam dikeluarkan; tanpa waktu terbit RSS, umur dihitung sejak masuk antrean.</p></div><div className="queue-counts"><span>{sections.queue.length} antre</span><span>{sections.failed.length} gagal</span></div></div>
+          <div className="panel-heading"><div><p className="eyebrow">BELUM TERBIT</p><h2>Antrean yang belum dikirim</h2><p className="muted small-note">Bagian ini hanya berisi artikel yang masih menunggu dikirim. Artikel yang sedang dikirim, sudah dikirim, atau gagal dipindahkan ke panel <b>Sudah terbit</b> di bawah. Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya; berita berumur lebih dari 7 jam dikeluarkan.</p></div><div className="queue-counts"><span>{sections.queue.length} antre</span></div></div>
 
           {sections.queue.length > 0 && <div className="article-group">
             <div className="group-heading"><strong>Antrean lokal</strong><span>Dikirim satu per siklus publisher, dimulai dari nomor #{sections.queue[0]?.queuePosition ?? 1}.</span></div>
             <div className="article-list">{sections.queue.map((article) => renderArticleCard(article))}</div>
           </div>}
 
-          {sections.sending.length > 0 && <div className="article-group">
-            <div className="group-heading"><strong>Sedang dikirim</strong><span>Siklus publisher sedang memproses artikel ini sekarang.</span></div>
-            <div className="article-list">{sections.sending.map((article) => renderArticleCard(article))}</div>
-          </div>}
-
-          {sections.failed.length > 0 && <div className="article-group">
-            <div className="group-heading"><strong>Gagal diproses</strong><span>Periksa pesan galat, lalu coba lagi atau keluarkan dari antrean.</span></div>
-            <div className="article-list">{sections.failed.map((article) => renderArticleCard(article))}</div>
-          </div>}
-
-          {pendingCount === 0 && <div className="empty-state"><strong>Belum ada artikel menunggu.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
+          {sections.queue.length === 0 && <div className="empty-state"><strong>Belum ada artikel menunggu.</strong><span>Tambahkan feed lalu jalankan panen untuk mengisi antrean. Jadwal publisher hanya mengambil dari antrean ini.</span></div>}
 
           <button type="button" onClick={() => void harvestNow()} disabled={busy} className="secondary-button run-button">{busy ? "Memproses…" : "Panen RSS sekarang (tidak menerbitkan)"}</button>
           {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Terbitkan"}</button>}
@@ -633,8 +625,8 @@ export default function Dashboard() {
       </div>
 
       <section className="panel published-panel">
-        <div className="panel-heading"><div><p className="eyebrow">SUDAH TERBIT</p><h2>Sudah terbit & terkirim</h2><p className="muted small-note">Post yang sudah keluar dari antrean, terbaru di atas (maksimal 20). <b>Terbit</b> berarti sudah tayang di Facebook; <b>Antrean Buffer</b> berarti Buffer sudah menerima post dan menayangkannya pada slot jadwal halaman.</p></div><div className="queue-counts"><span>{liveCount} terbit</span><span>{waitingSlotCount} menunggu slot</span><span>{data?.stats.publishedToday ?? 0} terbit hari ini</span></div></div>
-        {sections.done.length > 0 ? <div className="article-list">{sections.done.map((article) => renderArticleCard(article))}</div> : <div className="empty-state"><strong>Belum ada post terkirim.</strong><span>Setelah publisher mengirim artikel, post akan muncul di sini.</span></div>}
+        <div className="panel-heading"><div><p className="eyebrow">SUDAH TERBIT</p><h2>Sudah terbit & terkirim</h2><p className="muted small-note">Semua artikel yang sudah keluar dari antrean, terbaru di atas (maksimal 20): <b>Terbit</b> sudah tayang di Facebook, <b>Antrean Buffer</b> sudah diterima Buffer dan menunggu slot jadwal, <b>Gagal</b> perlu dicoba ulang.</p></div><div className="queue-counts"><span>{liveCount} terbit</span><span>{waitingSlotCount} menunggu slot</span><span className={failedCount > 0 ? "count-alert" : ""}>{failedCount} gagal</span><span>{data?.stats.publishedToday ?? 0} terbit hari ini</span></div></div>
+        {sections.done.length > 0 ? <div className="article-list">{sections.done.map((article) => renderArticleCard(article))}</div> : <div className="empty-state"><strong>Belum ada post terkirim.</strong><span>Setelah publisher memproses artikel, hasilnya muncul di sini.</span></div>}
       </section>
 
       <footer className="dashboard-footer"><span>News FB Fiesta · Neon Postgres</span><span>Posting otomatis dapat menerbitkan konten sungguhan. Periksa feed dan izin gambar sebelum mengaktifkan jadwal.</span></footer>
