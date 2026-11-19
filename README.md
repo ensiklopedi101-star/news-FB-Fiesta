@@ -60,7 +60,8 @@ Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kand
 - `BLOB_READ_WRITE_TOKEN`: token akses Vercel Blob. Buat Blob Store pada project Vercel; Vercel akan memasang token ini sebagai environment variable. Proses panen menyimpan gambar artikel baru ke Blob dan memperbarui `articles.image_url` di Neon. Endpoint OG menormalkan gambar ke JPEG sebelum `ImageResponse` merendernya. Tidak ada migrasi schema.
 - `PAGE_BRAND_NEWS`, `PAGE_BRAND_ENTERTAINMENT`: nama yang dicetak pada kartu masing-masing Page.
 - Logo default tersedia di `public/brand/nusabeez_icon.png` dan `public/brand/popbeez_icon.png`; URL custom per Page bisa diatur lewat `PAGE_LOGO_NEWS_URL` atau `PAGE_LOGO_ENTERTAINMENT_URL`, dengan `PAGE_LOGO_URL` sebagai fallback bersama.
-- Kredensial Graph API Facebook lama hanya diperlukan untuk endpoint retry komentar dari postingan langsung lama; alur baru tidak memerlukan Page Access Token Meta.
+- `FB_ENTERTAINMENT_PAGE_ID` + `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN`: mengaktifkan publikasi langsung halaman hiburan (Popbeez) ke Facebook Graph API, termasuk review manual, tanpa Buffer. Token harus Page Access Token berumur panjang dengan izin `pages_manage_posts`. Halaman berita tetap memakai Buffer; `FB_NEWS_PAGE_ID`/`FB_NEWS_PAGE_ACCESS_TOKEN` hanya dipakai untuk retry komentar sumber.
+- `FB_GRAPH_VERSION`: opsional, default `v23.0`.
 
 ### Hubungkan Vercel Blob
 
@@ -85,6 +86,17 @@ Berkas gambar disimpan di Vercel Blob; Neon hanya menyimpan URL. Upload terjadi 
 3. Deploy ulang, buka dashboard News FB Fiesta, lalu tekan **Tampilkan ID channel Buffer (hanya baca)**. Pilih baris channel Facebook Page yang benar, lalu salin ID channel-nya.
 4. Tambahkan ID ke `BUFFER_NEWS_CHANNEL_ID` dan `BUFFER_ENTERTAINMENT_CHANNEL_ID` di Vercel Production, kemudian deploy ulang lagi.
 5. Dashboard menandai variabel Buffer tersedia jika API key dan ID channel halaman tujuan ada. Tekan **Tes Buffer & tampilkan ID channel (hanya baca)** untuk benar-benar menguji akses API dan mencocokkan setiap ID ke Facebook Page yang aktif; pemeriksaan ini tidak membuat post. Hasil setiap pemanggilan terjadwal dapat diperiksa di riwayat eksekusi cron-job.org dan log Vercel.
+
+### Publikasi langsung Facebook untuk Popbeez (opsional)
+
+Jika `FB_ENTERTAINMENT_PAGE_ID` dan `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN` diisi, halaman hiburan menerbitkan langsung ke Facebook Graph API:
+
+1. Satu gambar dikirim ke `POST /{page-id}/photos` dengan `published=true`.
+2. Carousel diunggah sebagai beberapa foto `published=false`, lalu digabung lewat `POST /{page-id}/feed` dengan field `attached_media[0..n]`.
+3. Status artikel langsung menjadi `published` dan ID posting Facebook disimpan di `facebook_post_id`.
+4. Review manual Popbeez (enam slide) ikut memakai jalur langsung dan tidak dibatasi kuota Buffer.
+
+Halaman berita tetap memakai Buffer. Jika dua variabel hiburan itu kosong, halaman hiburan otomatis kembali ke Buffer sehingga aplikasi tetap berjalan. Token dan Page ID hanya disimpan sebagai environment variable Vercel, bukan di Neon atau repositori.
 
 Aplikasi membuat post dengan mode **Add to Queue**. Pastikan channel Facebook Page Buffer diatur untuk auto-publishing, bukan notifikasi manual, jika ingin publikasi otomatis. Batas/rencana API dan ketersediaannya mengikuti akun Buffer. Tidak perlu membuat Meta App/Page Access Token untuk alur posting lewat Buffer. Daftar RSS tetap dikelola di dashboard aplikasi dan disimpan di Neon; feed Google News/HanCinema yang dipreset nonaktif harus ditinjau dulu.
 

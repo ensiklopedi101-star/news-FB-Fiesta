@@ -5,8 +5,9 @@ import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { isAuthorized } from "@/lib/auth";
 import { createManualReview, buildManualReviewCaption, MANUAL_REVIEW_SOURCE_NAME, manualImageReferer } from "@/lib/manual-review";
-import { enqueueBufferFacebookPost } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
+import { FacebookPublishOutcomeUnknownError } from "@/lib/facebook";
+import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
 
 export const runtime = "nodejs";
@@ -47,6 +48,7 @@ export async function POST(request: NextRequest) {
   const title = review.headline;
   const caption = buildManualReviewCaption(review);
   const imageUrls = Array.from({ length: 6 }, (_, index) => `${publicAppUrl}/api/og/${id}?slide=${index + 1}`);
+  const directFacebook = usesDirectFacebookPublishing("entertainment");
 
   try {
     const db = getDb();
@@ -65,16 +67,30 @@ export async function POST(request: NextRequest) {
       caption,
       status: "processing",
       postFormat: "carousel",
+      facebookPostId: `${directFacebook ? "facebook" : "buffer"}:pending:${id}`,
       createdAt,
       updatedAt: createdAt,
     });
 
-    const result = await enqueueBufferFacebookPost({
+    const result = await publishPost({
       pageKey: "entertainment",
       imageUrl: imageUrls[0]!,
       imageUrls,
       caption,
     });
+
+    if (result.provider === "facebook") {
+      await db.update(articles).set({
+        status: "published",
+        postFormat: result.mediaFormat,
+        facebookPostId: result.postId,
+        publishedAt: new Date(),
+        updatedAt: new Date(),
+        errorMessage: null,
+      }).where(eq(articles.id, id));
+      return NextResponse.json({ ok: true, id, title, mediaFormat: result.mediaFormat, provider: result.provider }, { status: 201 });
+    }
+
     await db.update(articles).set({
       status: "ready",
       postFormat: result.mediaFormat,
@@ -84,20 +100,21 @@ export async function POST(request: NextRequest) {
         ? "Buffer menolak carousel enam slide dan hanya menerima cover."
         : null,
     }).where(eq(articles.id, id));
-    return NextResponse.json({ ok: true, id, title, mediaFormat: result.mediaFormat }, { status: 201 });
+    return NextResponse.json({ ok: true, id, title, mediaFormat: result.mediaFormat, provider: result.provider }, { status: 201 });
   } catch (error) {
-    const unknown = error instanceof BufferEnqueueOutcomeUnknownError;
-    const message = error instanceof Error ? error.message : "Gagal mengirim review ke Buffer.";
+    const unknown = error instanceof BufferEnqueueOutcomeUnknownError || error instanceof FacebookPublishOutcomeUnknownError;
+    const message = error instanceof Error ? error.message : "Gagal mengirim review ke halaman Facebook.";
+    const provider = directFacebook ? "facebook" : "buffer";
     try {
       await getDb().update(articles).set({
         status: unknown ? "ready" : "failed",
-        facebookPostId: unknown ? `buffer:pending:${id}` : null,
+        facebookPostId: unknown ? `${provider}:pending:${id}` : null,
         errorMessage: message.slice(0, 1_000),
         updatedAt: new Date(),
       }).where(eq(articles.id, id));
     } catch {
-      console.error(`[manual-review] Could not save enqueue outcome for ${id}.`);
+      console.error(`[manual-review] Could not save publish outcome for ${id}.`);
     }
-    return NextResponse.json({ error: message }, { status: unknown ? 202 : 502 });
+    return NextResponse.json({ error: message, provider }, { status: unknown ? 202 : 502 });
   }
 }
