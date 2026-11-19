@@ -87,6 +87,16 @@ export function witaMinutes(date: Date): number {
   return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
 }
 
+/** Weekday in WITA: 0 = Sunday … 6 = Saturday. */
+export function witaWeekday(date: Date): number {
+  return new Date(date.getTime() + WITA_OFFSET_MINUTES * 60_000).getUTCDay();
+}
+
+/** Whole days since the Unix epoch in WITA, so day math ignores clock time and time zones. */
+export function witaDayNumber(date: Date): number {
+  return Math.floor((date.getTime() + WITA_OFFSET_MINUTES * 60_000) / 86_400_000);
+}
+
 /** `YYYY-MM-DD` in WITA, handy for logs and dashboards. */
 export function witaDateKey(date: Date): string {
   const shifted = new Date(date.getTime() + WITA_OFFSET_MINUTES * 60_000);

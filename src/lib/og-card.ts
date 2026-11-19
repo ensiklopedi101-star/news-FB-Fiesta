@@ -8,7 +8,7 @@ const WIDTH = 1080;
 const HEIGHT = 1080;
 let fontconfigPromise: Promise<void> | undefined;
 
-async function ensureBundledFonts(): Promise<void> {
+export async function ensureBundledFonts(): Promise<void> {
   if (!fontconfigPromise) {
     fontconfigPromise = (async () => {
       const fontsDirectory = resolve(process.cwd(), "assets/fonts");

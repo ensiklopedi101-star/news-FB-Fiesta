@@ -53,6 +53,7 @@ type DashboardData = {
   aiModels: { groq: string; gemini: string };
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
+  quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; intervalDays: number; schedule: string; schemaReady: boolean };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
   articles: Article[];
@@ -62,7 +63,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -323,6 +324,24 @@ export default function Dashboard() {
     }
   }
 
+  async function createQuizEdition() {
+    if (!window.confirm("Kuis Tebak Dramanya akan langsung diposting ke halaman Facebook Popbeez. Lanjutkan?")) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/quiz", { method: "POST" });
+      setMessage(result.result === "posted"
+        ? `Kuis terbit dengan ${result.titles?.length ?? 12} poster.`
+        : result.detail || "Kuis diproses.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal membuat kuis.");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importPresets() {
     if (!window.confirm("Masukkan preset sumber hiburan? Feed Google News dan HanCinema akan ditambahkan dalam keadaan nonaktif untuk ditinjau.")) return;
     setBusy(true);
@@ -559,6 +578,23 @@ export default function Dashboard() {
         {bufferMappings && <div className="setup-grid"><article className="setup-card"><span className={bufferMappings.news.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Berita</strong><p>{bufferMappingLabel(bufferMappings.news)}</p></div></article><article className="setup-card"><span className={bufferMappings.entertainment.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Hiburan</strong><p>{bufferMappingLabel(bufferMappings.entertainment)}</p></div></article></div>}
         {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}
         <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
+      </section>
+
+      <section className="panel quiz-panel">
+        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Dramanya</h2><p className="muted small-note">Grid 4×3 dari poster review manual Popbeez. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir dan tersedia minimal 12 poster unik.</p></div><span className="format-tag carousel">Popbeez · 12 poster</span></div>
+        {data?.quiz.lastImageUrl ? <div className="quiz-preview">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={data.quiz.lastImageUrl} alt="Edisi kuis terakhir" loading="lazy" />
+          <div className="quiz-preview-meta">
+            <strong>Edisi terakhir · {data.quiz.tiles} poster</strong>
+            <span>{formatDate(data.quiz.lastPostedAt)}</span>
+            {facebookPostUrl(data.quiz.lastPostId) && <a className="article-source" href={facebookPostUrl(data.quiz.lastPostId)!} target="_blank" rel="noreferrer">Buka post kuis ↗</a>}
+            {data.quiz.lastError && <p className="article-error">{data.quiz.lastError}</p>}
+          </div>
+        </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Terbitkan minimal tiga review manual (lima poster per review) agar ada 12 poster unik, lalu buat kuis pertama.</span></div>}
+        {!data?.quiz.schemaReady && <p className="muted small-note">Tabel <code>quiz_editions</code> belum ada. Jalankan <code>drizzle/0010_quiz_editions.sql</code> di Neon untuk mengaktifkan kuis.</p>}
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat & posting kuis sekarang"}</button>
+        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook Popbeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster.</p>
       </section>
 
       <section className="panel manual-review-panel">
