@@ -7,6 +7,7 @@ import { getDb } from "@/lib/db";
 import { articles, quizEditions } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderQuizCard } from "@/lib/quiz-card";
+import { renderAiSilhouette, silhouettePalette } from "@/lib/quiz-silhouette";
 import {
   buildQuizCaption,
   posterKey,
@@ -28,7 +29,8 @@ import { MANUAL_REVIEW_SOURCE_NAME, manualImageReferer, parseManualReview, type 
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Five image edits plus the render: the model can be slow, so allow the full function budget.
+export const maxDuration = 300;
 
 /** Cron calls GET once a day; the dashboard button calls POST to force an edition. */
 export async function GET(request: NextRequest) {
@@ -102,11 +104,26 @@ async function handle(request: NextRequest, forced: boolean) {
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   if (!token) return NextResponse.json({ error: "BLOB_READ_WRITE_TOKEN belum diatur; gambar kuis tidak bisa disimpan." }, { status: 503 });
 
-  const caption = buildQuizCaption({ tiles: QUIZ_TILES });
+  const caption = buildQuizCaption();
+
+  // Flat silhouettes need an image model: no eye/nose/mouth and no printed title may survive.
+  // When the model is unavailable the local renderer still produces a flat paper-cut tile.
+  const useAi = process.env.QUIZ_SILHOUETTE_AI?.trim() !== "0";
+  const prepared: boolean[] = [];
+  const art = await Promise.all(tiles.map(async (tile, index) => {
+    if (!useAi) return tile.bytes;
+    const drawn = await renderAiSilhouette(tile.bytes, { palette: silhouettePalette(index) });
+    prepared[index] = drawn !== null;
+    return drawn ?? tile.bytes;
+  }));
+  const aiCount = prepared.filter(Boolean).length;
+  console.info(`[quiz] silhouette art: ${aiCount}/${tiles.length} dari model gambar`);
+
   let grid: Buffer;
   try {
     grid = await renderQuizCard({
-      tiles: tiles.map((tile) => tile.bytes),
+      tiles: art,
+      prepared,
       label: QUIZ_LABEL,
       sublabel: QUIZ_SUBLABEL,
       brand: process.env.PAGE_BRAND_ENTERTAINMENT?.trim() || "Popbeez",

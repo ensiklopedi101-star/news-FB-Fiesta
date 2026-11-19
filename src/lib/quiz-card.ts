@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
 import { ensureBundledFonts } from "./og-card";
+import { renderSilhouette, silhouettePalette } from "./quiz-silhouette";
 
 /**
  * Square 2×3 quiz grid: five poster cells plus a branded cell in the bottom-right
@@ -18,8 +19,6 @@ export const QUIZ_CELL_COUNT = QUIZ_COLUMNS * QUIZ_ROWS;
 export const QUIZ_POSTER_CELLS = QUIZ_CELL_COUNT - 1;
 export const QUIZ_BRAND_CELL_INDEX = QUIZ_POSTER_CELLS;
 
-const POSTER_PADDING = 16;
-
 export type QuizCardOptions = {
   /** Exactly `QUIZ_POSTER_CELLS` JPEG/PNG payloads, row by row. */
   tiles: Array<Uint8Array | Buffer>;
@@ -30,6 +29,8 @@ export type QuizCardOptions = {
   handle?: string;
   /** Optional logo payload for the brand cell; the bundled Popbeez icon is used otherwise. */
   logo?: Uint8Array | Buffer | null;
+  /** Tiles that are already flat silhouette art (AI-drawn), so they must not be re-processed. */
+  prepared?: boolean[];
 };
 
 function escapeXml(value: string): string {
@@ -95,35 +96,62 @@ function buildBrandPanel(options: QuizCardOptions): Buffer {
 }
 
 /**
- * Posters are portrait, the cells are landscape, so each cell gets a blurred
- * copy of its own poster as a backdrop with the uncropped poster centred on top.
+ * Posters are photographic and carry their own title, so each cell is redrawn as a
+ * flat silhouette: no face, no lettering, just the shape of the drama on paper.
  */
-async function renderPosterCell(tile: Uint8Array | Buffer): Promise<Buffer> {
-  const source = Buffer.from(tile);
-  const backdrop = await sharp(source, { limitInputPixels: 40_000_000 })
-    .rotate()
-    .resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { fit: "cover", position: "centre" })
-    .blur(26)
-    .modulate({ brightness: 0.48, saturation: 0.85 })
-    .jpeg({ quality: 82 })
-    .toBuffer();
+async function renderPosterCell(tile: Uint8Array | Buffer, index: number, prepared: boolean): Promise<Buffer> {
+  const palette = silhouettePalette(index);
+  const margin = 14;
+  const art = prepared
+    ? await preparedArt(tile, QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT)
+    : await renderSilhouette(tile, {
+        palette,
+        width: Math.round(QUIZ_CELL_WIDTH * 0.62),
+        height: QUIZ_CELL_HEIGHT - margin * 2,
+      });
+  if (prepared) return sharp(art).jpeg({ quality: 92 }).toBuffer();
 
-  const poster = await sharp(source, { limitInputPixels: 40_000_000 })
-    .rotate()
-    .resize(QUIZ_CELL_WIDTH - POSTER_PADDING * 2, QUIZ_CELL_HEIGHT - POSTER_PADDING * 2, { fit: "inside" })
+  const sheet = await sharp({
+    create: { width: QUIZ_CELL_WIDTH, height: QUIZ_CELL_HEIGHT, channels: 3, background: palette.paper },
+  }).png().toBuffer();
+  return sharp(sheet)
+    .composite([{
+      input: art,
+      left: Math.round((QUIZ_CELL_WIDTH - Math.round(QUIZ_CELL_WIDTH * 0.62)) / 2),
+      top: margin,
+    }])
     .jpeg({ quality: 90 })
     .toBuffer();
-  const metadata = await sharp(poster).metadata();
-  const width = metadata.width ?? QUIZ_CELL_WIDTH - POSTER_PADDING * 2;
-  const height = metadata.height ?? QUIZ_CELL_HEIGHT - POSTER_PADDING * 2;
+}
 
-  return sharp(backdrop)
+/**
+ * Flat art that already carries its own paper colour is only fitted to the cell:
+ * the artwork is centred on a sheet of its own background tone.
+ */
+async function preparedArt(tile: Uint8Array | Buffer, width: number, height: number): Promise<Buffer> {
+  // Never crop hand-drawn silhouettes: fit the whole artwork on a sheet of its own paper tone.
+  const fitted = await sharp(Buffer.from(tile), { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize(width, height, { fit: "inside" })
+    .png()
+    .toBuffer();
+  const metadata = await sharp(fitted).metadata();
+  const artWidth = metadata.width ?? width;
+  const artHeight = metadata.height ?? height;
+  // The paper tone is whatever the artwork's top-left corner is; the ink shape is dominant.
+  const [paperRed = 247, paperGreen = 231, paperBlue = 207] = await sharp(fitted)
+    .extract({ left: 0, top: 0, width: 1, height: 1 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const background = { r: paperRed, g: paperGreen, b: paperBlue };
+  return sharp({ create: { width, height, channels: 3, background } })
     .composite([{
-      input: poster,
-      left: Math.max(0, Math.round((QUIZ_CELL_WIDTH - width) / 2)),
-      top: Math.max(0, Math.round((QUIZ_CELL_HEIGHT - height) / 2)),
+      input: fitted,
+      left: Math.round((width - artWidth) / 2),
+      top: Math.round((height - artHeight) / 2),
     }])
-    .jpeg({ quality: 88 })
+    .png()
     .toBuffer();
 }
 
@@ -137,7 +165,7 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
   const layers: Array<{ input: Buffer; left: number; top: number }> = [];
   for (const [index, tile] of tiles.entries()) {
     layers.push({
-      input: await renderPosterCell(tile),
+      input: await renderPosterCell(tile, index, options.prepared?.[index] ?? false),
       left: (index % QUIZ_COLUMNS) * QUIZ_CELL_WIDTH,
       top: Math.floor(index / QUIZ_COLUMNS) * QUIZ_CELL_HEIGHT,
     });
