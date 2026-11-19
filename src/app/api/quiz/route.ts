@@ -10,8 +10,11 @@ import { renderQuizCard } from "@/lib/quiz-card";
 import {
   buildQuizCaption,
   posterKey,
+  quizAvailablePosters,
   quizIntervalDays,
+  quizPosterUsage,
   QUIZ_LABEL,
+  QUIZ_MAX_USES,
   QUIZ_SCHEDULE_LABEL,
   QUIZ_SUBLABEL,
   QUIZ_TILES,
@@ -40,12 +43,13 @@ async function handle(request: NextRequest, forced: boolean) {
   if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
+  // Every past edition is read, because each poster may only appear in three quizzes.
   const editions = await db.select({
     id: quizEditions.id,
     posterKeys: quizEditions.posterKeys,
     postedAt: quizEditions.postedAt,
     createdAt: quizEditions.createdAt,
-  }).from(quizEditions).orderBy(desc(quizEditions.createdAt)).limit(6);
+  }).from(quizEditions).orderBy(desc(quizEditions.createdAt));
 
   const lastPostedAt = editions.find((edition) => edition.postedAt)?.postedAt ?? null;
   const intervalDays = quizIntervalDays();
@@ -65,21 +69,21 @@ async function handle(request: NextRequest, forced: boolean) {
 
   const reviews = await loadQuizReviews();
   const posters = quizPostersFromReviews(reviews);
-  if (posters.length < QUIZ_TILES) {
+
+  // Each poster may appear in at most three quizzes; the edition history marks the used ones.
+  const usage = quizPosterUsage(editions);
+  const available = quizAvailablePosters(posters, { usage, maxUses: QUIZ_MAX_USES });
+  if (available.length < QUIZ_TILES) {
+    const exhausted = posters.length - available.length;
     return NextResponse.json({
-      error: `Butuh ${QUIZ_TILES} poster dari review manual, baru tersedia ${posters.length}. Terbitkan review mingguan dulu (5 poster per review) sebelum membuat kuis.`,
+      error: `Butuh ${QUIZ_TILES} poster yang masih bisa dipakai, baru tersedia ${available.length}. ${exhausted > 0 ? `${exhausted} poster sudah mencapai batas ${QUIZ_MAX_USES}× kuis. ` : ""}Terbitkan review manual baru dulu (5 poster per review).`,
       posters: posters.length,
+      available: available.length,
+      maxUses: QUIZ_MAX_USES,
     }, { status: 409 });
   }
 
-  // Posters already used in recent editions are deprioritised, not banned: the pool is small.
-  const usage: Record<string, number> = {};
-  for (const edition of editions) {
-    for (const key of edition.posterKeys ?? []) {
-      usage[key] = Math.max(usage[key] ?? 0, edition.createdAt.getTime());
-    }
-  }
-  const selected = selectQuizPosters(posters, { count: QUIZ_TILES, usage });
+  const selected = selectQuizPosters(available, { count: QUIZ_TILES, usage, maxUses: QUIZ_MAX_USES });
   const reviewIds = [...new Set(selected.map((poster) => poster.reviewId))];
 
   const fetched = await Promise.all(selected.map(async (poster) => {
@@ -160,7 +164,7 @@ async function handle(request: NextRequest, forced: boolean) {
   }
 }
 
-/** Newest manual reviews first; each review contributes up to five posters. */
+/** Newest manual reviews first; each review contributes up to five posters (pool for many editions). */
 async function loadQuizReviews(): Promise<QuizReview[]> {
   const rows = await getDb().select({ id: articles.id, rawText: articles.rawText, createdAt: articles.createdAt })
     .from(articles)
@@ -169,7 +173,7 @@ async function loadQuizReviews(): Promise<QuizReview[]> {
       inArray(articles.status, ["ready", "published"]),
     ))
     .orderBy(desc(articles.createdAt))
-    .limit(12);
+    .limit(24);
 
   const reviews: QuizReview[] = [];
   for (const row of rows) {
