@@ -4,6 +4,7 @@ import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { publisherState } from "@/lib/schema";
 import { runNewsPipeline } from "@/lib/pipeline";
+import { slotStateAt } from "@/lib/publish-slots";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,20 @@ export async function GET(request: NextRequest) {
   }
   const startedAt = Date.now();
   const requestId = request.headers.get("x-vercel-id") ?? "unknown";
-  console.info(`[cron] start requestId=${requestId}`);
+  // Manual "Terbitkan" presses and debugging calls pass ?force=1 to ignore the clock slots.
+  const forced = request.nextUrl.searchParams.get("force") === "1";
+  const slot = slotStateAt(new Date());
+  if (slot.enabled && !slot.active && !forced) {
+    console.info(`[cron] outside-slot requestId=${requestId} next=${slot.nextSlot} minutes=${slot.minutesUntilNextSlot}`);
+    return NextResponse.json({
+      ok: true,
+      result: "outside-slot",
+      detail: `Di luar jadwal tayang. Slot berikutnya ${slot.nextSlot} WITA (${slot.minutesUntilNextSlot} menit lagi).`,
+      nextSlot: slot.nextSlot,
+      minutesUntilNextSlot: slot.minutesUntilNextSlot,
+    }, { headers: { "Cache-Control": "no-store, max-age=0" } });
+  }
+  console.info(`[cron] start requestId=${requestId} slot=${slot.activeSlot ?? "off-slot"} forced=${forced}`);
   const db = getDb();
   await db.insert(publisherState).values({ id: 1 }).onConflictDoNothing();
   const [lock] = await db.update(publisherState)
