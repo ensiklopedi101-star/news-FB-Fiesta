@@ -108,6 +108,7 @@ Aplikasi menyimpan short link di tabel `short_links` (Neon) dan mengarahkannya l
 2. Jalankan migrasi `drizzle/0009_short_links.sql`.
 3. Setiap tautan sumber yang dipakai untuk caption/komentar otomatis dibuatkan slug deterministik, sehingga URL yang sama memakai short link dan penghitung klik yang sama.
 4. Jumlah klik tersimpan di kolom `clicks` dan `last_clicked_at` pada `short_links`; bisa dibaca langsung dari Neon.
+5. `popbeez.hivecomp.my.id` hanya melayani `/s/<slug>`; path lain di domain itu mengembalikan 404. Aplikasi/dashboard tetap di `portal-beez.vercel.app`. Batas ini diatur middleware dan bisa dipindah/dimatikan lewat `SHORTLINK_ONLY_HOST` (isi `off` untuk mematikan), misalnya saat subdomain itu dipakai sebagai frontend bisnis.
 
 Jika tabel atau domain belum siap, aplikasi otomatis memakai URL asli sehingga publikasi tidak gagal.
 
