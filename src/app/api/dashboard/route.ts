@@ -68,24 +68,25 @@ export async function GET(request: NextRequest) {
       publishedAt: articles.publishedAt,
       updatedAt: articles.updatedAt,
     };
-    // Three separate lists keep the dashboard readable: what still waits in the
-    // local queue, what was already handed to Buffer/Facebook (or failed), and
-    // what is actually live on the page. The client splits them again with
-    // `splitArticleSections` from `@/lib/article-sections`.
-    const [queueRows, pendingRows, publishedRows] = await Promise.all([
+    // Two groups keep the dashboard readable: rows that still have to leave it
+    // (queue, in-flight, failed) and rows that already left it (`ready` = accepted
+    // by Buffer and waiting for its slot, `published` = live on Facebook). The
+    // client splits them again with `splitArticleSections` from
+    // `@/lib/article-sections`.
+    const [queueRows, pendingRows, doneRows] = await Promise.all([
       db.select(articleFields).from(articles).where(eq(articles.status, "queued"))
         .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
       db.select(articleFields).from(articles)
-        .where(inArray(articles.status, ["processing", "ready", "failed"]))
+        .where(inArray(articles.status, ["processing", "failed"]))
         .orderBy(asc(articles.updatedAt)).limit(25),
       db.select(articleFields).from(articles)
-        .where(eq(articles.status, "published"))
-        .orderBy(desc(articles.publishedAt)).limit(15),
+        .where(inArray(articles.status, ["ready", "published"]))
+        .orderBy(desc(sql`coalesce(${articles.publishedAt}, ${articles.updatedAt})`)).limit(20),
     ]);
     const dashboardArticles = [
       ...queueRows.map((article, index) => ({ ...article, queuePosition: index + 1 })),
       ...pendingRows.map((article) => ({ ...article, queuePosition: null })),
-      ...publishedRows.map((article) => ({ ...article, queuePosition: null })),
+      ...doneRows.map((article) => ({ ...article, queuePosition: null })),
     ];
 
     const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0, expired: 0, removed: 0 };

@@ -1,16 +1,18 @@
 /**
- * Dashboard queues are shown as two separate lists: what has already been
- * published and what is still waiting to be published. These helpers keep the
- * grouping in one place so the API and the dashboard never disagree.
+ * Dashboard queues are shown as two lists: what still has to leave the
+ * dashboard ("belum terbit") and what has already left it ("sudah terbit").
+ * `ready` counts as done because Buffer accepted the post and publishes it on
+ * the channel schedule; only the direct Facebook path flips to `published`.
+ * These helpers keep that decision in one place.
  */
-export type ArticleSectionKey = "queue" | "waiting" | "failed" | "published";
+export type ArticleSectionKey = "queue" | "sending" | "failed" | "done";
 
 const SECTION_BY_STATUS: Record<string, ArticleSectionKey> = {
   queued: "queue",
-  processing: "waiting",
-  ready: "waiting",
+  processing: "sending",
   failed: "failed",
-  published: "published",
+  ready: "done",
+  published: "done",
 };
 
 /** Returns the section an article belongs to, or null for expired/removed rows that stay hidden. */
@@ -21,21 +23,26 @@ export function articleSection(status: string): ArticleSectionKey | null {
 export type ArticleSections<T> = {
   /** Still waiting for the local publisher: numbered #1, #2, … */
   queue: T[];
-  /** Already handed to Buffer/Facebook: has `ready`/`processing` status and waits for its slot. */
-  waiting: T[];
+  /** Being processed right now by a publisher cycle. */
+  sending: T[];
   /** Attempts exhausted; needs a manual retry or removal. */
   failed: T[];
-  /** Live on the Facebook Page. */
-  published: T[];
+  /** Left the dashboard: live on Facebook, or accepted by Buffer and waiting for its slot. */
+  done: T[];
 };
 
 export function splitArticleSections<T extends { status: string }>(articles: readonly T[]): ArticleSections<T> {
-  const sections: ArticleSections<T> = { queue: [], waiting: [], failed: [], published: [] };
+  const sections: ArticleSections<T> = { queue: [], sending: [], failed: [], done: [] };
   for (const article of articles) {
     const section = articleSection(article.status);
     if (section) sections[section].push(article);
   }
   return sections;
+}
+
+/** Live on the Facebook Page right now; `ready` rows only sit in the Buffer queue. */
+export function isLivePost(status: string): boolean {
+  return status === "published";
 }
 
 /**
