@@ -96,10 +96,6 @@ function buildSvg(options: OgCardOptions): string {
     : "";
   const brand = escapeXml(options.brand.trim().slice(0, 24));
   const category = escapeXml(options.category.trim().toUpperCase().slice(0, 24));
-  // The entertainment cards no longer carry the "SOROTAN HIBURAN" kicker; news keeps its own label.
-  const kickerMarkup = options.isEntertainment
-    ? ""
-    : `<text x="540" y="337" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="700" letter-spacing="4">KABAR HARI INI</text>`;
   const showFollowFooter = options.isEntertainment && (!options.slide || options.slide.isFollowCta === true);
   const sourceName = escapeXml(options.sourceName.trim().slice(0, showFollowFooter ? 30 : 48));
   const categoryWidth = Math.min(420, Math.max(170, category.length * 20 + 64));
@@ -125,7 +121,6 @@ function buildSvg(options: OgCardOptions): string {
     <text x="180" y="132" fill="#fff" fill-opacity=".78" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="600" letter-spacing="3">${options.isEntertainment ? "POP CULTURE" : "BERITA TERKINI"}</text>
     <rect x="${categoryLeft}" y="48" width="${categoryWidth}" height="56" rx="28" fill="#fff" fill-opacity=".15" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
     <text x="${categoryLeft + categoryWidth / 2}" y="84" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="800" letter-spacing="2">${category}</text>
-    ${kickerMarkup}
     ${slideContentMarkup}
     ${slideIndicator}
     <line x1="72" y1="936" x2="1008" y2="936" stroke="${palette.highlight}" stroke-width="3" stroke-opacity=".9"/>
