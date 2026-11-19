@@ -69,6 +69,22 @@ export const publisherState = pgTable("publisher_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const shortLinks = pgTable(
+  "short_links",
+  {
+    slug: text("slug").primaryKey(),
+    targetUrl: text("target_url").notNull(),
+    articleId: uuid("article_id"),
+    clicks: integer("clicks").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastClickedAt: timestamp("last_clicked_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("short_links_created_idx").on(table.createdAt),
+    index("short_links_article_idx").on(table.articleId),
+  ],
+);
+
 export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;

@@ -148,10 +148,14 @@ export async function createFacebookPhotoPost(input: {
   return result.postId;
 }
 
-export async function addSourceComment(pageKey: PageKey, postId: string, sourceUrl: string): Promise<void> {
+export async function addPageComment(pageKey: PageKey, postId: string, message: string): Promise<void> {
   const { url, token } = getGraphBase(pageKey);
   await postForm(`${url}/${encodeURIComponent(postId)}/comments`, {
-    message: `Sumber berita: ${sourceUrl}`,
+    message,
     access_token: token,
   }, token);
+}
+
+export async function addSourceComment(pageKey: PageKey, postId: string, sourceUrl: string): Promise<void> {
+  await addPageComment(pageKey, postId, `🔗 Sumber: ${sourceUrl}`);
 }

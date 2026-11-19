@@ -4,9 +4,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { isAuthorized } from "@/lib/auth";
-import { createManualReview, buildManualReviewCaption, MANUAL_REVIEW_SOURCE_NAME, manualImageReferer } from "@/lib/manual-review";
+import { createManualReview, buildManualReviewCaption, MANUAL_REVIEW_FOLLOW_COMMENT, MANUAL_REVIEW_SOURCE_NAME, manualImageReferer } from "@/lib/manual-review";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
-import { FacebookPublishOutcomeUnknownError } from "@/lib/facebook";
+import { addPageComment, FacebookPublishOutcomeUnknownError } from "@/lib/facebook";
 import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
 
@@ -46,9 +46,12 @@ export async function POST(request: NextRequest) {
     await storeArticleImageInBlob(`${id}-review-${index + 1}`, url, manualImageReferer(url)) ?? url));
   review.items = review.items.map((item, index) => ({ ...item, imageUrl: storedImages[index]! }));
   const title = review.headline;
-  const caption = buildManualReviewCaption(review);
   const imageUrls = Array.from({ length: 6 }, (_, index) => `${publicAppUrl}/api/og/${id}?slide=${index + 1}`);
   const directFacebook = usesDirectFacebookPublishing("entertainment");
+  // Direct Graph posts stay link-free and use a first comment; the Buffer fallback keeps the follow link in the caption.
+  const caption = directFacebook
+    ? buildManualReviewCaption(review)
+    : `${buildManualReviewCaption(review)}\n\n${MANUAL_REVIEW_FOLLOW_COMMENT}`;
 
   try {
     const db = getDb();
@@ -88,6 +91,19 @@ export async function POST(request: NextRequest) {
         updatedAt: new Date(),
         errorMessage: null,
       }).where(eq(articles.id, id));
+
+      // The caption stays link-free; the follow link goes into the first comment.
+      try {
+        await addPageComment("entertainment", result.postId, MANUAL_REVIEW_FOLLOW_COMMENT);
+      } catch (commentError) {
+        const commentMessage = commentError instanceof Error ? commentError.message : "Komentar tautan gagal dikirim.";
+        await db.update(articles).set({
+          errorMessage: `Posting berhasil; komentar tautan gagal: ${commentMessage}`.slice(0, 1_000),
+          updatedAt: new Date(),
+        }).where(eq(articles.id, id));
+        console.error(`[manual-review] Komentar tautan gagal untuk ${id}:`, commentMessage);
+      }
+
       return NextResponse.json({ ok: true, id, title, mediaFormat: result.mediaFormat, provider: result.provider }, { status: 201 });
     }
 
