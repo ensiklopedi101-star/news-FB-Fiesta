@@ -53,7 +53,7 @@ type DashboardData = {
   aiModels: { groq: string; gemini: string };
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
-  quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; intervalDays: number; schedule: string; schemaReady: boolean };
+  quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
   articles: Article[];
@@ -325,7 +325,7 @@ export default function Dashboard() {
   }
 
   async function createQuizEdition() {
-    if (!window.confirm("Kuis Tebak Dramanya akan langsung diposting ke halaman Facebook Popbeez. Lanjutkan?")) return;
+    if (!window.confirm("Kuis Tebak Drama akan langsung diposting ke halaman Facebook Popbeez. Lanjutkan?")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -581,7 +581,7 @@ export default function Dashboard() {
       </section>
 
       <section className="panel quiz-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Dramanya</h2><p className="muted small-note">Grid 4×3 dari poster review manual Popbeez. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir dan tersedia minimal 12 poster unik.</p></div><span className="format-tag carousel">Popbeez · 12 poster</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual Popbeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis.</p></div><span className="format-tag carousel">Popbeez · 5 poster</span></div>
         {data?.quiz.lastImageUrl ? <div className="quiz-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={data.quiz.lastImageUrl} alt="Edisi kuis terakhir" loading="lazy" />
@@ -591,10 +591,10 @@ export default function Dashboard() {
             {facebookPostUrl(data.quiz.lastPostId) && <a className="article-source" href={facebookPostUrl(data.quiz.lastPostId)!} target="_blank" rel="noreferrer">Buka post kuis ↗</a>}
             {data.quiz.lastError && <p className="article-error">{data.quiz.lastError}</p>}
           </div>
-        </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Terbitkan minimal tiga review manual (lima poster per review) agar ada 12 poster unik, lalu buat kuis pertama.</span></div>}
+        </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Butuh minimal lima poster dari review manual; satu review manual sudah berisi lima poster.</span></div>}
         {!data?.quiz.schemaReady && <p className="muted small-note">Tabel <code>quiz_editions</code> belum ada. Jalankan <code>drizzle/0010_quiz_editions.sql</code> di Neon untuk mengaktifkan kuis.</p>}
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat & posting kuis sekarang"}</button>
-        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook Popbeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster.</p>
+        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook Popbeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
       </section>
 
       <section className="panel manual-review-panel">

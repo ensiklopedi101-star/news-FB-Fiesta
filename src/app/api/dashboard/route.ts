@@ -4,7 +4,7 @@ import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { slotStateAt } from "@/lib/publish-slots";
-import { quizIntervalDays, QUIZ_SCHEDULE_LABEL } from "@/lib/quiz";
+import { quizIntervalDays, QUIZ_MAX_USES, QUIZ_SCHEDULE_LABEL, QUIZ_TILES } from "@/lib/quiz";
 import { articles, publisherState, quizEditions, rssSources } from "@/lib/schema";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
@@ -145,7 +145,8 @@ export async function GET(request: NextRequest) {
         lastImageUrl: lastQuiz?.imageUrl ?? null,
         lastPostId: lastQuiz?.facebookPostId ?? null,
         lastError: lastQuiz?.errorMessage ?? null,
-        tiles: lastQuiz?.posterKeys.length ?? 0,
+        tiles: lastQuiz?.posterKeys.length ?? QUIZ_TILES,
+        maxUses: QUIZ_MAX_USES,
         intervalDays: quizIntervalDays(),
         schedule: QUIZ_SCHEDULE_LABEL,
         schemaReady: quizSchemaReady,

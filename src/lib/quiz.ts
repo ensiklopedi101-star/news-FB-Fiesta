@@ -1,13 +1,15 @@
 import { witaDayNumber, witaMinutes, witaWeekday } from "./publish-slots";
 
 /**
- * "Tebak Dramanya" runs every two weeks: a 4×3 grid of posters taken from the
- * manual reviews already published for Popbeez, because those posters are the
- * dramas/films the audience already recognises. There is no answer key by design.
+ * "Tebak Drama" runs every two weeks: five posters taken from the manual reviews
+ * already published for Popbeez, because those posters are the dramas/films the
+ * audience already recognises. There is no answer key by design.
  */
-export const QUIZ_TILES = 12;
-export const QUIZ_LABEL = "TEBAK DRAMANYA";
-export const QUIZ_SUBLABEL = "12 poster · jawab di komentar";
+export const QUIZ_TILES = 5;
+export const QUIZ_LABEL = "TEBAK DRAMA";
+export const QUIZ_SUBLABEL = "5 poster · jawab di komentar";
+/** A poster may appear in at most this many editions, so the pool keeps rotating. */
+export const QUIZ_MAX_USES = 3;
 
 export const QUIZ_SCHEDULE = {
   /** 0 = Sunday, in WITA. */
@@ -33,7 +35,7 @@ export type QuizPoster = {
   imageUrl: string;
 };
 
-/** Stable key for a poster: used to avoid repeating the same tile across editions. */
+/** Stable key for a poster: used to mark which dramas already appeared in past quizzes. */
 export function posterKey(imageUrl: string): string {
   return imageUrl.trim();
 }
@@ -73,23 +75,52 @@ export function quizPostersFromReviews(reviews: readonly QuizReview[]): QuizPost
 }
 
 /**
- * Picks tiles for one edition: unused posters first (newest review first), then the
- * posters that have been absent the longest. `usage` maps a poster key to the moment
- * it last appeared in an edition.
+ * Counts how many editions each poster already appeared in. Every edition stores
+ * the poster keys it used, so the history itself is the "sudah dipakai" marker.
+ * A poster listed twice inside one edition still counts once.
+ */
+export function quizPosterUsage(
+  editions: ReadonlyArray<{ posterKeys?: readonly string[] | null }>,
+): Record<string, number> {
+  const usage: Record<string, number> = {};
+  for (const edition of editions) {
+    for (const key of new Set(edition.posterKeys ?? [])) {
+      if (!key) continue;
+      usage[key] = (usage[key] ?? 0) + 1;
+    }
+  }
+  return usage;
+}
+
+/** Posters that still have appearances left, i.e. used fewer than `maxUses` times. */
+export function quizAvailablePosters(
+  posters: readonly QuizPoster[],
+  options: { usage?: Record<string, number>; maxUses?: number } = {},
+): QuizPoster[] {
+  const usage = options.usage ?? {};
+  const maxUses = options.maxUses ?? QUIZ_MAX_USES;
+  return posters.filter((poster) => (usage[posterKey(poster.imageUrl)] ?? 0) < maxUses);
+}
+
+/**
+ * Picks the tiles for one edition at random from the posters that still have
+ * appearances left, then shows them newest review first. `random` is injectable
+ * so tests can pin the shuffle.
  */
 export function selectQuizPosters(
   posters: readonly QuizPoster[],
-  options: { count?: number; usage?: Record<string, number> } = {},
+  options: { count?: number; usage?: Record<string, number>; maxUses?: number; random?: () => number } = {},
 ): QuizPoster[] {
   const count = options.count ?? QUIZ_TILES;
-  const usage = options.usage ?? {};
-  const fresh = posters.filter((poster) => usage[posterKey(poster.imageUrl)] === undefined);
-  const reused = posters
-    .filter((poster) => usage[posterKey(poster.imageUrl)] !== undefined)
-    .sort((a, b) => (usage[posterKey(a.imageUrl)] ?? 0) - (usage[posterKey(b.imageUrl)] ?? 0));
+  const random = options.random ?? Math.random;
+  const pool = [...quizAvailablePosters(posters, options)];
 
-  const picked = [...fresh, ...reused].slice(0, count);
-  return picked.sort((a, b) => b.reviewCreatedAt.getTime() - a.reviewCreatedAt.getTime());
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(random() * (index + 1));
+    [pool[index], pool[swap]] = [pool[swap]!, pool[index]!];
+  }
+
+  return pool.slice(0, count).sort((a, b) => b.reviewCreatedAt.getTime() - a.reviewCreatedAt.getTime());
 }
 
 /** Caption stays link-free so Facebook keeps its organic reach; the quiz needs no answer key. */

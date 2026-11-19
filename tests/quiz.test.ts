@@ -3,15 +3,29 @@ import { test } from "node:test";
 import {
   buildQuizCaption,
   posterTitleKey,
+  quizAvailablePosters,
   quizIntervalDays,
+  quizPosterUsage,
   quizPostersFromReviews,
+  QUIZ_MAX_USES,
   QUIZ_TILES,
   selectQuizPosters,
   shouldPostQuiz,
+  type QuizPoster,
 } from "../src/lib/quiz";
 
 function review(id: string, createdAt: string, items: Array<[string, string]>) {
   return { id, createdAt: new Date(createdAt), items: items.map(([title, imageUrl]) => ({ title, imageUrl })) };
+}
+
+/** A flat list of posters titled A, B, C… all from the same review. */
+function letterPosters(count: number): QuizPoster[] {
+  return Array.from({ length: count }, (_, index) => ({
+    reviewId: "review",
+    reviewCreatedAt: new Date("2026-01-01T00:00:00Z"),
+    title: String.fromCharCode(65 + index),
+    imageUrl: `https://img.example/${String.fromCharCode(97 + index)}.jpg`,
+  }));
 }
 
 test("posters come from the newest review first and are deduplicated by title", () => {
@@ -40,28 +54,50 @@ test("poster title keys ignore punctuation and case", () => {
   assert.equal(posterTitleKey("Reply 1988"), "reply 1988");
 });
 
-test("unused posters are preferred, then the ones absent the longest", () => {
-  const posters = quizPostersFromReviews([
-    review("r1", "2026-01-01T00:00:00Z", [["A", "https://img.example/a.jpg"], ["B", "https://img.example/b.jpg"], ["C", "https://img.example/c.jpg"]]),
+test("edition history marks how often each poster was already used", () => {
+  const usage = quizPosterUsage([
+    { posterKeys: ["https://img.example/a.jpg", "https://img.example/a.jpg", "https://img.example/b.jpg"] },
+    { posterKeys: ["https://img.example/b.jpg"] },
+    { posterKeys: null },
   ]);
-  const usage = {
-    "https://img.example/a.jpg": new Date("2025-12-01T00:00:00Z").getTime(),
-    "https://img.example/b.jpg": new Date("2025-12-20T00:00:00Z").getTime(),
-  };
-
-  const picked = selectQuizPosters(posters, { count: 2, usage });
-  assert.deepEqual(picked.map((poster) => poster.title).sort(), ["A", "C"]);
-
-  const all = selectQuizPosters(posters, { count: 3, usage });
-  assert.equal(all.length, 3);
+  assert.deepEqual(usage, { "https://img.example/a.jpg": 1, "https://img.example/b.jpg": 2 });
 });
 
-test("caption stays link-free and mentions the tile count", () => {
+test("a poster is retired after three quizzes", () => {
+  const posters = letterPosters(3);
+  const usage = {
+    "https://img.example/a.jpg": QUIZ_MAX_USES,
+    "https://img.example/b.jpg": QUIZ_MAX_USES - 1,
+  };
+
+  const available = quizAvailablePosters(posters, { usage });
+  assert.deepEqual(available.map((poster) => poster.title), ["B", "C"]);
+
+  const picked = selectQuizPosters(available, { count: 3, usage, random: () => 0.5 });
+  assert.ok(!picked.some((poster) => poster.title === "A"), "poster yang sudah 3× tidak boleh dipakai lagi");
+  assert.equal(picked.length, 2);
+});
+
+test("selection is random across the eligible pool", () => {
+  const posters = letterPosters(10);
+
+  const low = selectQuizPosters(posters, { random: () => 0 });
+  const high = selectQuizPosters(posters, { random: () => 0.999999 });
+  assert.equal(low.length, QUIZ_TILES);
+  assert.equal(high.length, QUIZ_TILES);
+  assert.deepEqual([...low].map((poster) => poster.title).sort(), ["B", "C", "D", "E", "F"]);
+  assert.deepEqual([...high].map((poster) => poster.title).sort(), ["A", "B", "C", "D", "E"]);
+  assert.notDeepEqual(low.map((poster) => poster.title), high.map((poster) => poster.title));
+});
+
+test("caption stays link-free and mentions the poster count", () => {
   const caption = buildQuizCaption();
-  assert.ok(caption.includes("TEBAK DRAMANYA"));
-  assert.ok(caption.includes(String(QUIZ_TILES)));
+  assert.equal(QUIZ_TILES, 5);
+  assert.ok(caption.includes("TEBAK DRAMA"));
+  assert.ok(caption.includes("5 poster"));
   assert.ok(caption.includes("#TebakDramanya"));
   assert.ok(!/https?:\/\//i.test(caption));
+  assert.ok(!/kunci jawaban:/.test(caption), "caption tidak boleh memuat kunci jawaban");
 });
 
 test("quiz only runs on Sunday inside the 19:15 WITA window", () => {
