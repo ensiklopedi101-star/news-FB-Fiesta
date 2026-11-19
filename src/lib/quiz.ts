@@ -124,14 +124,13 @@ export function selectQuizPosters(
 }
 
 /** Caption stays link-free so Facebook keeps its organic reach; the quiz needs no answer key. */
-export function buildQuizCaption(input: { tiles?: number } = {}): string {
-  const tiles = input.tiles ?? QUIZ_TILES;
+export function buildQuizCaption(): string {
   return [
     `${QUIZ_LABEL} 🕵️`,
-    `${tiles} poster film & drama ada di gambar ini. Berapa yang berhasil kamu tebak?`,
-    `Tulis nomornya di komentar (1–${tiles}, urut dari kiri atas ke kanan bawah).`,
-    "Tidak ada kunci jawaban — andalkan ingatanmu. 😄",
-    "Ikuti Popbeez untuk kuis berikutnya.",
+    "",
+    "Tebak judul drama/film. Berapa yang berhasil kamu tebak?",
+    "",
+    "Ikuti PopBeez untuk Kuiz Berikutnya.",
     "",
     "#TebakDramanya #Drakor #Kdrama #FilmKorea #Popbeez",
   ].join("\n");

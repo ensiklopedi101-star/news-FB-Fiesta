@@ -90,11 +90,12 @@ test("selection is random across the eligible pool", () => {
   assert.notDeepEqual(low.map((poster) => poster.title), high.map((poster) => poster.title));
 });
 
-test("caption stays link-free and mentions the poster count", () => {
+test("caption is link-free and follows the agreed three-line copy", () => {
   const caption = buildQuizCaption();
   assert.equal(QUIZ_TILES, 5);
-  assert.ok(caption.includes("TEBAK DRAMA"));
-  assert.ok(caption.includes("5 poster"));
+  assert.ok(caption.startsWith("TEBAK DRAMA"));
+  assert.ok(caption.includes("Tebak judul drama/film. Berapa yang berhasil kamu tebak?"));
+  assert.ok(caption.includes("Ikuti PopBeez untuk Kuiz Berikutnya."));
   assert.ok(caption.includes("#TebakDramanya"));
   assert.ok(!/https?:\/\//i.test(caption));
   assert.ok(!/kunci jawaban:/.test(caption), "caption tidak boleh memuat kunci jawaban");
