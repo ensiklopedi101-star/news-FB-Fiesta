@@ -1,21 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { articleSection, facebookPostUrl, splitArticleSections } from "../src/lib/article-sections";
+import { articleSection, facebookPostUrl, isLivePost, splitArticleSections } from "../src/lib/article-sections";
 
-test("published and not-yet-published rows land in different sections", () => {
+test("rows that already left the dashboard are separated from the ones that did not", () => {
   const rows = [
     { id: "a", status: "queued" },
     { id: "b", status: "ready" },
     { id: "c", status: "published" },
     { id: "d", status: "processing" },
     { id: "e", status: "failed" },
-    { id: "f", status: "published" },
+    { id: "f", status: "ready" },
   ];
   const sections = splitArticleSections(rows);
   assert.deepEqual(sections.queue.map((row) => row.id), ["a"]);
-  assert.deepEqual(sections.waiting.map((row) => row.id), ["b", "d"]);
+  assert.deepEqual(sections.sending.map((row) => row.id), ["d"]);
   assert.deepEqual(sections.failed.map((row) => row.id), ["e"]);
-  assert.deepEqual(sections.published.map((row) => row.id), ["c", "f"]);
+  // `ready` means Buffer accepted the post, so it belongs to "sudah terbit".
+  assert.deepEqual(sections.done.map((row) => row.id), ["b", "c", "f"]);
 });
 
 test("input order is preserved inside every section", () => {
@@ -29,9 +30,15 @@ test("expired and removed rows stay hidden from both lists", () => {
   assert.equal(articleSection("scheduled"), null);
   const sections = splitArticleSections([{ status: "expired" }, { status: "removed" }, { status: "published" }]);
   assert.equal(sections.queue.length, 0);
-  assert.equal(sections.waiting.length, 0);
+  assert.equal(sections.sending.length, 0);
   assert.equal(sections.failed.length, 0);
-  assert.equal(sections.published.length, 1);
+  assert.equal(sections.done.length, 1);
+});
+
+test("only the published status counts as live on the page", () => {
+  assert.equal(isLivePost("published"), true);
+  assert.equal(isLivePost("ready"), false);
+  assert.equal(isLivePost("queued"), false);
 });
 
 test("only real Facebook post ids become permalinks", () => {
