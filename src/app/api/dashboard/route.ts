@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { articles, publisherState, rssSources } from "@/lib/schema";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
+import { isFacebookPublishingEnabled } from "@/lib/facebook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,7 +87,10 @@ export async function GET(request: NextRequest) {
       news: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
       entertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
     };
-    const hasConfiguredActiveFeed = feeds.some((feed) => feed.active && bufferChannels[feed.pageKey]);
+    const facebookEntertainment = isFacebookPublishingEnabled("entertainment");
+    const newsReady = bufferApi && bufferChannels.news;
+    const entertainmentReady = facebookEntertainment || (bufferApi && bufferChannels.entertainment);
+    const hasConfiguredActiveFeed = feeds.some((feed) => feed.active && (feed.pageKey === "news" ? newsReady : entertainmentReady));
     const integrations = {
       database: true,
       schema: true,
@@ -96,6 +100,7 @@ export async function GET(request: NextRequest) {
       bufferApi,
       bufferNews: bufferChannels.news,
       bufferEntertainment: bufferChannels.entertainment,
+      facebookEntertainment,
       appUrl: Boolean(process.env.APP_URL),
       cronSecret: Boolean(process.env.CRON_SECRET),
       blobStorage: Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim()),
@@ -109,7 +114,7 @@ export async function GET(request: NextRequest) {
         groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "llama-3.3-70b-versatile",
         gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "gemini-3.8-flash",
       },
-      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && integrations.bufferApi && hasConfiguredActiveFeed,
+      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       schedule: PUBLISH_POLICY,
       stats: {
         articles: articleTotal.value,

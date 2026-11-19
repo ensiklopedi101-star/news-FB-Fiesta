@@ -5,8 +5,10 @@ import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { MANUAL_REVIEW_SOURCE_NAME } from "@/lib/manual-review";
 import { writeNewsCopy } from "@/lib/ai";
-import { enqueueBufferFacebookPost, getBufferConfigurationGaps } from "@/lib/buffer";
+import { getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
+import { FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
+import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
 import { indonesianTranslationUrl } from "@/lib/translation-url";
 
@@ -115,18 +117,18 @@ function getPublicAppUrl() {
 }
 
 export type RunResult = {
-  result: "queued" | "idle" | "failed" | "rate-limited";
+  result: "queued" | "published" | "idle" | "failed" | "rate-limited";
   articleId?: string;
   title?: string;
   detail?: string;
 };
 
+function publishingConfigurationGaps(pageKey: PageKey): string[] {
+  return usesDirectFacebookPublishing(pageKey) ? [] : getBufferConfigurationGaps([pageKey]);
+}
+
 export async function runNewsPipeline(): Promise<RunResult> {
   const db = getDb();
-  const apiKeyGap = getBufferConfigurationGaps([]);
-  if (apiKeyGap.length) {
-    return { result: "failed", detail: `Konfigurasi Buffer belum lengkap: ${apiKeyGap.join(", ")}. Artikel tetap di antrean.` };
-  }
   const pause = await getPublishingPause();
   if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
   const article = await claimNextArticle();
@@ -136,18 +138,35 @@ export async function runNewsPipeline(): Promise<RunResult> {
       .where(eq(articles.status, "queued"))
       .orderBy(asc(articles.createdAt))
       .limit(1);
-    const missingChannel = blocked ? getBufferConfigurationGaps([blocked.pageKey]) : [];
+    const missingChannel = blocked ? publishingConfigurationGaps(blocked.pageKey) : [];
     if (missingChannel.length) {
       return { result: "failed", detail: `Artikel tetap di antrean: ${missingChannel.join(", ")} belum diatur untuk Page ini.` };
     }
     return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
   }
 
+  const directFacebook = usesDirectFacebookPublishing(article.pageKey);
+
+  // Validate the publish channel for this specific page before spending an AI call.
+  const channelGaps = publishingConfigurationGaps(article.pageKey);
+  if (channelGaps.length) {
+    await db.update(articles)
+      .set({ status: "queued", facebookPostId: null, updatedAt: new Date() })
+      .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
+    return {
+      result: "failed",
+      articleId: article.id,
+      detail: `Artikel tetap di antrean: ${channelGaps.join(", ")} belum diatur untuk Page ini.`,
+    };
+  }
+
   const startedAt = Date.now();
   const logStage = (stage: string) => console.info(`[pipeline] article=${article.id} stage=${stage} elapsedMs=${Date.now() - startedAt}`);
-  let bufferPostId: string | null = null;
-  let bufferMediaFormat: "single" | "carousel" | null = null;
+  let publishProvider: "buffer" | "facebook" | null = null;
+  let publishPostId: string | null = null;
+  let publishMediaFormat: "single" | "carousel" | null = null;
   let carouselSlides: [string, string, string] | null = null;
+  const pendingPrefix = directFacebook ? "facebook:pending" : "buffer:pending";
 
   try {
     logStage("ai-start");
@@ -176,7 +195,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
         caption,
         carouselSlides,
         status: "ready",
-        facebookPostId: `buffer:pending:${article.id}`,
+        facebookPostId: `${pendingPrefix}:${article.id}`,
         updatedAt: new Date(),
         errorMessage: null,
       })
@@ -186,39 +205,66 @@ export async function runNewsPipeline(): Promise<RunResult> {
     const imageUrls = article.postFormat === "carousel"
       ? Array.from({ length: 4 }, (_, index) => `${appUrl}/api/og/${article.id}?slide=${index + 1}`)
       : [`${appUrl}/api/og/${article.id}`];
-    logStage(`buffer-enqueue-start format=${article.postFormat} assets=${imageUrls.length}`);
-    const enqueueResult = await enqueueBufferFacebookPost({
+    logStage(`publish-start provider=${directFacebook ? "facebook" : "buffer"} format=${article.postFormat} assets=${imageUrls.length}`);
+    const result = await publishPost({
       pageKey: article.pageKey,
       imageUrl: imageUrls[0]!,
       imageUrls,
       caption,
     });
-    bufferPostId = enqueueResult.postId;
-    bufferMediaFormat = enqueueResult.mediaFormat;
-    logStage(`buffer-enqueue-complete format=${enqueueResult.mediaFormat}`);
+    publishProvider = result.provider;
+    publishPostId = result.postId;
+    publishMediaFormat = result.mediaFormat;
+    logStage(`publish-complete provider=${result.provider} format=${result.mediaFormat}`);
+
+    if (result.provider === "facebook") {
+      // Direct Graph publishing is public immediately; there is no Buffer schedule slot.
+      await db.update(articles)
+        .set({
+          status: "published",
+          postFormat: result.mediaFormat,
+          carouselSlides: result.mediaFormat === "carousel" ? carouselSlides : null,
+          facebookPostId: result.postId,
+          publishedAt: new Date(),
+          updatedAt: new Date(),
+          errorMessage: null,
+        })
+        .where(eq(articles.id, article.id));
+      logStage("facebook-published");
+      return {
+        result: "published",
+        articleId: article.id,
+        title: copy.title,
+        detail: "Posting langsung diterbitkan ke halaman Facebook Popbeez.",
+      };
+    }
 
     // Buffer menerima konten ke antreannya; Facebook akan menerbitkannya pada slot jadwal Buffer.
     // Gunakan prefix untuk membedakan ID Buffer dari ID posting Facebook lama tanpa migrasi schema.
     await db.update(articles)
-      .set({ status: "ready", postFormat: enqueueResult.mediaFormat, carouselSlides: enqueueResult.mediaFormat === "carousel" ? carouselSlides : null, facebookPostId: `buffer:${bufferPostId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
+      .set({ status: "ready", postFormat: result.mediaFormat, carouselSlides: result.mediaFormat === "carousel" ? carouselSlides : null, facebookPostId: `buffer:${result.postId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
       .where(eq(articles.id, article.id));
     logStage("tracking-saved");
 
     return { result: "queued", articleId: article.id, title: copy.title, detail: "Konten masuk ke antrean Buffer untuk dijadwalkan." };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kesalahan tidak diketahui saat memproses berita.";
-    const outcomeUnknown = error instanceof BufferEnqueueOutcomeUnknownError;
+    const outcomeUnknown = error instanceof BufferEnqueueOutcomeUnknownError || error instanceof FacebookPublishOutcomeUnknownError;
 
-    if (outcomeUnknown || bufferPostId) {
-      const trackingReference = bufferPostId ? `buffer:${bufferPostId}` : `buffer:pending:${article.id}`;
+    if (outcomeUnknown || publishPostId) {
+      const provider = publishProvider ?? (directFacebook ? "facebook" : "buffer");
+      const trackingReference = publishPostId
+        ? provider === "facebook" ? publishPostId : `buffer:${publishPostId}`
+        : `${provider === "facebook" ? "facebook" : "buffer"}:pending:${article.id}`;
       let trackingRecovered = false;
       try {
         await db.update(articles)
           .set({
-            status: "ready",
-            postFormat: bufferMediaFormat ?? article.postFormat,
-            carouselSlides: (bufferMediaFormat ?? article.postFormat) === "carousel" ? carouselSlides : null,
+            status: provider === "facebook" && publishPostId ? "published" : "ready",
+            postFormat: publishMediaFormat ?? article.postFormat,
+            carouselSlides: (publishMediaFormat ?? article.postFormat) === "carousel" ? carouselSlides : null,
             facebookPostId: trackingReference,
+            publishedAt: provider === "facebook" && publishPostId ? new Date() : null,
             errorMessage: outcomeUnknown ? `${message} Status tertunda untuk mencegah pengiriman duplikat.`.slice(0, 1_000) : null,
             updatedAt: new Date(),
           })
@@ -230,12 +276,16 @@ export async function runNewsPipeline(): Promise<RunResult> {
       const detail = outcomeUnknown
         ? `${message} Status disimpan sebagai tertunda untuk mencegah pengiriman duplikat.`
         : trackingRecovered
-          ? "Buffer menerima post dan ID antreannya berhasil disimpan setelah percobaan pemulihan database."
-          : `Buffer sudah menerima post, tetapi penyimpanan ID Buffer gagal. Periksa antrean sebelum mencoba lagi. ${message}`;
-      logStage(outcomeUnknown ? "buffer-outcome-unknown" : "tracking-recovery");
+          ? provider === "facebook"
+            ? "Posting Facebook berhasil dibuat dan ID-nya disimpan setelah percobaan pemulihan database."
+            : "Buffer menerima post dan ID antreannya berhasil disimpan setelah percobaan pemulihan database."
+          : provider === "facebook"
+            ? `Facebook sudah menerbitkan posting, tetapi penyimpanan ID-nya gagal. Periksa halaman sebelum mencoba lagi. ${message}`
+            : `Buffer sudah menerima post, tetapi penyimpanan ID Buffer gagal. Periksa antrean sebelum mencoba lagi. ${message}`;
+      logStage(outcomeUnknown ? "publish-outcome-unknown" : "tracking-recovery");
       console.error(`[pipeline] artikel ${article.id}:`, detail);
       return {
-        result: outcomeUnknown || !trackingRecovered ? "failed" : "queued",
+        result: outcomeUnknown || !trackingRecovered ? "failed" : provider === "facebook" ? "published" : "queued",
         articleId: article.id,
         detail,
       };

@@ -59,7 +59,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; mediaFormat?: string; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -70,6 +70,7 @@ const integrationLabels: Record<string, string> = {
   bufferApi: "Buffer API key",
   bufferNews: "Channel Buffer berita",
   bufferEntertainment: "Channel Buffer hiburan",
+  facebookEntertainment: "Facebook Graph Popbeez",
   appUrl: "URL publik aplikasi",
   cronSecret: "Pengaman cron",
   blobStorage: "Penyimpanan gambar Blob",
@@ -87,6 +88,7 @@ function pageLabel(pageKey: Feed["pageKey"]) {
 
 function articleStatusLabel(article: Article) {
   if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:pending:")) return "Perlu cek Buffer";
+  if (article.status === "ready" && article.facebookPostId?.startsWith("facebook:pending:")) return "Perlu cek Facebook";
   if (article.status === "ready" && article.facebookPostId?.startsWith("buffer:")) return "Antrean Buffer";
   if (article.status === "ready") return "Siap";
   if (article.status === "published") return "Terbit";
@@ -251,10 +253,12 @@ export default function Dashboard() {
         }),
       });
       setMessage(result.error
-        ? `Status Buffer belum pasti: ${result.error}`
-        : result.mediaFormat === "single"
-          ? "Review tersimpan, tetapi Buffer hanya menerima cover satu gambar. Periksa batas carousel channel Buffer."
-          : `Review “${result.title ?? reviewHeadline}” masuk ke antrean Buffer dalam format carousel enam slide.`);
+        ? `Status publikasi belum pasti: ${result.error}`
+        : result.provider === "facebook"
+          ? `Review “${result.title ?? reviewHeadline}” langsung diterbitkan ke halaman Facebook Popbeez.`
+          : result.mediaFormat === "single"
+            ? "Review tersimpan, tetapi Buffer hanya menerima cover satu gambar. Periksa batas carousel channel Buffer."
+            : `Review “${result.title ?? reviewHeadline}” masuk ke antrean Buffer dalam format carousel enam slide.`);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal membuat review manual.");

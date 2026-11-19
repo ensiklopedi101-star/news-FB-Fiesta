@@ -2,6 +2,7 @@ import { count, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { publisherState, rssSources } from "@/lib/schema";
+import { isFacebookPublishingEnabled } from "@/lib/facebook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export async function GET() {
       bufferApi: Boolean(process.env.BUFFER_API_KEY?.trim()),
       bufferNews: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
       bufferEntertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
+      facebookEntertainment: isFacebookPublishingEnabled("entertainment"),
       feeds: activeFeeds > 0,
     },
   });
