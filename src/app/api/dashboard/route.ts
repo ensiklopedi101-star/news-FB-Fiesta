@@ -6,7 +6,8 @@ import { PUBLISH_POLICY } from "@/lib/schedule";
 import { slotStateAt } from "@/lib/publish-slots";
 import { quizIntervalDays, QUIZ_MAX_USES, QUIZ_SCHEDULE_LABEL, QUIZ_TILES } from "@/lib/quiz";
 import { minimumOriginalityScore } from "@/lib/originality";
-import { articles, publisherState, quizEditions, rssSources } from "@/lib/schema";
+import { articles, publisherState, quizEditions, reels, rssSources } from "@/lib/schema";
+import { EDITORIAL_VOICES } from "@/lib/editorial-voices";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
 
@@ -78,11 +79,15 @@ export async function GET(request: NextRequest) {
       editorialTake: articles.editorialTake,
       originalityScore: articles.originalityScore,
       originalityNotes: articles.originalityNotes,
+      editorialVoice: articles.editorialVoice,
+      narrationScript: articles.narrationScript,
     };
     const legacyOriginalityFields = {
       editorialTake: sql<string | null>`null`,
       originalityScore: sql<number>`0`,
       originalityNotes: sql<never>`null`,
+      editorialVoice: sql<string | null>`null`,
+      narrationScript: sql<string | null>`null`,
     };
     // Two groups keep the dashboard readable: rows still waiting in the local
     // queue, and rows a publisher cycle already handled (in-flight, accepted by
@@ -148,6 +153,38 @@ export async function GET(request: NextRequest) {
       held: scoredRows.filter((row) => row.status === "failed" && row.score < originalityThreshold).length,
     };
 
+    // Reels ship with drizzle/0012; the dashboard must still load before it runs.
+    let reelsSchemaReady = true;
+    let lastReel: { videoUrl: string | null; facebookVideoId: string | null; status: string; voiceLabel: string | null; errorMessage: string | null; durationSeconds: number; frameCount: number; createdAt: Date } | null = null;
+    let reelCount = 0;
+    try {
+      const [row] = await db.select({
+        videoUrl: reels.videoUrl,
+        facebookVideoId: reels.facebookVideoId,
+        status: reels.status,
+        voiceLabel: reels.voiceLabel,
+        errorMessage: reels.errorMessage,
+        durationSeconds: reels.durationSeconds,
+        frameCount: reels.frameCount,
+        createdAt: reels.createdAt,
+      }).from(reels).orderBy(desc(reels.createdAt)).limit(1);
+      lastReel = row ?? null;
+      const [total] = await db.select({ value: count() }).from(reels).where(eq(reels.status, "published"));
+      reelCount = total?.value ?? 0;
+    } catch {
+      reelsSchemaReady = false;
+    }
+    const reelsSummary = {
+      schemaReady: reelsSchemaReady,
+      enabled: process.env.REELS_ENABLED?.trim() === "1",
+      published: reelCount,
+      last: lastReel,
+      minGapHours: Number(process.env.REELS_MIN_GAP_HOURS?.trim() || 20),
+      ttsVoice: process.env.REELS_TTS_VOICE?.trim() || "id-ID-GadisNeural",
+      renderMode: process.env.REELS_RENDER_URL?.trim() ? "worker" : process.env.FFMPEG_PATH?.trim() ? "ffmpeg-lokal" : "belum-disetel",
+      voices: EDITORIAL_VOICES.map((voice) => ({ id: voice.id, label: voice.label, summary: voice.summary })),
+    };
+
     const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0, expired: 0, removed: 0 };
     for (const row of groupedStatuses) statusCounts[row.status] = row.value;
 
@@ -185,6 +222,7 @@ export async function GET(request: NextRequest) {
       },
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       originality,
+      reels: reelsSummary,
       schedule: PUBLISH_POLICY,
       publishSchedule: slotStateAt(new Date()),
       quiz: {

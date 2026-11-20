@@ -10,6 +10,7 @@ import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { addPageComment, FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
 import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
+import { pickEditorialVoice } from "@/lib/editorial-voices";
 import { indonesianTranslationUrl } from "@/lib/translation-url";
 import { shortenArticleUrl } from "@/lib/shortlink";
 import {
@@ -150,6 +151,7 @@ async function writeGuardedCopy(
   strictFirstDraft: boolean,
 ): Promise<{ copy: GeneratedCopy; originality: OriginalityReport; drafts: number }> {
   const maxDrafts = originalityMaxAttempts();
+  const voice = pickEditorialVoice(article.id);
   const score = (copy: GeneratedCopy) => scoreOriginality({
     caption: copy.caption,
     take: copy.take,
@@ -165,10 +167,11 @@ async function writeGuardedCopy(
     sourceName: article.sourceName,
     strictOriginality: strictFirstDraft,
     budgetMs: AI_DRAFT_BUDGET_MS,
+    voice,
   });
   let originality = score(copy);
   let drafts = 1;
-  logStage(`originality score=${originality.score} band=${originality.band} overlap=${originality.overlap} longestRun=${originality.longestRun} draft=${drafts}`);
+  logStage(`originality score=${originality.score} band=${originality.band} overlap=${originality.overlap} longestRun=${originality.longestRun} draft=${drafts} voice=${voice.id}`);
 
   while (shouldRetryForOriginality(originality, drafts, maxDrafts)) {
     logStage(`originality-rewrite draft=${drafts + 1} previous=${originality.score}`);
@@ -181,6 +184,7 @@ async function writeGuardedCopy(
         strictOriginality: true,
         feedback: originality.reasons.join(" "),
         budgetMs: AI_DRAFT_BUDGET_MS,
+        voice,
       });
       copy = rewritten;
       originality = score(rewritten);
@@ -203,10 +207,20 @@ async function writeGuardedCopy(
  * `drizzle/0011_originality.sql`; until that migration runs the publish path must
  * keep working, so a failure here is logged and ignored.
  */
-async function recordOriginality(articleId: string, take: string, report: OriginalityReport) {
+async function recordOriginality(
+  articleId: string,
+  editorial: { take: string; voiceId: string | null; narration: string },
+  report: OriginalityReport,
+) {
   try {
     await getDb().update(articles)
-      .set({ editorialTake: take, originalityScore: report.score, originalityNotes: report })
+      .set({
+        editorialTake: editorial.take,
+        editorialVoice: editorial.voiceId,
+        narrationScript: editorial.narration,
+        originalityScore: report.score,
+        originalityNotes: report,
+      })
       .where(eq(articles.id, articleId));
   } catch (error) {
     console.warn(`[pipeline] originality-persist-skipped reason=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
@@ -278,7 +292,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
           updatedAt: new Date(),
         })
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
-      await recordOriginality(article.id, copy.take, originality);
+      await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
       return {
         result: "failed",
         articleId: article.id,
@@ -309,7 +323,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
         errorMessage: null,
       })
       .where(eq(articles.id, article.id));
-    await recordOriginality(article.id, copy.take, originality);
+    await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
 
     const appUrl = getPublicAppUrl();
     const imageUrls = article.postFormat === "carousel"

@@ -42,6 +42,10 @@ type Article = {
   /** 0–100 originality score; 0 means the post predates the guard. */
   originalityScore: number;
   originalityNotes: { band: "safe" | "watch" | "risky"; reasons: string[]; overlap: number; longestRun: number } | null;
+  /** Standing editorial voice that wrote this post. */
+  editorialVoice: string | null;
+  /** Spoken script for the matching Reel. */
+  narrationScript: string | null;
 };
 
 type ReviewDraftItem = { title: string; rating: string; genre: string; reason: string; suitableFor: string; imageUrl: string };
@@ -59,6 +63,16 @@ type DashboardData = {
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
   originality: { schemaReady: boolean; threshold: number; scored: number; average: number; safe: number; watch: number; risky: number; held: number };
+  reels: {
+    schemaReady: boolean;
+    enabled: boolean;
+    published: number;
+    last: { videoUrl: string | null; facebookVideoId: string | null; status: string; voiceLabel: string | null; errorMessage: string | null; durationSeconds: number; frameCount: number; createdAt: string } | null;
+    minGapHours: number;
+    ttsVoice: string;
+    renderMode: string;
+    voices: Array<{ id: string; label: string; summary: string }>;
+  };
   quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
@@ -69,7 +83,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; videoUrl?: string | null; frames?: number; durationSeconds?: number; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -94,6 +108,12 @@ function formatDate(value: string | null) {
 
 function pageLabel(pageKey: Feed["pageKey"]) {
   return pageKey === "news" ? "Berita" : "Hiburan";
+}
+
+function voiceLabelOf(article: Article) {
+  const label = article.editorialVoice;
+  if (!label) return "Popbeez";
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function articleStatusLabel(article: Article) {
@@ -310,6 +330,23 @@ export default function Dashboard() {
     }
   }
 
+  async function createReel() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/reels", { method: "POST" });
+      setMessage(result.result === "published"
+        ? `Reel terbit: ${result.frames ?? 0} frame · ${result.durationSeconds ?? 0} detik${result.videoUrl ? ` · ${result.videoUrl}` : ""}`
+        : result.detail || "Tidak ada Reel yang dibuat.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal membuat Reel.");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function requeueArticle(article: Article) {
     setBusy(true);
     setMessage("");
@@ -501,7 +538,8 @@ export default function Dashboard() {
         <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
         {article.status === "published" && <div className="article-meta published-meta">Terbit di Facebook: {formatDate(article.publishedAt)}</div>}
         {article.status === "ready" && <div className="article-meta published-meta">Dikirim: {formatDate(article.updatedAt)}</div>}
-        {article.editorialTake && <p className="article-take">💡 {article.editorialTake}</p>}
+        {article.editorialTake && <p className="article-take">💡 Sudut pandang {voiceLabelOf(article)} · {article.editorialTake}</p>}
+        {article.narrationScript && <details className="article-narration"><summary>Naskah narasi Reel</summary><p>{article.narrationScript}</p></details>}
         {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
         <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
           <div className="article-preview-gallery">
@@ -615,6 +653,29 @@ export default function Dashboard() {
         </div>
         {data?.originality.schemaReady === false && <p className="muted small-note">Kolom <code>editorial_take</code>, <code>originality_score</code>, dan <code>originality_notes</code> belum ada. Jalankan <code>drizzle/0011_originality.sql</code> di Neon; penahanan caption tetap berjalan walau skor belum tersimpan.</p>}
         {(data?.originality.scored ?? 0) === 0 && <p className="muted small-note">Belum ada post yang dinilai. Skor muncul setelah artikel berikutnya diproses pipeline.</p>}
+      </section>
+
+      <section className="panel reels-panel">
+        <div className="panel-heading"><div><p className="eyebrow">REELS &amp; SUARA</p><h2>Reel otomatis dari naskah narasi</h2><p className="muted small-note">Setiap artikel hiburan kini membawa naskah narasi 25–35 detik. Reels menyuarakannya dengan <b>Edge TTS</b> (gratis, tanpa API key — kuota Gemini tetap untuk penulisan dan kuis), menyusun frame 1080×1920, lalu mengunggah ke Facebook Reels. Maksimal satu Reel tiap <b>{data?.reels.minGapHours ?? 20} jam</b>.</p></div><span className={data?.reels.enabled ? "status-tag published" : "status-tag"}>{data?.reels.enabled ? "AKTIF" : "MATI"}</span></div>
+        <div className="queue-counts"><span>{data?.reels.published ?? 0} Reel terbit</span><span>suara: {data?.reels.ttsVoice}</span><span>render: {data?.reels.renderMode}</span><span>naskah: {data?.reels.last?.frameCount ?? 0} frame</span></div>
+        {data?.reels.last ? <div className="quiz-preview">
+          <div className="quiz-preview-meta">
+            <strong>Reel terakhir · {data.reels.last.status} · {data.reels.last.durationSeconds} detik</strong>
+            <span>{formatDate(data.reels.last.createdAt)} · sudut pandang {data.reels.last.voiceLabel ?? "Redaksi"}</span>
+            {data.reels.last.errorMessage && <p className="article-error">{data.reels.last.errorMessage}</p>}
+            <div className="article-links">
+              {data.reels.last.videoUrl && <a className="article-source" href={data.reels.last.videoUrl} target="_blank" rel="noreferrer">Buka file video ↗</a>}
+              {data.reels.last.facebookVideoId && <a className="article-source" href={`https://www.facebook.com/reel/${data.reels.last.facebookVideoId}`} target="_blank" rel="noreferrer">Buka Reel di Facebook ↗</a>}
+            </div>
+          </div>
+        </div> : <div className="empty-state"><strong>Belum ada Reel.</strong><span>Reel dibuat dari artikel hiburan terbaru yang punya naskah narasi.</span></div>}
+        <div className="setup-grid">
+          {data?.reels.voices.map((voice) => <article className="setup-card" key={voice.id}><span className="check-dot good" /><div><strong>{voice.label}</strong><p>{voice.summary}</p></div></article>)}
+        </div>
+        {data?.reels.schemaReady === false && <p className="muted small-note">Tabel <code>reels</code> dan kolom narasi belum ada. Jalankan <code>drizzle/0012_reels_voices.sql</code> di Neon.</p>}
+        {!data?.reels.enabled && <p className="muted small-note">Set <code>REELS_ENABLED=1</code> di Vercel untuk mengizinkan pembuatan otomatis. Tombol di bawah tetap bisa dipakai untuk mencoba satu Reel sekarang.</p>}
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void createReel()}>{busy ? "Menyiapkan…" : "Buat & posting Reel sekarang"}</button>
+        <p className="muted small-note">Butuh encoder: <code>FFMPEG_PATH</code> di server ini, atau <code>REELS_RENDER_URL</code> + <code>REELS_WORKER_TOKEN</code> ke worker VPS (<code>scripts/reels-render-worker.mjs</code>). Tanpa keduanya, Reel ditandai gagal dan pipeline teks tidak terpengaruh.</p>
       </section>
 
       <section className="panel quiz-panel">
