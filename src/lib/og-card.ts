@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
+import { circularLogoBuffer } from "@/lib/logo-circle";
 import type { ManualReviewItem, ReviewMediaType } from "@/lib/manual-review";
 
 const WIDTH = 1080;
@@ -223,19 +224,11 @@ async function loadBrandLogo(isEntertainment: boolean): Promise<Buffer> {
 }
 
 /**
- * The page logo is drawn as a circle: a replaced logo can arrive as a white square,
- * and a circular mask plus a thin ring keeps the header clean on every card.
+ * The page logo is always drawn as a circle: the uploaded asset is a white square
+ * card, and `circularLogoBuffer()` trims the flat border before masking.
  */
 async function circularLogo(isEntertainment: boolean, size = 112): Promise<Buffer> {
-  const raw = await loadBrandLogo(isEntertainment);
-  const square = await sharp(raw, { limitInputPixels: 40_000_000 })
-    .resize(size, size, { fit: "cover", position: "centre" })
-    .png()
-    .toBuffer();
-  const radius = size / 2;
-  const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${radius}" cy="${radius}" r="${radius}"/></svg>`);
-  const ring = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${radius}" cy="${radius}" r="${radius - 2}" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="3"/></svg>`);
-  return sharp(square).composite([{ input: mask, blend: "dest-in" }]).composite([{ input: ring }]).png().toBuffer();
+  return circularLogoBuffer(await loadBrandLogo(isEntertainment), size);
 }
 
 /** Compose a full-bleed, square news card with Sharp and SVG; use the actual bundled page logo asset. */

@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
+import { circularLogoBuffer } from "@/lib/logo-circle";
 import { ensureBundledFonts } from "./og-card";
 import { renderSilhouette, silhouettePalette } from "./quiz-silhouette";
 
@@ -182,16 +183,8 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
   const logo = options.logo ? Buffer.from(options.logo) : await logoPromise();
   if (logo?.byteLength) {
     try {
-      const squareLogo = await sharp(logo, { limitInputPixels: 40_000_000 })
-        .resize(116, 116, { fit: "cover", position: "centre" })
-        .png()
-        .toBuffer();
-      // Circular mask: a swapped logo arrives as a white square otherwise.
-      const circleMask = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="116" height="116"><circle cx="58" cy="58" r="58"/></svg>');
-      const renderedLogo = await sharp(squareLogo)
-        .composite([{ input: circleMask, blend: "dest-in" }])
-        .png()
-        .toBuffer();
+      // Circular mask that trims the white square border of the uploaded logo.
+      const renderedLogo = await circularLogoBuffer(logo, 116);
       layers.push({ input: renderedLogo, left: brandLeft + Math.round((QUIZ_CELL_WIDTH - 116) / 2), top: brandTop + 20 });
     } catch {
       console.warn("[quiz] logo PopBeez gagal disiapkan; sel merek tampil tanpa logo.");
