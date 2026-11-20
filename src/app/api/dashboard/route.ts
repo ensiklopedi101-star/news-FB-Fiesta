@@ -1,10 +1,11 @@
-import { and, asc, count, desc, eq, gte, inArray, isNull, like, lt, notLike, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, like, lt, notLike, or, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { slotStateAt } from "@/lib/publish-slots";
 import { quizIntervalDays, QUIZ_MAX_USES, QUIZ_SCHEDULE_LABEL, QUIZ_TILES } from "@/lib/quiz";
+import { minimumOriginalityScore } from "@/lib/originality";
 import { articles, publisherState, quizEditions, rssSources } from "@/lib/schema";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
@@ -70,17 +71,38 @@ export async function GET(request: NextRequest) {
       publishedAt: articles.publishedAt,
       updatedAt: articles.updatedAt,
     };
+    // The originality columns arrive with drizzle/0011; fall back to neutral values
+    // so the dashboard keeps loading before that migration runs.
+    let originalitySchemaReady = true;
+    const originalityFields = {
+      editorialTake: articles.editorialTake,
+      originalityScore: articles.originalityScore,
+      originalityNotes: articles.originalityNotes,
+    };
+    const legacyOriginalityFields = {
+      editorialTake: sql<string | null>`null`,
+      originalityScore: sql<number>`0`,
+      originalityNotes: sql<never>`null`,
+    };
     // Two groups keep the dashboard readable: rows still waiting in the local
     // queue, and rows a publisher cycle already handled (in-flight, accepted by
     // Buffer, live on Facebook, or failed). The client splits them again with
     // `splitArticleSections` from `@/lib/article-sections`.
-    const [queueRows, doneRows] = await Promise.all([
-      db.select(articleFields).from(articles).where(eq(articles.status, "queued"))
+    const loadRows = (fields: Parameters<typeof db.select>[0]) => Promise.all([
+      db.select(fields).from(articles).where(eq(articles.status, "queued"))
         .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`)),
-      db.select(articleFields).from(articles)
+      db.select(fields).from(articles)
         .where(inArray(articles.status, ["processing", "ready", "published", "failed"]))
         .orderBy(desc(sql`coalesce(${articles.publishedAt}, ${articles.updatedAt})`)).limit(20),
     ]);
+    let rows: Awaited<ReturnType<typeof loadRows>>;
+    try {
+      rows = await loadRows({ ...articleFields, ...originalityFields });
+    } catch {
+      originalitySchemaReady = false;
+      rows = await loadRows({ ...articleFields, ...legacyOriginalityFields });
+    }
+    const [queueRows, doneRows] = rows;
     const dashboardArticles = [
       ...queueRows.map((article, index) => ({ ...article, queuePosition: index + 1 })),
       ...doneRows.map((article) => ({ ...article, queuePosition: null })),
@@ -101,6 +123,30 @@ export async function GET(request: NextRequest) {
     } catch {
       quizSchemaReady = false;
     }
+
+    // Originality guard summary: how much of the recent output clears the "substantial addition" bar.
+    const originalityThreshold = minimumOriginalityScore();
+    let scoredRows: { score: number; status: ArticleStatus }[] = [];
+    try {
+      scoredRows = await db.select({ score: articles.originalityScore, status: articles.status })
+        .from(articles)
+        .where(gt(articles.originalityScore, 0))
+        .orderBy(desc(articles.createdAt))
+        .limit(60);
+    } catch {
+      originalitySchemaReady = false;
+    }
+    const originality = {
+      schemaReady: originalitySchemaReady,
+      threshold: originalityThreshold,
+      scored: scoredRows.length,
+      /** Average of the recent scores, rounded; 0 when nothing has been scored yet. */
+      average: scoredRows.length ? Math.round(scoredRows.reduce((total, row) => total + row.score, 0) / scoredRows.length) : 0,
+      safe: scoredRows.filter((row) => row.score >= 65).length,
+      watch: scoredRows.filter((row) => row.score >= originalityThreshold && row.score < 65).length,
+      risky: scoredRows.filter((row) => row.score < originalityThreshold).length,
+      held: scoredRows.filter((row) => row.status === "failed" && row.score < originalityThreshold).length,
+    };
 
     const statusCounts: Record<ArticleStatus, number> = { queued: 0, processing: 0, ready: 0, published: 0, failed: 0, expired: 0, removed: 0 };
     for (const row of groupedStatuses) statusCounts[row.status] = row.value;
@@ -138,6 +184,7 @@ export async function GET(request: NextRequest) {
         gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "gemini-3.8-flash",
       },
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
+      originality,
       schedule: PUBLISH_POLICY,
       publishSchedule: slotStateAt(new Date()),
       quiz: {
