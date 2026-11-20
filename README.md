@@ -29,7 +29,8 @@ Panen menyimpan maksimal 50 artikel baru per hari ke antrean `queued` di Neon; d
 4. Jika tabel `articles` sudah ada dari skema versi sebelumnya, jalankan sekali file [`drizzle/0001_multi_page.sql`](./drizzle/0001_multi_page.sql) di Neon SQL Editor. Kolom baru `page_key` untuk artikel lama otomatis bernilai `news`.
 5. Jalankan file [`drizzle/0002_rss_sources.sql`](./drizzle/0002_rss_sources.sql) untuk membuat tabel feed RSS yang dikelola dari Dashboard. Jika database belum memiliki tabel `articles`, gunakan `drizzle/schema.sql` yang sudah mencakup kedua tabel.
 6. Jalankan [`drizzle/0003_scheduled_harvest.sql`](./drizzle/0003_scheduled_harvest.sql) untuk menambahkan filter kata kunci dan pengunci publisher.
-7. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
+7. Untuk database yang sudah ada, jalankan [`drizzle/0004_hivecomp_posts_index.sql`](./drizzle/0004_hivecomp_posts_index.sql) sekali saat deploy untuk indeks feed publik terbaru. Instalasi baru dengan `drizzle/schema.sql` sudah mencakupnya. Endpoint API tidak menjalankan migrasi.
+8. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -39,6 +40,7 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
+- `HIVECOMP_API_TOKEN`: secret terpisah untuk API read-only landing HiveComp, minimal 32 karakter acak. Hanya dipasang di server backend dan server landing; tidak memakai prefix `NEXT_PUBLIC_`. Lihat [panduan HiveComp](./docs/hivecomp-api.md).
 - `GROQ_API_KEY`: opsional, penyedia AI pertama yang dicoba.
 - `GROQ_MODEL`: opsional, preferensi model Groq. Aplikasi memeriksa katalog model akun secara otomatis, mengutamakan model ekonomis seperti `llama-3.1-8b-instant`, dan beralih jika model tidak tersedia.
 - `GEMINI_API_KEY`: key Gemini utama, dicoba jika Groq gagal.
@@ -96,7 +98,8 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `GET /api/admin/buffer/channels` — baca nama dan ID channel Buffer (wajib bearer secret; tidak membuat post).
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
 - `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
-- `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
+- `GET /api/health` — pemeriksaan read-only koneksi/skema database dan status konfigurasi integrasi (boolean saja, bukan kredensial). Tidak memperbaiki atau menulis data; skema belum siap menghasilkan 503 JSON.
+- `GET /api/pages/{brand}/posts` — feed read-only HiveComp untuk `popbeez` (`entertainment`) atau `nusabeez` (`news`), wajib Bearer `HIVECOMP_API_TOKEN`. Maksimal 3 artikel dengan referensi Facebook dan waktu publikasi yang tersimpan, terbaru dahulu; antrean Buffer tidak dianggap terbit. `items` selalu array, cache sukses 5 menit. [Kontrak, env, curl, contoh error, keterbatasan data, dan panduan deploy](./docs/hivecomp-api.md).
 - `GET /api/cron` — proses satu artikel dan kirim ke antrean Buffer; mematuhi batas 2 pengiriman/jam dan jeda 15 menit. Wajib header `Authorization: Bearer <CRON_SECRET>`. Buffer mengatur waktu publikasi akhir.
 - `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
 - `POST /api/admin/retry-comment` — mengulang komentar sumber untuk postingan yang sudah terbit. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.

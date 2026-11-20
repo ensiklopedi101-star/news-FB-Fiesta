@@ -43,6 +43,7 @@ CREATE TABLE "articles" (
 CREATE UNIQUE INDEX "articles_url_hash_unique" ON "articles" USING btree ("url_hash");
 CREATE INDEX "articles_status_created_idx" ON "articles" USING btree ("status", "created_at");
 CREATE INDEX "articles_page_status_created_idx" ON "articles" USING btree ("page_key", "status", "created_at");
+CREATE INDEX "articles_page_status_published_idx" ON "articles" USING btree ("page_key", "status", "published_at", "id");
 CREATE INDEX "articles_published_at_idx" ON "articles" USING btree ("published_at");
 
 CREATE TABLE "publisher_state" (

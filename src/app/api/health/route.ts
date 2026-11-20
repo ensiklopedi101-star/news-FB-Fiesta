@@ -1,47 +1,27 @@
-import { count, eq, sql } from "drizzle-orm";
-import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { publisherState, rssSources } from "@/lib/schema";
+import { createHealthHandler } from "@/lib/health-api";
+import { readHealthSnapshot } from "@/lib/read-only-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function GET() {
-  let db: ReturnType<typeof getDb>;
-  try {
-    db = getDb();
-    await db.execute(sql`select 1`);
-  } catch (error) {
-    console.error("[health:database]", error instanceof Error ? error.message : error);
-    return NextResponse.json({ ok: false, database: "unavailable" }, { status: 503 });
-  }
+const handle = createHealthHandler({
+  loadSnapshot: async (signal) => readHealthSnapshot(getDb({ signal })),
+  getIntegrations: () => ({
+    gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
+    groq: Boolean(process.env.GROQ_API_KEY),
+    bufferApi: Boolean(process.env.BUFFER_API_KEY?.trim()),
+    bufferNews: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
+    bufferEntertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
+    hivecompApi: Boolean(process.env.HIVECOMP_API_TOKEN?.trim()),
+  }),
+});
 
-  let schemaReady = true;
-  let activeFeeds = 0;
-  try {
-    const [sourceCount] = await db.select({ value: count() }).from(rssSources).where(eq(rssSources.active, true));
-    await db.select({ id: rssSources.id, keywords: rssSources.keywords }).from(rssSources).limit(1);
-    await db.insert(publisherState).values({ id: 1 }).onConflictDoNothing();
-    const [lockRow] = await db.select({ id: publisherState.id }).from(publisherState).limit(1);
-    if (!lockRow) throw new Error("Migration scheduler belum diterapkan.");
-    activeFeeds = sourceCount.value;
-  } catch (error) {
-    schemaReady = false;
-    console.error("[health:schema]", error instanceof Error ? error.message : error);
-  }
-
-  return NextResponse.json({
-    ok: true,
-    database: "connected",
-    schema: schemaReady ? "ready" : "migration-required",
-    activeFeeds,
-    integrations: {
-      gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
-      groq: Boolean(process.env.GROQ_API_KEY),
-      bufferApi: Boolean(process.env.BUFFER_API_KEY?.trim()),
-      bufferNews: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
-      bufferEntertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
-      feeds: activeFeeds > 0,
-    },
-  });
-}
+export const GET = handle;
+export const HEAD = handle;
+export const POST = handle;
+export const PUT = handle;
+export const PATCH = handle;
+export const DELETE = handle;
+export const OPTIONS = handle;
