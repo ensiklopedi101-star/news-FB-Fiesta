@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { MANUAL_REVIEW_SOURCE_NAME } from "@/lib/manual-review";
-import { writeNewsCopy } from "@/lib/ai";
+import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
 import { getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { addPageComment, FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
@@ -12,7 +12,13 @@ import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
 import { indonesianTranslationUrl } from "@/lib/translation-url";
 import { shortenArticleUrl } from "@/lib/shortlink";
-import { originalityBlocked, scoreOriginality, type OriginalityReport } from "@/lib/originality";
+import {
+  originalityBlocked,
+  originalityMaxAttempts,
+  scoreOriginality,
+  shouldRetryForOriginality,
+  type OriginalityReport,
+} from "@/lib/originality";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -129,6 +135,69 @@ function publishingConfigurationGaps(pageKey: PageKey): string[] {
   return usesDirectFacebookPublishing(pageKey) ? [] : getBufferConfigurationGaps([pageKey]);
 }
 
+/** Time budget for one AI draft. Two drafts must still fit the cron window. */
+const AI_DRAFT_BUDGET_MS = 30_000;
+
+/**
+ * Writes the copy and keeps rewriting while the originality guard objects, so a
+ * weak first draft is fixed without a human pressing "Tulis ulang caption".
+ * A failed rewrite keeps the previous draft: the article must not fail because
+ * the second AI call (or its budget) fell over.
+ */
+async function writeGuardedCopy(
+  article: Article,
+  logStage: (stage: string) => void,
+  strictFirstDraft: boolean,
+): Promise<{ copy: GeneratedCopy; originality: OriginalityReport; drafts: number }> {
+  const maxDrafts = originalityMaxAttempts();
+  const score = (copy: GeneratedCopy) => scoreOriginality({
+    caption: copy.caption,
+    take: copy.take,
+    question: copy.question,
+    sourceText: article.rawText,
+    title: article.originalTitle,
+  });
+
+  let copy = await writeNewsCopy({
+    title: article.originalTitle,
+    rawText: article.rawText,
+    category: article.category,
+    sourceName: article.sourceName,
+    strictOriginality: strictFirstDraft,
+    budgetMs: AI_DRAFT_BUDGET_MS,
+  });
+  let originality = score(copy);
+  let drafts = 1;
+  logStage(`originality score=${originality.score} band=${originality.band} overlap=${originality.overlap} longestRun=${originality.longestRun} draft=${drafts}`);
+
+  while (shouldRetryForOriginality(originality, drafts, maxDrafts)) {
+    logStage(`originality-rewrite draft=${drafts + 1} previous=${originality.score}`);
+    try {
+      const rewritten = await writeNewsCopy({
+        title: article.originalTitle,
+        rawText: article.rawText,
+        category: article.category,
+        sourceName: article.sourceName,
+        strictOriginality: true,
+        feedback: originality.reasons.join(" "),
+        budgetMs: AI_DRAFT_BUDGET_MS,
+      });
+      copy = rewritten;
+      originality = score(rewritten);
+      drafts += 1;
+      logStage(`originality score=${originality.score} band=${originality.band} overlap=${originality.overlap} longestRun=${originality.longestRun} draft=${drafts}`);
+    } catch (error) {
+      logStage(`originality-rewrite-failed draft=${drafts + 1} reason=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+      break;
+    }
+  }
+
+  if (originalityBlocked(originality)) {
+    logStage(`originality-blocked score=${originality.score} drafts=${drafts}`);
+  }
+  return { copy, originality, drafts };
+}
+
 /**
  * Stores the editorial take and the originality audit. The columns ship with
  * `drizzle/0011_originality.sql`; until that migration runs the publish path must
@@ -190,14 +259,8 @@ export async function runNewsPipeline(): Promise<RunResult> {
     // A retried article that was previously held by the originality guard gets the
     // stricter brief, so the rewrite is less likely to fail the same way again.
     const retryingHeldCopy = Boolean(article.errorMessage?.startsWith("Ditahan oleh penjaga orisinalitas"));
-    const copy = await writeNewsCopy({
-      title: article.originalTitle,
-      rawText: article.rawText,
-      category: article.category,
-      sourceName: article.sourceName,
-      strictOriginality: retryingHeldCopy,
-    });
-    logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
+    const { copy, originality, drafts } = await writeGuardedCopy(article, logStage, retryingHeldCopy);
+    logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} drafts=${drafts} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
 
     if (isQueueItemExpired(article.sourcePublishedAt ?? article.createdAt)) {
       await db.update(articles)
@@ -205,33 +268,22 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
     }
-    // Originality gate: a caption that only restates the source puts the Page at risk of
-    // Facebook's "limited originality" review, so it never reaches Facebook.
-    const originality = scoreOriginality({
-      caption: copy.caption,
-      take: copy.take,
-      question: copy.question,
-      sourceText: article.rawText,
-      title: article.originalTitle,
-    });
-    logStage(`originality score=${originality.score} band=${originality.band} overlap=${originality.overlap} longestRun=${originality.longestRun} signals=${Object.entries(originality.signals).filter(([, on]) => on).map(([name]) => name).join("+") || "none"}`);
     if (originalityBlocked(originality)) {
       await db.update(articles)
         .set({
           status: "failed",
           facebookPostId: null,
           attempts: article.attempts + 1,
-          errorMessage: `Ditahan oleh penjaga orisinalitas (skor ${originality.score}/100). ${originality.reasons.join(" ")}`.slice(0, 1_000),
+          errorMessage: `Ditahan oleh penjaga orisinalitas setelah ${drafts} percobaan (skor ${originality.score}/100). ${originality.reasons.join(" ")}`.slice(0, 1_000),
           updatedAt: new Date(),
         })
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
       await recordOriginality(article.id, copy.take, originality);
-      logStage("originality-blocked");
       return {
         result: "failed",
         articleId: article.id,
         title: copy.title,
-        detail: `Ditahan: orisinalitas ${originality.score}/100. ${originality.reasons[0]}`,
+        detail: `Ditahan setelah ${drafts} percobaan: orisinalitas ${originality.score}/100. ${originality.reasons[0]}`,
       };
     }
     const sourceLinkTarget = article.pageKey === "entertainment"

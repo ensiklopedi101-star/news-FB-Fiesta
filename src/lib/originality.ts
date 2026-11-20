@@ -131,6 +131,27 @@ export function scoreOriginality(input: OriginalityInput): OriginalityReport {
   return { score, band, overlap: Number(overlap.toFixed(3)), longestRun, signals, reasons };
 }
 
+const DEFAULT_MAX_ATTEMPTS = 2;
+
+/**
+ * How many drafts one article may use before the guard gives up. Two is the
+ * ceiling on purpose: every attempt costs an AI call inside the cron budget.
+ */
+export function originalityMaxAttempts(env: Record<string, string | undefined> = process.env): number {
+  const configured = Number(env.ORIGINALITY_MAX_ATTEMPTS?.trim());
+  if (!Number.isFinite(configured)) return DEFAULT_MAX_ATTEMPTS;
+  return Math.min(2, Math.max(1, Math.round(configured)));
+}
+
+/** True while a failed draft may still be rewritten automatically. */
+export function shouldRetryForOriginality(
+  report: OriginalityReport,
+  attemptsUsed: number,
+  maxAttempts: number = originalityMaxAttempts(),
+): boolean {
+  return originalityBlocked(report) && attemptsUsed < maxAttempts;
+}
+
 /** Captions scoring below this are held instead of published. */
 export function minimumOriginalityScore(env: Record<string, string | undefined> = process.env): number {
   const configured = Number(env.ORIGINALITY_MIN_SCORE?.trim());

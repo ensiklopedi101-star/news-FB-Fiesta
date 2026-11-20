@@ -8,7 +8,9 @@ import { slotStateAt } from "@/lib/publish-slots";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Two AI drafts (30 s each) plus publishing must fit, so the guard can rewrite
+// a weak first draft without the request being cut off mid-publish.
+export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
