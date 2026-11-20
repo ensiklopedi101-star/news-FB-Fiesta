@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { OriginalityReport } from "@/lib/originality";
 import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed", "expired", "removed"]);
@@ -43,6 +44,11 @@ export const articles = pgTable(
     imageUrls: jsonb("image_urls").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     manualImageUrls: jsonb("manual_image_urls").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     caption: text("caption"),
+    /** Editorial analysis + opinion written for this post (the "substantial addition"). */
+    editorialTake: text("editorial_take"),
+    /** Deterministic originality check attached to the caption (see lib/originality). */
+    originalityScore: integer("originality_score").notNull().default(0),
+    originalityNotes: jsonb("originality_notes").$type<OriginalityReport | null>(),
     status: articleStatus("status").notNull().default("queued"),
     facebookPostId: text("facebook_post_id"),
     errorMessage: text("error_message"),

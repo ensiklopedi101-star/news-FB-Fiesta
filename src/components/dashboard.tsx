@@ -37,6 +37,11 @@ type Article = {
   publishedAt: string | null;
   updatedAt: string;
   queuePosition: number | null;
+  /** Analysis + opinion written for this post ("substantial addition"). */
+  editorialTake: string | null;
+  /** 0–100 originality score; 0 means the post predates the guard. */
+  originalityScore: number;
+  originalityNotes: { band: "safe" | "watch" | "risky"; reasons: string[]; overlap: number; longestRun: number } | null;
 };
 
 type ReviewDraftItem = { title: string; rating: string; genre: string; reason: string; suitableFor: string; imageUrl: string };
@@ -53,6 +58,7 @@ type DashboardData = {
   aiModels: { groq: string; gemini: string };
   schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
+  originality: { schemaReady: boolean; threshold: number; scored: number; average: number; safe: number; watch: number; risky: number; held: number };
   quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
@@ -304,6 +310,21 @@ export default function Dashboard() {
     }
   }
 
+  async function requeueArticle(article: Article) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/api/admin/retry", { method: "POST", body: JSON.stringify({ id: article.id }) });
+      setMessage(`Masuk antrean lagi: ${article.title}. Caption akan ditulis ulang pada siklus publisher berikutnya.`);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal memasukkan artikel kembali ke antrean.");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleArticlePriority(article: Article) {
     const priority = !article.priorityAt;
     setBusy(true);
@@ -470,14 +491,17 @@ export default function Dashboard() {
           <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
           <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
           <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
+          {article.originalityScore > 0 && <span className={`status-tag originality-${article.originalityNotes?.band ?? "watch"}`} title={article.originalityNotes?.reasons.join(" ") ?? ""}>Orisinalitas {article.originalityScore}</span>}
           {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
           {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
           {commentFailed && <button type="button" className="retry-comment-button" disabled={busy} onClick={() => void retrySourceComment(article)}>Kirim ulang komentar sumber</button>}
+          {article.status === "failed" && <button type="button" className="quiet-button" disabled={busy} onClick={() => void requeueArticle(article)}>Tulis ulang caption</button>}
         </div>
         <strong>{article.title}</strong>
         <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
         {article.status === "published" && <div className="article-meta published-meta">Terbit di Facebook: {formatDate(article.publishedAt)}</div>}
         {article.status === "ready" && <div className="article-meta published-meta">Dikirim: {formatDate(article.updatedAt)}</div>}
+        {article.editorialTake && <p className="article-take">💡 {article.editorialTake}</p>}
         {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
         <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
           <div className="article-preview-gallery">
@@ -578,6 +602,19 @@ export default function Dashboard() {
         {bufferMappings && <div className="setup-grid"><article className="setup-card"><span className={bufferMappings.news.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Berita</strong><p>{bufferMappingLabel(bufferMappings.news)}</p></div></article><article className="setup-card"><span className={bufferMappings.entertainment.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Hiburan</strong><p>{bufferMappingLabel(bufferMappings.entertainment)}</p></div></article></div>}
         {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}
         <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
+      </section>
+
+      <section className="panel originality-panel">
+        <div className="panel-heading"><div><p className="eyebrow">NILAI TAMBAH</p><h2>Penjaga orisinalitas</h2><p className="muted small-note">Setiap caption wajib membawa analisis, opini redaksi, dan pertanyaan diskusi. Sebelum dikirim, caption diperiksa otomatis: bila terlalu mirip sumber atau tidak punya sudut pandang, post <b>ditahan</b> dan tidak pernah sampai ke Facebook. Ambang lulus saat ini <b>{data?.originality.threshold ?? 45}/100</b> (<code>ORIGINALITY_MIN_SCORE</code>).</p></div><span className="format-tag carousel">Anti “Limited Originality”</span></div>
+        <div className="queue-counts"><span>{data?.originality.scored ?? 0} post dinilai</span><span>rata-rata {data?.originality.average ?? 0}/100</span><span>{data?.originality.safe ?? 0} aman</span><span>{data?.originality.watch ?? 0} pantau</span><span className={(data?.originality.risky ?? 0) > 0 ? "count-alert" : ""}>{data?.originality.risky ?? 0} berisiko</span><span>{data?.originality.held ?? 0} ditahan</span></div>
+        <div className="setup-grid">
+          <article className="setup-card"><span className="check-dot good" /><div><strong>Analisis + opini</strong><p>Paragraf “Sudut pandang Popbeez” ditulis ulang per berita: sebab-akibat, perbandingan, atau penilaian redaksi — bukan ringkasan sumber.</p></div></article>
+          <article className="setup-card"><span className="check-dot good" /><div><strong>Larangan salin</strong><p>8 kata berurutan yang sama dengan sumber langsung menurunkan skor ke ambang tahan. Parafrase total, tanpa fakta baru.</p></div></article>
+          <article className="setup-card"><span className="check-dot good" /><div><strong>Pertanyaan diskusi</strong><p>Setiap post diakhiri pertanyaan spesifik agar komentar pembaca menjadi bagian dari nilai tambah, bukan hanya reaksi.</p></div></article>
+          <article className="setup-card"><span className="check-dot good" /><div><strong>Jejak audit</strong><p>Skor, panjang salinan, dan alasan disimpan di kolom <code>originality_score</code>/<code>originality_notes</code> untuk ditinjau ulang.</p></div></article>
+        </div>
+        {data?.originality.schemaReady === false && <p className="muted small-note">Kolom <code>editorial_take</code>, <code>originality_score</code>, dan <code>originality_notes</code> belum ada. Jalankan <code>drizzle/0011_originality.sql</code> di Neon; penahanan caption tetap berjalan walau skor belum tersimpan.</p>}
+        {(data?.originality.scored ?? 0) === 0 && <p className="muted small-note">Belum ada post yang dinilai. Skor muncul setelah artikel berikutnya diproses pipeline.</p>}
       </section>
 
       <section className="panel quiz-panel">

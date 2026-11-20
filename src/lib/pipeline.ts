@@ -12,6 +12,7 @@ import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
 import { indonesianTranslationUrl } from "@/lib/translation-url";
 import { shortenArticleUrl } from "@/lib/shortlink";
+import { originalityBlocked, scoreOriginality, type OriginalityReport } from "@/lib/originality";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -128,6 +129,21 @@ function publishingConfigurationGaps(pageKey: PageKey): string[] {
   return usesDirectFacebookPublishing(pageKey) ? [] : getBufferConfigurationGaps([pageKey]);
 }
 
+/**
+ * Stores the editorial take and the originality audit. The columns ship with
+ * `drizzle/0011_originality.sql`; until that migration runs the publish path must
+ * keep working, so a failure here is logged and ignored.
+ */
+async function recordOriginality(articleId: string, take: string, report: OriginalityReport) {
+  try {
+    await getDb().update(articles)
+      .set({ editorialTake: take, originalityScore: report.score, originalityNotes: report })
+      .where(eq(articles.id, articleId));
+  } catch (error) {
+    console.warn(`[pipeline] originality-persist-skipped reason=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+  }
+}
+
 export async function runNewsPipeline(): Promise<RunResult> {
   const db = getDb();
   const pause = await getPublishingPause();
@@ -171,18 +187,52 @@ export async function runNewsPipeline(): Promise<RunResult> {
 
   try {
     logStage("ai-start");
+    // A retried article that was previously held by the originality guard gets the
+    // stricter brief, so the rewrite is less likely to fail the same way again.
+    const retryingHeldCopy = Boolean(article.errorMessage?.startsWith("Ditahan oleh penjaga orisinalitas"));
     const copy = await writeNewsCopy({
       title: article.originalTitle,
       rawText: article.rawText,
       category: article.category,
       sourceName: article.sourceName,
+      strictOriginality: retryingHeldCopy,
     });
     logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
+
     if (isQueueItemExpired(article.sourcePublishedAt ?? article.createdAt)) {
       await db.update(articles)
         .set({ status: "expired", errorMessage: `Berita dikeluarkan dari antrean karena sudah lebih dari ${MAX_QUEUE_AGE_HOURS} jam sejak terbit.`, updatedAt: new Date() })
         .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
+    }
+    // Originality gate: a caption that only restates the source puts the Page at risk of
+    // Facebook's "limited originality" review, so it never reaches Facebook.
+    const originality = scoreOriginality({
+      caption: copy.caption,
+      take: copy.take,
+      question: copy.question,
+      sourceText: article.rawText,
+      title: article.originalTitle,
+    });
+    logStage(`originality score=${originality.score} band=${originality.band} overlap=${originality.overlap} longestRun=${originality.longestRun} signals=${Object.entries(originality.signals).filter(([, on]) => on).map(([name]) => name).join("+") || "none"}`);
+    if (originalityBlocked(originality)) {
+      await db.update(articles)
+        .set({
+          status: "failed",
+          facebookPostId: null,
+          attempts: article.attempts + 1,
+          errorMessage: `Ditahan oleh penjaga orisinalitas (skor ${originality.score}/100). ${originality.reasons.join(" ")}`.slice(0, 1_000),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
+      await recordOriginality(article.id, copy.take, originality);
+      logStage("originality-blocked");
+      return {
+        result: "failed",
+        articleId: article.id,
+        title: copy.title,
+        detail: `Ditahan: orisinalitas ${originality.score}/100. ${originality.reasons[0]}`,
+      };
     }
     const sourceLinkTarget = article.pageKey === "entertainment"
       ? indonesianTranslationUrl(article.sourceUrl)
@@ -207,6 +257,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
         errorMessage: null,
       })
       .where(eq(articles.id, article.id));
+    await recordOriginality(article.id, copy.take, originality);
 
     const appUrl = getPublicAppUrl();
     const imageUrls = article.postFormat === "carousel"
