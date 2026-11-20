@@ -46,6 +46,10 @@ export const articles = pgTable(
     caption: text("caption"),
     /** Editorial analysis + opinion written for this post (the "substantial addition"). */
     editorialTake: text("editorial_take"),
+    /** Standing editorial voice that wrote this post ("kritis", "santai", ...). */
+    editorialVoice: text("editorial_voice"),
+    /** Spoken script for the matching Reel; never shown in the caption. */
+    narrationScript: text("narration_script"),
     /** Deterministic originality check attached to the caption (see lib/originality). */
     originalityScore: integer("originality_score").notNull().default(0),
     originalityNotes: jsonb("originality_notes").$type<OriginalityReport | null>(),
@@ -108,7 +112,33 @@ export const quizEditions = pgTable(
   (table) => [index("quiz_editions_created_idx").on(table.createdAt)],
 );
 
+export const reelStatus = pgEnum("reel_status", ["rendering", "published", "failed"]);
+
+/** One Reel per article (latest attempt wins), rendered from narration + frames. */
+export const reels = pgTable(
+  "reels",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    articleId: uuid("article_id").notNull().references(() => articles.id, { onDelete: "cascade" }),
+    status: reelStatus("status").notNull().default("rendering"),
+    narration: text("narration"),
+    voiceLabel: text("voice_label"),
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+    frameCount: integer("frame_count").notNull().default(0),
+    videoUrl: text("video_url"),
+    facebookVideoId: text("facebook_video_id"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("reels_article_idx").on(table.articleId),
+    index("reels_created_idx").on(table.createdAt),
+  ],
+);
+
 export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
 export type QuizEdition = typeof quizEditions.$inferSelect;
+export type Reel = typeof reels.$inferSelect;
