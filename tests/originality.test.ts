@@ -5,7 +5,9 @@ import {
   minimumOriginalityScore,
   originalityBlocked,
   originalityLabel,
+  originalityMaxAttempts,
   scoreOriginality,
+  shouldRetryForOriginality,
 } from "@/lib/originality";
 
 const sourceText =
@@ -72,4 +74,33 @@ test("label band dipakai di dashboard", () => {
   assert.equal(originalityLabel("safe"), "Aman");
   assert.equal(originalityLabel("watch"), "Pantau");
   assert.equal(originalityLabel("risky"), "Berisiko");
+});
+
+test("draft yang gagal ditulis ulang otomatis, maksimal dua percobaan", () => {
+  const blocked = scoreOriginality({
+    caption: sourceText,
+    take: "",
+    question: "",
+    sourceText,
+  });
+  assert.equal(originalityBlocked(blocked), true);
+  // First draft may be rewritten once; the second draft is the last chance.
+  assert.equal(shouldRetryForOriginality(blocked, 1, 2), true);
+  assert.equal(shouldRetryForOriginality(blocked, 2, 2), false);
+  // A passing draft is never rewritten, however many attempts are left.
+  const safe = scoreOriginality({
+    caption: "Menurut kami, karena ceritanya lambat, dampaknya justru pada kesabaran penonton setia yang bertahan sampai akhir musim. Justru itu yang membuat diskusi panjang di media sosial, dibandingkan drama lain yang ramai hanya di episode pembuka. Padahal pola seperti ini sudah berulang sejak tahun lalu, artinya rumah produksi mulai menghitung kesabaran sebagai bagian dari strategi, bukan kelemahan naskah.",
+    take: "Menurut kami, karena ceritanya lambat, dampaknya justru pada kesabaran penonton setia yang bertahan sampai akhir musim. Justru itu yang membuat diskusi panjang di media sosial, dibandingkan drama lain yang ramai hanya di episode pembuka.",
+    question: "Drama lambat seperti apa yang kamu bertahan sampai episode terakhir?",
+    sourceText,
+  });
+  assert.equal(shouldRetryForOriginality(safe, 1, 2), false);
+});
+
+test("jumlah percobaan dijepit 1-2 lewat env", () => {
+  assert.equal(originalityMaxAttempts({}), 2);
+  assert.equal(originalityMaxAttempts({ ORIGINALITY_MAX_ATTEMPTS: "1" }), 1);
+  assert.equal(originalityMaxAttempts({ ORIGINALITY_MAX_ATTEMPTS: "9" }), 2);
+  assert.equal(originalityMaxAttempts({ ORIGINALITY_MAX_ATTEMPTS: "0" }), 1);
+  assert.equal(originalityMaxAttempts({ ORIGINALITY_MAX_ATTEMPTS: "abc" }), 2);
 });
