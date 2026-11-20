@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const brand = (
     (isEntertainment ? process.env.PAGE_BRAND_ENTERTAINMENT : process.env.PAGE_BRAND_NEWS)
     || process.env.PAGE_BRAND
-    || (isEntertainment ? "Popbeez" : "Nusabeez")
+    || (isEntertainment ? "PopBeez" : "Nusabeez")
   ).slice(0, 40);
   const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
   const manualReview = parseManualReview(article.rawText);

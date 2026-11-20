@@ -3,17 +3,26 @@ import test from "node:test";
 
 import {
   EDITORIAL_VOICES,
+  VOICE_STYLE_GUIDE,
   editorialVoiceById,
   editorialVoiceLabel,
   pickEditorialVoice,
 } from "@/lib/editorial-voices";
 
-test("empat sudut pandang tersedia dan semuanya menyebut opini eksplisit", () => {
+test("empat sudut pandang tersedia dan semuanya memakai gaya bicara PopBeez", () => {
   assert.equal(EDITORIAL_VOICES.length, 4);
   for (const voice of EDITORIAL_VOICES) {
     assert.ok(voice.label.length > 2);
-    assert.match(voice.brief, /Menurut kami|Kami menilai|menurut kami/i);
+    assert.match(voice.brief, /PopBeez|popbeez/);
+    assert.match(voice.brief, /sih|deh|nih|banget|rasa/);
   }
+});
+
+test("panduan gaya melarang label dan frasa kaku", () => {
+  assert.match(VOICE_STYLE_GUIDE, /Sudut pandang PopBeez/);
+  assert.match(VOICE_STYLE_GUIDE, /tak dapat dipungkiri/);
+  assert.match(VOICE_STYLE_GUIDE, /Beezers/);
+  assert.match(VOICE_STYLE_GUIDE, /Menurut PopBeez sih/);
 });
 
 test("pemilihan voice deterministik untuk artikel yang sama", () => {
@@ -30,8 +39,8 @@ test("rotasi menjangkau semua voice pada banyak artikel", () => {
   assert.equal(seen.size, EDITORIAL_VOICES.length);
 });
 
-test("label caption memakai nama kolom", () => {
-  assert.equal(editorialVoiceLabel(editorialVoiceById("kritis")), "💡 Sudut pandang Popbeez · Kritis");
-  assert.equal(editorialVoiceLabel(null), "💡 Sudut pandang Popbeez");
+test("nama nada hanya untuk dashboard, bukan untuk caption", () => {
+  assert.equal(editorialVoiceLabel(editorialVoiceById("kritis")), "Nada Kritis");
+  assert.equal(editorialVoiceLabel(null), "Nada bebas");
   assert.equal(editorialVoiceById("tidak-ada"), null);
 });

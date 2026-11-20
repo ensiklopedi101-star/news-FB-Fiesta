@@ -1,9 +1,9 @@
 import "server-only";
-import { and, asc, desc, eq, gt, isNull, like, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, like, lt, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
 import { PUBLISH_POLICY } from "@/lib/schedule";
-import { MANUAL_REVIEW_SOURCE_NAME } from "@/lib/manual-review";
+import { MANUAL_REVIEW_SOURCE_NAMES } from "@/lib/manual-review";
 import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
 import { getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
@@ -86,12 +86,12 @@ async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: st
   const [facebookPublished, bufferQueued] = await Promise.all([
     db.select({ occurredAt: articles.publishedAt })
       .from(articles)
-      .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff), ne(articles.sourceName, MANUAL_REVIEW_SOURCE_NAME)))
+      .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff), notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES])))
       .orderBy(desc(articles.publishedAt))
       .limit(PUBLISH_POLICY.maxPerHour),
     db.select({ occurredAt: articles.updatedAt })
       .from(articles)
-      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff), ne(articles.sourceName, MANUAL_REVIEW_SOURCE_NAME)))
+      .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff), notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES])))
       .orderBy(desc(articles.updatedAt))
       .limit(PUBLISH_POLICY.maxPerHour),
   ]);
@@ -304,7 +304,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
       ? indonesianTranslationUrl(article.sourceUrl)
       : article.sourceUrl;
     const shareLink = await shortenArticleUrl(sourceLinkTarget, article.id);
-    const followLink = article.pageKey === "entertainment" ? "\n\nIkuti Popbeez: https://www.facebook.com/portalbeez" : "";
+    const followLink = article.pageKey === "entertainment" ? "\n\nIkuti PopBeez: https://www.facebook.com/portalbeez" : "";
     // Direct Graph posts keep the caption link-free so Meta does not suppress reach;
     // the source link is posted as the first comment right after publishing.
     const caption = directFacebook
@@ -374,7 +374,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
         result: "published",
         articleId: article.id,
         title: copy.title,
-        detail: "Posting langsung diterbitkan ke halaman Facebook Popbeez.",
+        detail: "Posting langsung diterbitkan ke halaman Facebook PopBeez.",
       };
     }
 

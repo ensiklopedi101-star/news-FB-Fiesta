@@ -72,7 +72,7 @@ test("renders a carousel information slide as a square branded JPEG", async () =
 test("entertainment single-image cards show a Facebook follow CTA in the footer", async () => {
   const output = await renderOgCard({
     ...baseOptions,
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "DRAMA",
     isEntertainment: true,
     photoJpeg: null,
@@ -90,7 +90,7 @@ test("entertainment single-image cards show a Facebook follow CTA in the footer"
 test("carousel follow CTA slide renders the Facebook icon", async () => {
   const output = await renderOgCard({
     ...baseOptions,
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "DRAMA",
     isEntertainment: true,
     photoJpeg: null,
@@ -112,7 +112,7 @@ test("renders a unified manual review slide with the poster in a framed panel", 
   }).png().toBuffer();
   const output = await renderOgCard({
     ...baseOptions,
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "DRAMA",
     isEntertainment: true,
     photoJpeg: photo,
@@ -133,10 +133,10 @@ test("renders a unified manual review slide with the poster in a framed panel", 
   assert.ok(photoPixel[2]! > photoPixel[0]! * 2);
 });
 
-test("entertainment cards load the existing Popbeez logo asset", async () => {
+test("entertainment cards load the existing PopBeez logo asset", async () => {
   const output = await renderOgCard({
     ...baseOptions,
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "ENTERTAINMENT",
     isEntertainment: true,
     photoJpeg: null,
@@ -154,7 +154,7 @@ test("review slide keeps a long uppercase title inside the dark panel and preser
   }).png().toBuffer();
   const output = await renderOgCard({
     ...baseOptions,
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "DRAMA",
     isEntertainment: true,
     photoJpeg: photo,
@@ -174,13 +174,13 @@ test("review slide keeps a long uppercase title inside the dark panel and preser
   assert.ok(borderPixel[0]! < 60 && borderPixel[1]! < 60 && borderPixel[2]! < 60);
 });
 
-test("review cover uses a plain pink panel without a poster and shows the Popbeez logo", async () => {
+test("review cover uses a plain pink panel without a poster and shows the PopBeez logo", async () => {
   const photo = await sharp({
     create: { width: 40, height: 80, channels: 3, background: { r: 20, g: 190, b: 90 } },
   }).png().toBuffer();
   const output = await renderOgCard({
     ...baseOptions,
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "DRAMA",
     isEntertainment: true,
     photoJpeg: photo,
@@ -198,7 +198,7 @@ test("review cover uses a plain pink panel without a poster and shows the Popbee
 test("cards render without the kicker line above the headline", async () => {
   const darkPhoto = await sharp({ create: { width: 60, height: 60, channels: 3, background: { r: 8, g: 8, b: 10 } } }).png().toBuffer();
   const entertainment = await renderOgCard({
-    brand: "Popbeez",
+    brand: "PopBeez",
     category: "K-ENTERTAINMENT",
     title: "Drama sejarah Korea kembali meramaikan layar",
     sourceName: "Korea Times",

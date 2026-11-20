@@ -71,8 +71,13 @@ function longestCommonRun(left: string[], right: string[]): number {
   return best;
 }
 
-const OPINION_MARKERS = /\b(menurut (?:kami|saya|redaksi|gue)|kami menilai|saya (?:rasa|lihat|kira|pikir)|jujur(?:nya)?|yang bikin|menariknya|sayangnya|justru|patut|kami (?:anggap|catat)|buat (?:kami|saya)|di mata kami)\b/i;
-const ANALYSIS_MARKERS = /\b(karena|sehingga|artinya|dampak(?:nya)?|dibanding(?:kan)?|padahal|kontras|membandingkan|implikasi|pola|tren|sinyal|konteksnya|makanya|alhasil)\b/i;
+/**
+ * PopBeez writes in conversational Indonesian ("Menurut PopBeez sih…", "PopBeez
+ * rasa…"), so the guard has to recognise that voice too — otherwise every natural
+ * draft would be held as "no opinion".
+ */
+const OPINION_MARKERS = /\b(menurut (?:kami|saya|redaksi|gue|popbeez)|popbeez (?:rasa|nilai|yakin|sih|anggap)|kami (?:menilai|rasa|anggap|lihat|sih)|saya (?:rasa|lihat|kira|pikir)|gue rasa|jujur(?:nya)?|yang bikin|menariknya|sayangnya|justru|patut|di mata kami)\b/i;
+const ANALYSIS_MARKERS = /\b(karena|tapi|soalnya|jadi|makanya|alhasil|sehingga|artinya|dampak(?:nya)?|dibanding(?:kan)?|padahal|kontras|membandingkan|implikasi|pola|tren|sinyal|konteksnya|bikin|bukan cuma|gak cuma)\b/i;
 
 export type OriginalityInput = {
   /** Full caption, exactly as it would be posted. */
@@ -105,7 +110,7 @@ export function scoreOriginality(input: OriginalityInput): OriginalityReport {
     opinion: OPINION_MARKERS.test(take || input.caption),
     analysis: ANALYSIS_MARKERS.test(take) && take.length >= 60,
     question: question.length >= 25 && question.includes("?"),
-    context: captionWords.length >= 60 && overlap < 0.25,
+    context: captionWords.length >= 50 && overlap < 0.25,
     noVerbatim: longestRun < VERBATIM_RUN_LIMIT,
   };
 

@@ -25,7 +25,7 @@ import {
   type QuizReview,
 } from "@/lib/quiz";
 import { publishFacebookPagePost } from "@/lib/facebook";
-import { MANUAL_REVIEW_SOURCE_NAME, manualImageReferer, parseManualReview, type ManualReviewItem } from "@/lib/manual-review";
+import { MANUAL_REVIEW_SOURCE_NAMES, manualImageReferer, parseManualReview, type ManualReviewItem } from "@/lib/manual-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,7 +126,7 @@ async function handle(request: NextRequest, forced: boolean) {
       prepared,
       label: QUIZ_LABEL,
       sublabel: QUIZ_SUBLABEL,
-      brand: process.env.PAGE_BRAND_ENTERTAINMENT?.trim() || "Popbeez",
+      brand: process.env.PAGE_BRAND_ENTERTAINMENT?.trim() || "PopBeez",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal menyusun gambar kuis.";
@@ -186,7 +186,7 @@ async function loadQuizReviews(): Promise<QuizReview[]> {
   const rows = await getDb().select({ id: articles.id, rawText: articles.rawText, createdAt: articles.createdAt })
     .from(articles)
     .where(and(
-      eq(articles.sourceName, MANUAL_REVIEW_SOURCE_NAME),
+      inArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES]),
       inArray(articles.status, ["ready", "published"]),
     ))
     .orderBy(desc(articles.createdAt))

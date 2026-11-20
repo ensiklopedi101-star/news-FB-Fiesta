@@ -40,14 +40,14 @@ test("publishes a single photo directly to the entertainment page", async () => 
   const result = await publishFacebookPagePost({
     pageKey: "entertainment",
     imageUrls: ["https://app.example/api/og/article-1?slide=1"],
-    caption: "Halo Popbeez",
+    caption: "Halo PopBeez",
   });
 
   assert.deepEqual(result, { postId: "1234567890_777", mediaFormat: "single" });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.url, "https://graph.facebook.com/v23.0/1234567890/photos");
   assert.equal(calls[0]!.fields.get("published"), "true");
-  assert.equal(calls[0]!.fields.get("caption"), "Halo Popbeez");
+  assert.equal(calls[0]!.fields.get("caption"), "Halo PopBeez");
   assert.equal(calls[0]!.fields.get("access_token"), "page-token-secret");
 });
 
@@ -66,7 +66,7 @@ test("uploads carousel slides unpublished then creates one feed post", async () 
   const result = await publishFacebookPagePost({
     pageKey: "entertainment",
     imageUrls: images,
-    caption: "Carousel Popbeez",
+    caption: "Carousel PopBeez",
   });
 
   assert.deepEqual(result, { postId: "1234567890_888", mediaFormat: "carousel" });
@@ -76,7 +76,7 @@ test("uploads carousel slides unpublished then creates one feed post", async () 
     assert.equal(upload.fields.get("access_token"), "page-token-secret");
   }
   const feed = calls[3]!;
-  assert.equal(feed.fields.get("message"), "Carousel Popbeez");
+  assert.equal(feed.fields.get("message"), "Carousel PopBeez");
   assert.deepEqual(
     [feed.fields.get("attached_media[0]"), feed.fields.get("attached_media[1]"), feed.fields.get("attached_media[2]")],
     ['{"media_fbid":"photo-1"}', '{"media_fbid":"photo-2"}', '{"media_fbid":"photo-3"}'],

@@ -96,6 +96,6 @@ export function totalSeconds(scenes: ReelScene[]): number {
 
 /** Reels caption: the same substance as the post, plus the source note. */
 export function buildReelCaption(input: { headline: string; question: string; sourceName: string; hashtags?: string[] }): string {
-  const hashtags = input.hashtags?.length ? input.hashtags.join(" ") : "#Popbeez #DramaKorea #FilmKorea";
+  const hashtags = input.hashtags?.length ? input.hashtags.join(" ") : "#PopBeez #DramaKorea #FilmKorea";
   return [input.headline.trim(), "", input.question.trim(), "", hashtags, `📰 ${input.sourceName}`].join("\n");
 }

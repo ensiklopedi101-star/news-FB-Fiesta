@@ -7,7 +7,7 @@ import { renderSilhouette, silhouettePalette } from "./quiz-silhouette";
 
 /**
  * Square 2×3 quiz grid: five poster cells plus a branded cell in the bottom-right
- * corner that carries the Popbeez logo and the "Tebak Drama" wording.
+ * corner that carries the PopBeez logo and the "Tebak Drama" wording.
  */
 export const QUIZ_CARD_SIZE = 1080;
 export const QUIZ_COLUMNS = 2;
@@ -27,7 +27,7 @@ export type QuizCardOptions = {
   brand?: string;
   brandTag?: string;
   handle?: string;
-  /** Optional logo payload for the brand cell; the bundled Popbeez icon is used otherwise. */
+  /** Optional logo payload for the brand cell; the bundled PopBeez icon is used otherwise. */
   logo?: Uint8Array | Buffer | null;
   /** Tiles that are already flat silhouette art (AI-drawn), so they must not be re-processed. */
   prepared?: boolean[];
@@ -67,11 +67,11 @@ function buildBadges(): Buffer {
   </svg>`);
 }
 
-/** The bottom-right cell: Popbeez logo, wordmark, and the "Tebak Drama" label. */
+/** The bottom-right cell: PopBeez logo, wordmark, and the "Tebak Drama" label. */
 function buildBrandPanel(options: QuizCardOptions): Buffer {
   const label = escapeXml(options.label ?? "TEBAK DRAMA");
   const sublabel = escapeXml(options.sublabel ?? "5 poster · jawab di komentar");
-  const brand = escapeXml(options.brand ?? "Popbeez");
+  const brand = escapeXml(options.brand ?? "PopBeez");
   const brandTag = escapeXml(options.brandTag ?? "POP CULTURE");
   const handle = escapeXml(options.handle ?? "@PORTALBEEZ");
 
@@ -184,7 +184,7 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
         .toBuffer();
       layers.push({ input: renderedLogo, left: brandLeft + Math.round((QUIZ_CELL_WIDTH - 116) / 2), top: brandTop + 20 });
     } catch {
-      console.warn("[quiz] logo Popbeez gagal disiapkan; sel merek tampil tanpa logo.");
+      console.warn("[quiz] logo PopBeez gagal disiapkan; sel merek tampil tanpa logo.");
     }
   }
 
