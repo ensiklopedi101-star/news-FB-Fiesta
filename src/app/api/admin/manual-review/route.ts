@@ -7,6 +7,7 @@ import { isAuthorized } from "@/lib/auth";
 import { createManualReview, buildManualReviewCaption, MANUAL_REVIEW_FOLLOW_COMMENT, MANUAL_REVIEW_SOURCE_NAME, manualImageReferer } from "@/lib/manual-review";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { addPageComment, FacebookPublishOutcomeUnknownError } from "@/lib/facebook";
+import { isInstagramPublishingEnabled, publishInstagramPost } from "@/lib/instagram";
 import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
 
@@ -104,7 +105,23 @@ export async function POST(request: NextRequest) {
         console.error(`[manual-review] Komentar tautan gagal untuk ${id}:`, commentMessage);
       }
 
-      return NextResponse.json({ ok: true, id, title, mediaFormat: result.mediaFormat, provider: result.provider }, { status: 201 });
+      let instagramNote = "";
+      if (isInstagramPublishingEnabled()) {
+        try {
+          await publishInstagramPost({ imageUrls, caption });
+          console.info(`[manual-review] Instagram terkirim untuk ${id}.`);
+        } catch (instagramError) {
+          const detail = instagramError instanceof Error ? instagramError.message : "Instagram gagal.";
+          instagramNote = ` Instagram belum terkirim: ${detail.slice(0, 160)}`;
+          await db.update(articles).set({
+            errorMessage: `Posting Facebook berhasil; Instagram gagal: ${detail}`.slice(0, 1_000),
+            updatedAt: new Date(),
+          }).where(eq(articles.id, id));
+          console.warn(`[manual-review] Instagram gagal untuk ${id}: ${detail.slice(0, 200)}`);
+        }
+      }
+
+      return NextResponse.json({ ok: true, id, title, mediaFormat: result.mediaFormat, provider: result.provider, detail: instagramNote.trim() || undefined }, { status: 201 });
     }
 
     await db.update(articles).set({

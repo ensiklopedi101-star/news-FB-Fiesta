@@ -10,6 +10,7 @@ import { renderReelFrame, REEL_HEIGHT, REEL_WIDTH } from "@/lib/reel-frames";
 import { synthesizeNarration, TtsUnavailableError } from "@/lib/reel-tts";
 import { ReelEncoderMissingError, renderReelLocally, renderReelRemotely, type ReelSlide } from "@/lib/reel-video";
 import { publishFacebookReel } from "@/lib/reel-facebook";
+import { isInstagramPublishingEnabled, publishInstagramReel } from "@/lib/instagram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -168,12 +169,31 @@ async function handle(request: NextRequest, force: boolean) {
       })
       .where(eq(reels.id, reelId));
 
+    // Instagram Reels needs a public video URL; without Blob storage we skip it cleanly.
+    let instagramMediaId: string | null = null;
+    let instagramNote: string | null = null;
+    if (isInstagramPublishingEnabled() && videoUrl) {
+      try {
+        instagramMediaId = (await publishInstagramReel({ videoUrl, caption })).mediaId;
+        console.info(`[reels] instagram reel=${instagramMediaId} article=${candidate.id}`);
+      } catch (instagramError) {
+        const detail = instagramError instanceof Error ? instagramError.message : "Instagram gagal.";
+        instagramNote = `Reel Facebook terbit; Instagram gagal: ${detail}`.slice(0, 1_000);
+        await db.update(reels).set({ errorMessage: instagramNote, updatedAt: new Date() }).where(eq(reels.id, reelId));
+        console.warn(`[reels] instagram gagal article=${candidate.id}: ${detail.slice(0, 200)}`);
+      }
+    } else if (isInstagramPublishingEnabled()) {
+      instagramNote = "Reel terbit di Facebook; Instagram butuh video publik (BLOB_READ_WRITE_TOKEN).";
+    }
+
     console.info(`[reels] published article=${candidate.id} video=${published.videoId} frames=${scenes.length} bytes=${video.length}`);
     return NextResponse.json({
       result: "published",
       reelId,
       videoId: published.videoId,
       videoUrl,
+      instagramMediaId,
+      ...(instagramNote ? { instagramNote } : {}),
       frames: scenes.length,
       durationSeconds: Math.round(totalSeconds(scenes)),
       width: REEL_WIDTH,

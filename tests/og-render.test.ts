@@ -69,7 +69,21 @@ test("renders a carousel information slide as a square branded JPEG", async () =
   assert.equal(metadata.height, 1080);
 });
 
-test("entertainment single-image cards show a Facebook follow CTA in the footer", async () => {
+/** Scans a card region and returns how many pixels look like the HIVECOMP yellow. */
+async function countYellowPixels(image: Buffer, region: { left: number; top: number; width: number; height: number }) {
+  const { data, info } = await sharp(image)
+    .extract(region)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let yellow = 0;
+  for (let index = 0; index < data.length; index += info.channels) {
+    if (data[index]! > 190 && data[index + 1]! > 130 && data[index + 2]! < 130) yellow += 1;
+  }
+  return yellow;
+}
+
+test("every card footer carries the Powered by HIVECOMP credit", async () => {
   const output = await renderOgCard({
     ...baseOptions,
     brand: "PopBeez",
@@ -77,17 +91,12 @@ test("entertainment single-image cards show a Facebook follow CTA in the footer"
     isEntertainment: true,
     photoJpeg: null,
   });
-  const iconPixel = await sharp(output)
-    .extract({ left: 774, top: 978, width: 1, height: 1 })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
 
-  assert.ok(iconPixel[2]! > iconPixel[0]! * 2);
-  assert.ok(iconPixel[2]! > iconPixel[1]!);
+  // COMP is the yellow half of the wordmark in the bottom-right corner.
+  assert.ok(await countYellowPixels(output, { left: 880, top: 952, width: 130, height: 48 }) > 40);
 });
 
-test("carousel follow CTA slide renders the Facebook icon", async () => {
+test("the carousel CTA slide promotes both Facebook and Instagram", async () => {
   const output = await renderOgCard({
     ...baseOptions,
     brand: "PopBeez",
@@ -96,14 +105,16 @@ test("carousel follow CTA slide renders the Facebook icon", async () => {
     photoJpeg: null,
     slide: { number: 4, total: 4, label: "IKUTI POPBEEZ", isFollowCta: true },
   });
-  const iconPixel = await sharp(output)
-    .extract({ left: 505, top: 612, width: 1, height: 1 })
+  const facebookPixel = await sharp(output)
+    .extract({ left: 398, top: 508, width: 1, height: 1 })
     .removeAlpha()
     .raw()
     .toBuffer();
 
-  assert.ok(iconPixel[2]! > iconPixel[0]! * 2);
-  assert.ok(iconPixel[2]! > iconPixel[1]!);
+  assert.ok(facebookPixel[2]! > facebookPixel[0]! * 2);
+  assert.ok(facebookPixel[2]! > facebookPixel[1]!);
+  // The Instagram glyph is drawn white next to it, and the handle sits below.
+  assert.ok(await countYellowPixels(output, { left: 880, top: 952, width: 130, height: 48 }) > 40);
 });
 
 test("renders a unified manual review slide with the poster in a framed panel", async () => {

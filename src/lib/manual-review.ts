@@ -6,7 +6,7 @@ export const MANUAL_REVIEW_SOURCE_NAME = "Review manual PopBeez";
 /** Rows created before the brand capitalisation fix still carry this spelling. */
 export const MANUAL_REVIEW_LEGACY_SOURCE_NAMES = ["Review manual Pop" + "beez"];
 export const MANUAL_REVIEW_SOURCE_NAMES = [MANUAL_REVIEW_SOURCE_NAME, ...MANUAL_REVIEW_LEGACY_SOURCE_NAMES];
-export const MANUAL_REVIEW_FOLLOW_COMMENT = "Ikuti PopBeez untuk rekomendasi film & drama berikutnya: https://www.facebook.com/portalbeez";
+export const MANUAL_REVIEW_FOLLOW_COMMENT = "Ikuti PopBeez untuk rekomendasi film & drama berikutnya: https://www.facebook.com/portalbeez\nFollow juga Instagram PopBeez: https://www.instagram.com/popbeez.hive/";
 export const reviewMediaTypes = ["FILM", "DRAMA", "MUSIK"] as const;
 export type ReviewMediaType = (typeof reviewMediaTypes)[number];
 

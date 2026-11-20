@@ -82,3 +82,23 @@ test("accepts media:group nested image entries and srcset candidates", () => {
   assert.equal(nested, "https://cdn.example/group.jpg");
   assert.equal(srcset, "https://cdn.example/large.jpg");
 });
+
+test("rejects every image hosted by an rss.app aggregator, not only its logo", async () => {
+  const { isKnownAggregatorBrandImage } = await import("../src/lib/safe-url");
+  for (const url of [
+    "https://rss.app/static/img/images/rss-app.png",
+    "https://img.rss.app/feeds/ZOcW23h2FO2a0PI2/thumbnail.jpg",
+    "https://rss.app-cdn.com/cache/poster.webp",
+    "https://media.rssapp.com/2025/07/drama-still.jpg",
+    "https://reader.example/proxy?url=https%3A%2F%2Frss.app%2Ffeed",
+  ]) {
+    assert.equal(isKnownAggregatorBrandImage(url), true, `${url} must be filtered`);
+  }
+  for (const url of [
+    "https://cdn.example/first.jpg",
+    "https://www.soompi.com/wp-content/uploads/2025/07/still.jpg",
+    "https://rss.app.example.com/photo.jpg",
+  ]) {
+    assert.equal(isKnownAggregatorBrandImage(url), false, `${url} must stay usable`);
+  }
+});

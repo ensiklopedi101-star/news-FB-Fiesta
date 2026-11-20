@@ -125,3 +125,6 @@ CREATE TABLE IF NOT EXISTS "reels" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "reels_article_idx" ON "reels" ("article_id");
 CREATE INDEX IF NOT EXISTS "reels_created_idx" ON "reels" ("created_at");
+
+-- Mirror every published post to Instagram (@popbeez.hive).
+ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;

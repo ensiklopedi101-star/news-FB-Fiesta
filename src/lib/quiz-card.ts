@@ -85,13 +85,17 @@ function buildBrandPanel(options: QuizCardOptions): Buffer {
     <rect width="${QUIZ_CELL_WIDTH}" height="${QUIZ_CELL_HEIGHT}" fill="url(#quiz-brand)"/>
     <rect x="1" y="1" width="${QUIZ_CELL_WIDTH - 2}" height="${QUIZ_CELL_HEIGHT - 2}" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="2"/>
     <rect x="0" y="0" width="7" height="${QUIZ_CELL_HEIGHT}" fill="#f20b55"/>
-    <text x="${QUIZ_CELL_WIDTH / 2}" y="192" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="900" letter-spacing=".5">${brand}</text>
-    <text x="${QUIZ_CELL_WIDTH / 2}" y="218" text-anchor="middle" fill="#fff" fill-opacity=".7" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" letter-spacing="4">${brandTag}</text>
-    <text x="${QUIZ_CELL_WIDTH / 2}" y="270" text-anchor="middle" fill="#ffd12e" font-family="DejaVu Sans, sans-serif" font-size="40" font-weight="900" letter-spacing="2">${label}</text>
-    <text x="${QUIZ_CELL_WIDTH / 2}" y="298" text-anchor="middle" fill="#fff" fill-opacity=".84" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="600">${sublabel}</text>
-    <circle cx="216" cy="324" r="13" fill="#1877F2"/>
-    <text x="216" y="330" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="20" font-weight="900">f</text>
-    <text x="236" y="329" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="800" letter-spacing=".5">${handle}</text>
+    <text x="${QUIZ_CELL_WIDTH / 2}" y="172" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="900" letter-spacing=".5">${brand}</text>
+    <text x="${QUIZ_CELL_WIDTH / 2}" y="198" text-anchor="middle" fill="#fff" fill-opacity=".7" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" letter-spacing="4">${brandTag}</text>
+    <text x="${QUIZ_CELL_WIDTH / 2}" y="240" text-anchor="middle" fill="#ffd12e" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="900" letter-spacing="2">${label}</text>
+    <text x="${QUIZ_CELL_WIDTH / 2}" y="264" text-anchor="middle" fill="#fff" fill-opacity=".84" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="600">${sublabel}</text>
+    <circle cx="146" cy="290" r="11" fill="#1877F2"/>
+    <text x="146" y="295" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="900">f</text>
+    <text x="164" y="295" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="800" letter-spacing=".5">${handle.toLowerCase()}</text>
+    <circle cx="330" cy="290" r="10" fill="none" stroke="#fff" stroke-width="2.2"/><circle cx="330" cy="290" r="4.4" fill="none" stroke="#fff" stroke-width="2.2"/><circle cx="333" cy="287" r="1.5" fill="#fff"/>
+    <text x="346" y="295" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="800" letter-spacing=".5">@popbeez.hive</text>
+    <text x="${QUIZ_CELL_WIDTH / 2}" y="324" text-anchor="middle" fill="#fff" fill-opacity=".5" font-family="DejaVu Sans, sans-serif" font-size="10" font-weight="600" letter-spacing="2">powered by</text>
+    <text x="${QUIZ_CELL_WIDTH / 2}" y="344" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="900" letter-spacing="1"><tspan fill="#ffffff">HIVE</tspan><tspan fill="#ffd12e">COMP</tspan></text>
   </svg>`);
 }
 
@@ -178,8 +182,14 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
   const logo = options.logo ? Buffer.from(options.logo) : await logoPromise();
   if (logo?.byteLength) {
     try {
-      const renderedLogo = await sharp(logo, { limitInputPixels: 40_000_000 })
-        .resize(116, 116, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      const squareLogo = await sharp(logo, { limitInputPixels: 40_000_000 })
+        .resize(116, 116, { fit: "cover", position: "centre" })
+        .png()
+        .toBuffer();
+      // Circular mask: a swapped logo arrives as a white square otherwise.
+      const circleMask = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="116" height="116"><circle cx="58" cy="58" r="58"/></svg>');
+      const renderedLogo = await sharp(squareLogo)
+        .composite([{ input: circleMask, blend: "dest-in" }])
         .png()
         .toBuffer();
       layers.push({ input: renderedLogo, left: brandLeft + Math.round((QUIZ_CELL_WIDTH - 116) / 2), top: brandTop + 20 });

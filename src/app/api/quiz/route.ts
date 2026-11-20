@@ -25,6 +25,7 @@ import {
   type QuizReview,
 } from "@/lib/quiz";
 import { publishFacebookPagePost } from "@/lib/facebook";
+import { isInstagramPublishingEnabled, publishInstagramPost } from "@/lib/instagram";
 import { MANUAL_REVIEW_SOURCE_NAMES, manualImageReferer, parseManualReview, type ManualReviewItem } from "@/lib/manual-review";
 
 export const runtime = "nodejs";
@@ -161,6 +162,18 @@ async function handle(request: NextRequest, forced: boolean) {
       errorMessage: null,
     }).where(eq(quizEditions.id, edition.id));
     console.info(`[quiz] posted edition=${edition.id} post=${post.postId}`);
+
+    // Mirror the quiz to Instagram; a failure must not undo the Facebook post.
+    if (isInstagramPublishingEnabled()) {
+      try {
+        await publishInstagramPost({ imageUrls: [blob.url], caption });
+        console.info(`[quiz] instagram posted edition=${edition.id}`);
+      } catch (instagramError) {
+        const detail = instagramError instanceof Error ? instagramError.message : "Instagram gagal.";
+        await db.update(quizEditions).set({ errorMessage: `Kuis terbit di Facebook; Instagram gagal: ${detail}`.slice(0, 1_000) }).where(eq(quizEditions.id, edition.id));
+        console.warn(`[quiz] instagram gagal edition=${edition.id}: ${detail.slice(0, 200)}`);
+      }
+    }
     return NextResponse.json({
       ok: true,
       result: "posted",

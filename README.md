@@ -57,6 +57,7 @@ Lalu di Vercel set `REELS_RENDER_URL=https://vps-kamu:8080`, `REELS_WORKER_TOKEN
 13. Jalankan [`drizzle/0010_quiz_editions.sql`](./drizzle/0010_quiz_editions.sql) untuk menyimpan edisi kuis Tebak Drama; kolom `poster_keys` dipakai menandai poster yang sudah dipakai beserta jumlah pemakaiannya (maksimal 3× per poster).
 14. Jalankan [`drizzle/0011_originality.sql`](./drizzle/0011_originality.sql) untuk menyimpan blok opini (`editorial_take`), skor orisinalitas, dan alasan penilaian tiap artikel. Tanpa file ini pipeline tetap jalan, tetapi skor tidak tersimpan dan panel **Penjaga orisinalitas** akan kosong.
 15. Jalankan [`drizzle/0012_reels_voices.sql`](./drizzle/0012_reels_voices.sql) untuk menyimpan sudut pandang redaksi (`editorial_voice`), naskah narasi (`narration_script`), dan tabel `reels` (status render, durasi, URL video, ID video Facebook). Tanpa file ini artikel tetap terbit; Reels dan panel Reels akan menampilkan peringatan.
+16. Jalankan [`drizzle/0013_instagram.sql`](./drizzle/0013_instagram.sql) untuk menyimpan ID media Instagram (`instagram_media_id`) setiap post yang berhasil dicerminkan ke @popbeez.hive. Tanpa kolom ini posting Instagram tetap jalan, tetapi tautan post IG tidak tercatat.
 11. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
@@ -120,6 +121,41 @@ Jika `FB_ENTERTAINMENT_PAGE_ID` dan `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN` diisi, 
 
 Halaman berita tetap memakai Buffer. Jika dua variabel hiburan itu kosong, halaman hiburan otomatis kembali ke Buffer sehingga aplikasi tetap berjalan. Token dan Page ID hanya disimpan sebagai environment variable Vercel, bukan di Neon atau repositori.
 
+### Instagram: setiap post Facebook ikut tayang di @popbeez.hive
+
+Posting tidak lagi hanya ke Facebook. Setelah sebuah post sukses terbit di halaman Facebook PopBeez, pipeline langsung mencerminkan post yang sama ke Instagram:
+
+1. **Feed & carousel** — `publishInstagramPost()` membuat container `image_url` (satu gambar) atau carousel `is_carousel_item` lalu `CAROUSEL`, memakai kartu `api/og/<id>` yang sama seperti Facebook, dan menerbitkannya lewat `media_publish`. Caption yang dipakai persis caption Facebook.
+2. **Kuis Tebak Drama** — gambar kuis di Blob dicerminkan sebagai satu post foto.
+3. **Review manual PopBeez** — keenam slide dicerminkan sebagai carousel Instagram.
+4. **Reels** — `publishInstagramReel()` memakai `media_type=REELS`, menunggu `status_code=FINISHED`, lalu menerbitkan. Ini butuh video publik, jadi `BLOB_READ_WRITE_TOKEN` wajib aktif.
+5. Kegagalan Instagram **tidak pernah** membatalkan post Facebook: status artikel tetap `published`, pesan kesalahan disimpan di `error_message`, dan ID media IG dicatat di `instagram_media_id`.
+
+Isi `IG_USER_ID` (ID akun Instagram Business, bukan username) dan `IG_ACCESS_TOKEN` di Vercel → Settings → Environment Variables, lalu deploy ulang. Token halaman Facebook hiburan boleh dipakai sebagai `IG_ACCESS_TOKEN` selama akun IG sudah tertaut ke halaman itu. Status kesiapan terlihat di panel **Panduan setup API** pada dashboard (`Instagram @popbeez.hive`).
+
+### Landing page: cara post backend muncul otomatis
+
+Tidak ada langkah manual per post: cron-job.org sudah memicu `/api/cron` (menit `00` dan `15`), artikel terbit ke Facebook + Instagram, lalu langsung tersedia di feed publik:
+
+```
+GET https://<APP_URL>/api/public/posts?page=entertainment&limit=12
+GET https://<APP_URL>/api/public/posts?page=news&limit=12
+```
+
+Respons berisi `title`, `excerpt`, `image` (kartu 1080×1080 siap pakai), `images` (semua slide carousel), `facebookUrl`, `instagramUrl`, `shortUrl`, `sourceName`, dan `publishedAt`; CORS terbuka (`*`) sehingga boleh dipanggil dari domain landing page mana pun. Landing page cukup merender JSON itu dan memanggil ulang tiap 60 detik:
+
+```js
+async function loadPosts() {
+  const res = await fetch("https://<APP_URL>/api/public/posts?page=entertainment&limit=12", { cache: "no-store" });
+  const { posts } = await res.json();
+  render(posts); // satu kartu per post, tautkan ke facebookUrl/shortUrl
+}
+loadPosts();
+setInterval(loadPosts, 60_000);
+```
+
+Hanya artikel `published` yang tampil; artikel `buffer:pending:%`/`facebook:pending:%` (belum pasti tayang), review manual, dan gambar aggregator seperti rss.app difilter. Cache edge 60 detik, jadi post baru muncul paling lambat sekitar satu menit setelah terbit.
+
 ### Short link domain sendiri
 
 Aplikasi menyimpan short link di tabel `short_links` (Neon) dan mengarahkannya lewat route `/s/<slug>`:
@@ -159,6 +195,7 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
 - `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
+- `GET /api/public/posts?page=entertainment|news&limit=12` — feed publik (CORS terbuka) berisi post yang sudah terbit di Facebook/Instagram. Dipakai landing page; tidak perlu autentikasi.
 - `GET /api/cron` — proses satu artikel: terbit langsung ke Facebook (PopBeez) atau masuk antrean Buffer (berita). Hanya jalan di dalam jendela slot WITA, mematuhi batas 5 pengiriman/jam dan jeda 12 menit. Tambahkan `?force=1` untuk melewati jadwal slot (dipakai tombol **Terbitkan** manual). Wajib header `Authorization: Bearer <CRON_SECRET>`.
 - `GET /api/reels` — membuat satu Reel dari artikel hiburan terbaru bila `REELS_ENABLED=1` dan jeda `REELS_MIN_GAP_HOURS` sudah lewat. `POST /api/reels` memaksa satu Reel sekarang (dipakai tombol dashboard, melewati flag & jeda). Wajib header `Authorization: Bearer <CRON_SECRET>`. Butuh encoder: `FFMPEG_PATH` atau `REELS_RENDER_URL`.
 - `GET /api/quiz` — membuat dan memposting kuis Tebak Drama (cron harian). `POST /api/quiz` memaksa satu edisi sekarang (dipakai tombol dashboard). Wajib header `Authorization: Bearer <CRON_SECRET>`. Poster diambil dari `raw_text` review manual, dipilih acak, diubah menjadi siluet oleh `GEMINI_IMAGE_MODEL` (default `gemini-2.5-flash-image`, bisa dimatikan dengan `QUIZ_SILHOUETTE_AI=0`), dan setiap poster berhenti dipakai setelah muncul di tiga edisi.
@@ -173,6 +210,13 @@ curl -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron"
 ```
 
 Jangan memanggil endpoint cron berulang-ulang untuk tes di production: setiap artikel berhasil akan ditambahkan ke antrean Buffer dan dapat diterbitkan otomatis oleh Buffer.
+
+## Tampilan kartu: kredit HIVECOMP, logo bulat, ajakan Instagram
+
+- Sudut kanan bawah setiap kartu (news card, carousel, review manual, edisi kuis) kini berbunyi **powered by HIVECOMP**: kata `powered by` kecil dan tipis, lalu `HIVE` putih + `COMP` kuning (`#ffd12e`). Konstanta ada di `src/lib/brand.ts` (`POWERED_BY`, `poweredByLine()`).
+- Logo halaman selalu digambar **bulat**: `src/lib/og-card.ts` dan `src/lib/quiz-card.ts` memotong logo dengan mask lingkaran + cincin tipis. Mengganti `public/brand/popbeez_icon.png` dengan berkas persegi tidak lagi menghasilkan kotak putih.
+- Slide CTA carousel (`slide=4`) menampilkan ikon Facebook **dan** Instagram dengan handle `portalbeez` + `@popbeez.hive`; caption kuis, Reels, dan komentar sumber juga menyebut Instagram.
+- Gambar dari layanan aggregator seperti **rss.app** diblokir total (`isKnownAggregatorBrandImage()`), bukan hanya berkas logonya, dan route kartu memeriksa ulang gambar yang sudah tersimpan sehingga feed lama pun tidak bisa memunculkan placeholder itu lagi.
 
 ## Pemeriksaan dan catatan penting
 

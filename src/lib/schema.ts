@@ -55,6 +55,8 @@ export const articles = pgTable(
     originalityNotes: jsonb("originality_notes").$type<OriginalityReport | null>(),
     status: articleStatus("status").notNull().default("queued"),
     facebookPostId: text("facebook_post_id"),
+    /** Instagram media id when the post was mirrored to @popbeez.hive. */
+    instagramMediaId: text("instagram_media_id"),
     errorMessage: text("error_message"),
     attempts: integer("attempts").notNull().default(0),
     sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),

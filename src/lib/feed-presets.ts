@@ -20,6 +20,9 @@ export const feedPresets: FeedPreset[] = [
   { name: "DramaPanda C-News", category: "C-DRAMA", pageKey: "entertainment", feedUrl: "https://dramapanda.com/category/c-news/feed", language: "en", keywords: [], active: true },
   { name: "Overseasidol C-Drama", category: "C-DRAMA", pageKey: "entertainment", feedUrl: "https://overseasidol.com/en/drama-movie/c-drama-en/feed/", language: "en", keywords: [], active: true },
   { name: "Koala's Playground", category: "DRAMA", pageKey: "entertainment", feedUrl: "https://koalasplayground.com/feed/", language: "en", keywords: [], active: true },
+  // rss.app rebuilds MyDramaList as a feed and injects its own artwork as the item image.
+  // Those pictures are refused by isKnownAggregatorBrandImage(), so posts from this feed
+  // fall back to a photo-less card instead of showing the rss.app placeholder.
   { name: "MyDramaList News", category: "DRAMA", pageKey: "entertainment", feedUrl: "https://rss.app/feeds/ZOcW23h2FO2a0PI2.xml", language: "en", keywords: [], active: true },
   { name: "HanCinema", category: "DRAMA", pageKey: "entertainment", feedUrl: "https://feeds.feedburner.com/hancinema/AUJj", language: "en", keywords: [], active: false },
   { name: "Google News Donghua", category: "DONGHUA", pageKey: "entertainment", feedUrl: "https://news.google.com/rss/search?q=donghua+OR+%22Chinese+animation%22&hl=en-US&gl=US&ceid=US:en", language: "en", keywords: [], active: false },
