@@ -131,6 +131,7 @@ export function buildQuizCaption(): string {
     "Tebak judul drama/film. Berapa yang berhasil kamu tebak?",
     "",
     "Ikuti PopBeez untuk Kuiz Berikutnya.",
+    "Follow juga Instagram @popbeez.hive biar gak ketinggalan kuisnya. 🐝",
     "",
     "#TebakDramanya #Drakor #Kdrama #FilmKorea #PopBeez",
   ].join("\n");

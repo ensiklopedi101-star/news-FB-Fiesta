@@ -1,9 +1,18 @@
+/**
+ * Feed services like rss.app put their own artwork into an item's image fields. Those
+ * pictures are never the article's photo, so the whole service is blocked instead of
+ * matching one filename (the placeholder has changed shape twice already).
+ */
+const AGGREGATOR_HOSTS = ["rss.app", "rssapp.com", "rss.app-cdn.com"];
+
 export function isKnownAggregatorBrandImage(raw: string | null | undefined): boolean {
   if (!raw) return false;
   try {
     const url = new URL(raw);
-    return ["rss.app", "www.rss.app"].includes(url.hostname.toLowerCase())
-      && /(?:^|\/)rss-app(?:-logo|-icon)?\.(?:png|jpe?g|webp|svg)$/i.test(url.pathname);
+    const hostname = url.hostname.toLowerCase();
+    if (AGGREGATOR_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`))) return true;
+    // Some readers proxy the placeholder from their own CDN.
+    return /(?:^|[\/_.-])rss[-_.]?app(?:[\/_.-]|$)/i.test(decodeURIComponent(`${url.pathname}${url.search}`));
   } catch {
     return false;
   }

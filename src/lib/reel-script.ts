@@ -94,8 +94,10 @@ export function totalSeconds(scenes: ReelScene[]): number {
   return Number(scenes.reduce((total, scene) => total + scene.seconds, 0).toFixed(2));
 }
 
-/** Reels caption: the same substance as the post, plus the source note. */
+/** Reels caption: the same substance as the post, plus the source note and IG handle. */
+import { INSTAGRAM_HANDLE } from "@/lib/brand";
+
 export function buildReelCaption(input: { headline: string; question: string; sourceName: string; hashtags?: string[] }): string {
   const hashtags = input.hashtags?.length ? input.hashtags.join(" ") : "#PopBeez #DramaKorea #FilmKorea";
-  return [input.headline.trim(), "", input.question.trim(), "", hashtags, `📰 ${input.sourceName}`].join("\n");
+  return [input.headline.trim(), "", input.question.trim(), "", hashtags, `📰 ${input.sourceName}`, "", `📱 Follow Instagram ${INSTAGRAM_HANDLE} juga ya, Beezers!`].join("\n");
 }

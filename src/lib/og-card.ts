@@ -6,6 +6,20 @@ import type { ManualReviewItem, ReviewMediaType } from "@/lib/manual-review";
 
 const WIDTH = 1080;
 const HEIGHT = 1080;
+const HIVECOMP_WHITE = "#ffffff";
+const HIVECOMP_YELLOW = "#ffd12e";
+import { INSTAGRAM_HANDLE } from "@/lib/brand";
+
+export { INSTAGRAM_HANDLE, INSTAGRAM_URL } from "@/lib/brand";
+
+/**
+ * Bottom-right credit on every card: "powered by" in small thin type, then the
+ * wordmark split into a white HIVE and a yellow COMP.
+ */
+function poweredByMarkup(right = 1008, baseline = 989): string {
+  return `<text x="${right}" y="${baseline - 27}" text-anchor="end" fill="#fff" fill-opacity=".62" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="500" letter-spacing="1.6">powered by</text>
+    <text x="${right}" y="${baseline}" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="25" font-weight="900" letter-spacing="1.2"><tspan fill="${HIVECOMP_WHITE}">HIVE</tspan><tspan fill="${HIVECOMP_YELLOW}">COMP</tspan></text>`;
+}
 let fontconfigPromise: Promise<void> | undefined;
 
 export async function ensureBundledFonts(): Promise<void> {
@@ -86,7 +100,15 @@ function buildSvg(options: OgCardOptions): string {
   const slideText = options.slide?.text?.trim();
   const slideLines = slideText ? wrapWords(slideText, 34).slice(0, 6) : [];
   const followSlideMarkup = options.slide?.isFollowCta
-    ? `<text x="540" y="474" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">IKUTI POPBEEZ</text><circle cx="540" cy="612" r="58" fill="#1877F2"/><text x="540" y="642" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="94" font-weight="900">f</text><text x="540" y="740" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="31" font-weight="700">Ikuti untuk update hiburan</text><text x="540" y="802" text-anchor="middle" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="600">facebook.com/portalbeez</text>`
+    ? `<text x="540" y="430" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">IKUTI POPBEEZ</text>
+      <circle cx="430" cy="528" r="52" fill="#1877F2"/><text x="430" y="555" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="84" font-weight="900">f</text>
+      <text x="430" y="620" text-anchor="middle" fill="#fff" fill-opacity=".72" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="700" letter-spacing="1.4">FACEBOOK</text>
+      <text x="430" y="658" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="25" font-weight="800">portalbeez</text>
+      <circle cx="650" cy="528" r="52" fill="none" stroke="#fff" stroke-width="6"/><circle cx="650" cy="528" r="22" fill="none" stroke="#fff" stroke-width="6"/><circle cx="666" cy="512" r="7" fill="#fff"/>
+      <text x="650" y="620" text-anchor="middle" fill="#fff" fill-opacity=".72" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="700" letter-spacing="1.4">INSTAGRAM</text>
+      <text x="650" y="658" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="25" font-weight="800">${INSTAGRAM_HANDLE}</text>
+      <text x="540" y="758" text-anchor="middle" fill="#fff" fill-opacity=".94" font-family="DejaVu Sans, sans-serif" font-size="34" font-weight="800">Beezers, follow di dua tempat ya!</text>
+      <text x="540" y="816" text-anchor="middle" fill="#fff" fill-opacity=".82" font-family="DejaVu Sans, sans-serif" font-size="26" font-weight="600">Update hiburan tiap hari di Facebook &amp; Instagram</text>`
     : "";
   const slideContentMarkup = followSlideMarkup || (slideLines.length
     ? `<text x="540" y="474" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">${escapeXml(options.slide?.label ?? "INTI BERITA")}</text>${slideLines.map((line, index) => `<text x="540" y="${560 + index * 51}" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="800">${escapeXml(line)}</text>`).join("")}`
@@ -103,9 +125,8 @@ function buildSvg(options: OgCardOptions): string {
   const fallback = options.photoJpeg
     ? ""
     : `<rect width="${WIDTH}" height="${HEIGHT}" fill="${palette.dark}"/><path d="M0 0H1080V1080H0Z" fill="url(#fallback)"/><circle cx="900" cy="210" r="260" fill="${palette.accent}" opacity=".22"/><circle cx="120" cy="900" r="330" fill="none" stroke="${palette.highlight}" stroke-width="22" opacity=".18"/>`;
-  const footerIdentity = showFollowFooter
-    ? `<circle cx="785" cy="978" r="17" fill="#1877F2"/><text x="785" y="987" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="27" font-weight="900">f</text><text x="1008" y="985" text-anchor="end" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="800" letter-spacing=".5">FOLLOW @PORTALBEEZ</text>`
-    : `<text x="1008" y="989" text-anchor="end" fill="#fff" fill-opacity=".82" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="600">${options.isEntertainment ? "POPBEEZ" : "NUSABEEZ"}</text>`;
+  // The corner credit belongs to the publisher now: Powered by HIVECOMP.
+  const footerIdentity = poweredByMarkup();
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <defs>
@@ -186,8 +207,7 @@ function buildReviewSvg(review: NonNullable<OgCardOptions["reviewSlide"]>): stri
     <g clip-path="url(#review-text-panel)">${eyebrow}${headline}${coverSub}${ratingMarkup}</g>
     <path d="M912 72l65 65-65 65M1000 72l-65 65 65 65" fill="none" stroke="#fff" stroke-width="12" opacity=".8"/>
     <text x="78" y="986" fill="#fff" fill-opacity=".9" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="800" letter-spacing="2">GESER · ${review.number}/${review.total}</text>
-    <text x="1000" y="986" text-anchor="end" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="800">IKUTI @PORTALBEEZ</text>
-    <path d="M1020 1015l-35 35m35-35h-34m34 0v34" fill="none" stroke="#fff" stroke-width="7"/>
+    ${poweredByMarkup(1000, 1002)}
   </svg>`;
 }
 
@@ -200,6 +220,22 @@ async function loadBrandLogo(isEntertainment: boolean): Promise<Buffer> {
     logoBuffers.set(file, pending);
   }
   return pending;
+}
+
+/**
+ * The page logo is drawn as a circle: a replaced logo can arrive as a white square,
+ * and a circular mask plus a thin ring keeps the header clean on every card.
+ */
+async function circularLogo(isEntertainment: boolean, size = 112): Promise<Buffer> {
+  const raw = await loadBrandLogo(isEntertainment);
+  const square = await sharp(raw, { limitInputPixels: 40_000_000 })
+    .resize(size, size, { fit: "cover", position: "centre" })
+    .png()
+    .toBuffer();
+  const radius = size / 2;
+  const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${radius}" cy="${radius}" r="${radius}"/></svg>`);
+  const ring = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${radius}" cy="${radius}" r="${radius - 2}" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="3"/></svg>`);
+  return sharp(square).composite([{ input: mask, blend: "dest-in" }]).composite([{ input: ring }]).png().toBuffer();
 }
 
 /** Compose a full-bleed, square news card with Sharp and SVG; use the actual bundled page logo asset. */
@@ -255,10 +291,7 @@ export async function renderOgCard(options: OgCardOptions): Promise<Buffer> {
       layers.push({ input: panel, left: 595, top: 38 });
     }
     layers.push({ input: Buffer.from(buildReviewSvg(options.reviewSlide)), left: 0, top: 0 });
-    const logo = await sharp(await loadBrandLogo(options.isEntertainment))
-      .resize(112, 112, { fit: "contain" })
-      .png()
-      .toBuffer();
+    const logo = await circularLogo(options.isEntertainment, 112);
     layers.push({ input: logo, left: 44, top: 34 });
     return sharp(base).composite(layers).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
   }
@@ -280,10 +313,7 @@ export async function renderOgCard(options: OgCardOptions): Promise<Buffer> {
     layers.push({ input: photo, left: 0, top: 0 });
   }
 
-  const logo = await sharp(await loadBrandLogo(options.isEntertainment))
-    .resize(112, 112, { fit: "contain" })
-    .png()
-    .toBuffer();
+  const logo = await circularLogo(options.isEntertainment, 112);
   layers.push({ input: Buffer.from(buildSvg(options)), left: 0, top: 0 });
   layers.push({ input: logo, left: 44, top: 34 });
   return sharp(base).composite(layers).jpeg({ quality: 88, mozjpeg: true }).toBuffer();

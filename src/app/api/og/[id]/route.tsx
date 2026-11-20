@@ -5,6 +5,7 @@ import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderOgCard } from "@/lib/og-card";
 import { imageForCarouselSlide } from "@/lib/carousel-image";
 import { manualImageReferer, parseManualReview } from "@/lib/manual-review";
+import { isKnownAggregatorBrandImage } from "@/lib/safe-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +36,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return new Response("Invalid carousel slide", { status: 400 });
   }
   const carouselLabels = ["FAKTA UTAMA", "RINCIAN BERITA", "IKUT BERBAGI PENDAPAT"];
+  // New image fields from the feed occasionally carry the rss.app placeholder again,
+  // so stored rows are re-checked at render time instead of trusting the database.
   const isFollowCtaSlide = !manualReview && isEntertainment && requestedSlide === 4;
   const slide = article.postFormat === "carousel" && !manualReview ? {
     number: requestedSlide,
@@ -61,7 +64,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         : article.postFormat === "carousel"
           ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
           : article.imageUrl;
-    const imageReferer = manualReview && requestedImage ? manualImageReferer(requestedImage) : article.sourceUrl;
+    const safeRequestedImage = isKnownAggregatorBrandImage(requestedImage) ? null : requestedImage;
+    const imageReferer = manualReview && safeRequestedImage ? manualImageReferer(safeRequestedImage) : article.sourceUrl;
     let imageFailure = "";
     const reportImageFailure = (reason: string) => {
       imageFailure = reason;
@@ -69,10 +73,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     };
     let photoJpeg = plainReviewCover
       ? null
-      : await fetchOgImageJpeg(requestedImage, imageReferer, fetch, reportImageFailure);
+      : await fetchOgImageJpeg(safeRequestedImage, imageReferer, fetch, reportImageFailure);
     // Some publishers reject every cross-origin Referer; retry anonymously before giving up on a manual image.
-    if (!photoJpeg && manualReview && requestedImage) {
-      photoJpeg = await fetchOgImageJpeg(requestedImage, "", fetch, (reason) => {
+    if (!photoJpeg && manualReview && safeRequestedImage) {
+      photoJpeg = await fetchOgImageJpeg(safeRequestedImage, "", fetch, (reason) => {
         imageFailure = reason;
         console.warn(`[og-image] Manual image rejected without Referer for ${article.id}: ${reason}.`);
       });

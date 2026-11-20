@@ -26,6 +26,7 @@ test("manual review caption keeps numbered winners without external links", () =
   assert.match(caption, /5️⃣ Drama B/);
   assert.doesNotMatch(caption, /https?:\/\//);
   assert.match(MANUAL_REVIEW_FOLLOW_COMMENT, /https:\/\/www\.facebook\.com\/portalbeez/);
+  assert.match(MANUAL_REVIEW_FOLLOW_COMMENT, /instagram\.com\/popbeez\.hive/);
 });
 
 test("manual review requires exactly five items and safe HTTPS image links", () => {

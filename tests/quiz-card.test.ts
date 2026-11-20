@@ -50,7 +50,7 @@ test("the brand cell carries the PopBeez logo and the Tebak Drama wording", asyn
 
   // Yellow "TEBAK DRAMA" label line inside the brand cell.
   const labelBand = await sharp(output)
-    .extract({ left: QUIZ_CELL_WIDTH, top: QUIZ_CELL_HEIGHT * 2 + 245, width: QUIZ_CELL_WIDTH, height: 34 })
+    .extract({ left: QUIZ_CELL_WIDTH, top: QUIZ_CELL_HEIGHT * 2 + 218, width: QUIZ_CELL_WIDTH, height: 32 })
     .removeAlpha()
     .raw()
     .toBuffer();

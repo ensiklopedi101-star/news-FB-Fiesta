@@ -10,6 +10,7 @@ import { articles, publisherState, quizEditions, reels, rssSources } from "@/lib
 import { EDITORIAL_VOICES } from "@/lib/editorial-voices";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
+import { isInstagramPublishingEnabled } from "@/lib/instagram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -207,6 +208,7 @@ export async function GET(request: NextRequest) {
       bufferNews: bufferChannels.news,
       bufferEntertainment: bufferChannels.entertainment,
       facebookEntertainment,
+      instagram: isInstagramPublishingEnabled(),
       appUrl: Boolean(process.env.APP_URL),
       cronSecret: Boolean(process.env.CRON_SECRET),
       blobStorage: Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim()),

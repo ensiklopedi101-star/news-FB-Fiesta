@@ -8,6 +8,7 @@ import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
 import { getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { addPageComment, FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
+import { isInstagramPublishingEnabled, publishInstagramPost } from "@/lib/instagram";
 import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
 import { pickEditorialVoice } from "@/lib/editorial-voices";
@@ -304,7 +305,9 @@ export async function runNewsPipeline(): Promise<RunResult> {
       ? indonesianTranslationUrl(article.sourceUrl)
       : article.sourceUrl;
     const shareLink = await shortenArticleUrl(sourceLinkTarget, article.id);
-    const followLink = article.pageKey === "entertainment" ? "\n\nIkuti PopBeez: https://www.facebook.com/portalbeez" : "";
+    const followLink = article.pageKey === "entertainment"
+      ? "\n\nIkuti PopBeez: https://www.facebook.com/portalbeez\nFollow juga Instagram: https://www.instagram.com/popbeez.hive/"
+      : "";
     // Direct Graph posts keep the caption link-free so Meta does not suppress reach;
     // the source link is posted as the first comment right after publishing.
     const caption = directFacebook
@@ -370,11 +373,33 @@ export async function runNewsPipeline(): Promise<RunResult> {
         }
       }
 
+      // Mirror to Instagram. A failure here is reported but never rolls back the
+      // Facebook post, exactly like the source comment.
+      let instagramNote = "";
+      if (isInstagramPublishingEnabled()) {
+        try {
+          const instagram = await publishInstagramPost({ imageUrls, caption });
+          await db.update(articles)
+            .set({ instagramMediaId: instagram.mediaId, updatedAt: new Date() })
+            .where(eq(articles.id, article.id))
+            .catch(() => undefined);
+          logStage(`instagram-published media=${instagram.mediaId}`);
+        } catch (instagramError) {
+          const instagramMessage = instagramError instanceof Error ? instagramError.message : "Instagram gagal.";
+          instagramNote = ` Instagram belum terkirim: ${instagramMessage.slice(0, 200)}`;
+          await db.update(articles)
+            .set({ errorMessage: `Posting Facebook berhasil; Instagram gagal: ${instagramMessage}`.slice(0, 1_000), updatedAt: new Date() })
+            .where(eq(articles.id, article.id));
+          console.error(`[pipeline] instagram gagal untuk ${article.id}:`, instagramMessage);
+          logStage("instagram-failed");
+        }
+      }
+
       return {
         result: "published",
         articleId: article.id,
         title: copy.title,
-        detail: "Posting langsung diterbitkan ke halaman Facebook PopBeez.",
+        detail: `Posting langsung diterbitkan ke halaman Facebook PopBeez.${instagramNote}`,
       };
     }
 
