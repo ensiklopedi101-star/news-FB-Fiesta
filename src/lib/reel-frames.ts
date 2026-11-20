@@ -10,6 +10,7 @@ export const REEL_HEIGHT = 1920;
 export type ReelFrameOptions = {
   brand: string;
   handle: string;
+  /** Small tag on the frame; the audience name by default. */
   voiceLabel: string;
   sourceName: string;
 };
@@ -90,7 +91,7 @@ export async function renderReelFrame(scene: ReelScene, options: ReelFrameOption
 
     <rect x="72" y="120" width="${Math.min(600, 34 + screenText(options.voiceLabel).length * 17)}" height="56" rx="28" fill="#ffffff" fill-opacity="0.10" stroke="#3ddc97" stroke-opacity="0.45" stroke-width="2"/>
     <text x="98" y="157" font-family="DejaVu Sans, sans-serif" font-size="24" font-weight="700" fill="#9ff0cd">${escapeXml(screenText(options.voiceLabel).slice(0, 32))}</text>
-    <text x="${REEL_WIDTH - 72}" y="158" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" fill="#ffffff" fill-opacity="0.85">${escapeXml(options.brand.toUpperCase())}</text>
+    <text x="${REEL_WIDTH - 72}" y="158" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" fill="#ffffff" fill-opacity="0.85">${escapeXml(options.brand)}</text>
 
     ${body}
 

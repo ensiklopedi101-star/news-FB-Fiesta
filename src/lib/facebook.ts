@@ -46,7 +46,7 @@ export function isFacebookPublishingEnabled(pageKey: PageKey): boolean {
   return getFacebookConfigurationGaps(pageKey).length === 0;
 }
 
-/** Entertainment (Popbeez) publishes directly once its Graph credentials exist. */
+/** Entertainment (PopBeez) publishes directly once its Graph credentials exist. */
 export function usesDirectFacebookPublishing(pageKey: PageKey): boolean {
   return pageKey === "entertainment" && isFacebookPublishingEnabled(pageKey);
 }

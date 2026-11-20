@@ -2,7 +2,7 @@ import { witaDayNumber, witaMinutes, witaWeekday } from "./publish-slots";
 
 /**
  * "Tebak Drama" runs every two weeks: five posters taken from the manual reviews
- * already published for Popbeez, because those posters are the dramas/films the
+ * already published for PopBeez, because those posters are the dramas/films the
  * audience already recognises. There is no answer key by design.
  */
 export const QUIZ_TILES = 5;
@@ -132,7 +132,7 @@ export function buildQuizCaption(): string {
     "",
     "Ikuti PopBeez untuk Kuiz Berikutnya.",
     "",
-    "#TebakDramanya #Drakor #Kdrama #FilmKorea #Popbeez",
+    "#TebakDramanya #Drakor #Kdrama #FilmKorea #PopBeez",
   ].join("\n");
 }
 

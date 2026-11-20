@@ -40,13 +40,13 @@ test("quiz card renders a 1080×1080 grid of five silhouettes plus the brand cel
   assert.ok((brand[0]! + brand[1]! + brand[2]!) / 3 < 70, "sel merek harus gelap");
 });
 
-test("the brand cell carries the Popbeez logo and the Tebak Drama wording", async () => {
+test("the brand cell carries the PopBeez logo and the Tebak Drama wording", async () => {
   const tiles = await Promise.all(Array.from({ length: QUIZ_POSTER_CELLS }, () => tile({ r: 255, g: 255, b: 255 })));
   const output = await renderQuizCard({ tiles });
 
   // The logo sits near the top of the brand cell and is pink, unlike any pastel poster cell.
   const logo = await pixel(output, QUIZ_CELL_WIDTH + QUIZ_CELL_WIDTH / 2, QUIZ_CELL_HEIGHT * 2 + 78);
-  assert.ok(logo[0]! > logo[1]! + 20, "logo Popbeez harus berwarna merah muda");
+  assert.ok(logo[0]! > logo[1]! + 20, "logo PopBeez harus berwarna merah muda");
 
   // Yellow "TEBAK DRAMA" label line inside the brand cell.
   const labelBand = await sharp(output)

@@ -59,6 +59,6 @@ test("caption Reel membawa pertanyaan, hashtag, dan sumber", () => {
   });
   assert.match(caption, /Rating Drama Ini/);
   assert.match(caption, /Kamu berhenti di episode berapa\?/);
-  assert.match(caption, /#Popbeez/);
+  assert.match(caption, /#PopBeez/);
   assert.match(caption, /📰 Soompi/);
 });

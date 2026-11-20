@@ -13,7 +13,7 @@ export type PublishResult = {
 export { usesDirectFacebookPublishing } from "@/lib/facebook";
 
 /**
- * The entertainment page (Popbeez) can publish straight to Facebook when its
+ * The entertainment page (PopBeez) can publish straight to Facebook when its
  * Page Access Token and Page ID are configured. News keeps using Buffer, and
  * entertainment falls back to Buffer until the Graph credentials exist.
  */

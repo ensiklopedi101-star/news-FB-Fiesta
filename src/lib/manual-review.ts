@@ -2,8 +2,11 @@ import { z } from "zod";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 
 export const MANUAL_REVIEW_MARKER = "popbeez-manual-review-v1";
-export const MANUAL_REVIEW_SOURCE_NAME = "Review manual Popbeez";
-export const MANUAL_REVIEW_FOLLOW_COMMENT = "Ikuti Popbeez untuk rekomendasi film & drama berikutnya: https://www.facebook.com/portalbeez";
+export const MANUAL_REVIEW_SOURCE_NAME = "Review manual PopBeez";
+/** Rows created before the brand capitalisation fix still carry this spelling. */
+export const MANUAL_REVIEW_LEGACY_SOURCE_NAMES = ["Review manual Pop" + "beez"];
+export const MANUAL_REVIEW_SOURCE_NAMES = [MANUAL_REVIEW_SOURCE_NAME, ...MANUAL_REVIEW_LEGACY_SOURCE_NAMES];
+export const MANUAL_REVIEW_FOLLOW_COMMENT = "Ikuti PopBeez untuk rekomendasi film & drama berikutnya: https://www.facebook.com/portalbeez";
 export const reviewMediaTypes = ["FILM", "DRAMA", "MUSIK"] as const;
 export type ReviewMediaType = (typeof reviewMediaTypes)[number];
 
@@ -85,5 +88,5 @@ export function buildManualReviewCaption(review: ManualReview): string {
   }).join("\n\n");
   const typeLabel = review.mediaType.toLocaleLowerCase("id-ID");
   // No links in the caption: the follow link goes into the first comment instead.
-  return `🏆 ${review.headline}! 🎬✨\n\nBingung mau pilih ${typeLabel} untuk ditonton? Ini lima rekomendasi berdasarkan rating yang dicantumkan.\n\n${rows}\n\n💬 Mana yang paling bikin penasaran? Tulis nomornya di kolom komentar ya! 👇\n\n#Rekomendasi${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #Review${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #WatchlistMingguIni`;
+  return `🏆 ${review.headline}! 🎬✨\n\nBeezers, bingung mau pilih ${typeLabel} buat ditonton? Ini lima rekomendasi berdasarkan rating yang dicantumkan.\n\n${rows}\n\n💬 Beezers, mana yang paling bikin penasaran? Tulis nomornya di kolom komentar ya! 👇\n\n#Rekomendasi${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #Review${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #WatchlistMingguIni`;
 }

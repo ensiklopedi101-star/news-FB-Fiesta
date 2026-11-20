@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { articles, reels } from "@/lib/schema";
-import { editorialVoiceById, editorialVoiceLabel } from "@/lib/editorial-voices";
+import { AUDIENCE_NAME, entertainmentBrand } from "@/lib/brand";
 import { buildReelScenes, totalSeconds, buildReelCaption } from "@/lib/reel-script";
 import { renderReelFrame, REEL_HEIGHT, REEL_WIDTH } from "@/lib/reel-frames";
 import { synthesizeNarration, TtsUnavailableError } from "@/lib/reel-tts";
@@ -58,13 +58,12 @@ async function handle(request: NextRequest, force: boolean) {
     }
   }
 
-  // Narration comes from the entertainment pipeline (Popbeez), newest first.
+  // Narration comes from the entertainment pipeline (PopBeez), newest first.
   const [candidate] = await db.select({
     id: articles.id,
     title: articles.title,
     narration: articles.narrationScript,
     question: articles.caption,
-    voiceId: articles.editorialVoice,
     sourceName: articles.sourceName,
     hashtags: articles.caption,
   }).from(articles)
@@ -86,8 +85,8 @@ async function handle(request: NextRequest, force: boolean) {
     return NextResponse.json({ result: "idle", detail: "Artikel terbaru sudah punya Reel." });
   }
 
-  const voice = editorialVoiceById(candidate.voiceId);
-  const voiceLabel = editorialVoiceLabel(voice).replace("💡 Sudut pandang Popbeez · ", "").replace("💡 Sudut pandang Popbeez", "Redaksi");
+  // The frame tag invites the audience; the editorial tone stays internal.
+  const voiceLabel = AUDIENCE_NAME;
   const scenes = buildReelScenes(candidate.narration);
   if (scenes.length < 2) {
     return NextResponse.json({ result: "idle", detail: "Naskah narasi terlalu pendek untuk dijadikan Reel." });
@@ -113,7 +112,7 @@ async function handle(request: NextRequest, force: boolean) {
     await db.update(reels).set({ status: "rendering", errorMessage: null, updatedAt: new Date() }).where(eq(reels.id, reelId));
 
     const frames = await Promise.all(scenes.map((scene, index) => renderReelFrame(scene, {
-      brand: process.env.PAGE_BRAND_ENTERTAINMENT?.trim() || "Popbeez",
+      brand: entertainmentBrand(),
       handle: REELS_HANDLE,
       voiceLabel,
       sourceName: candidate.sourceName,

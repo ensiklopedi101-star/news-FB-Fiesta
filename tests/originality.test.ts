@@ -36,9 +36,9 @@ test("caption dengan analisis, opini, dan pertanyaan spesifik lolos", () => {
     caption: [
       "Rating episode pamungkas drama itu tembus dua digit, angka yang jarang muncul di slot akhir pekan.",
       "Kalau dibandingkan drama kabel lain yang rilis di bulan yang sama, kenaikan penontonnya datang dari basis pemirsa lama yang kembali menonton, bukan dari penonton baru.",
-      `💡 Sudut pandang Popbeez: ${take}`,
+      `💡 Sudut pandang PopBeez: ${take}`,
       question,
-      "#DramaKorea #RatingDrama #Popbeez",
+      "#DramaKorea #RatingDrama #PopBeez",
     ].join("\n\n"),
     take,
     question,

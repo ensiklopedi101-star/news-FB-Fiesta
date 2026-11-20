@@ -94,7 +94,7 @@ const integrationLabels: Record<string, string> = {
   bufferApi: "Buffer API key",
   bufferNews: "Channel Buffer berita",
   bufferEntertainment: "Channel Buffer hiburan",
-  facebookEntertainment: "Facebook Graph Popbeez",
+  facebookEntertainment: "Facebook Graph PopBeez",
   appUrl: "URL publik aplikasi",
   cronSecret: "Pengaman cron",
   blobStorage: "Penyimpanan gambar Blob",
@@ -112,7 +112,7 @@ function pageLabel(pageKey: Feed["pageKey"]) {
 
 function voiceLabelOf(article: Article) {
   const label = article.editorialVoice;
-  if (!label) return "Popbeez";
+  if (!label) return "PopBeez";
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
@@ -272,7 +272,7 @@ export default function Dashboard() {
 
   async function submitManualReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!window.confirm("Review ini akan diterbitkan ke halaman Popbeez. Tautan mengikuti aturan komentar pertama. Pastikan rating dan semua informasi sudah benar. Lanjutkan?")) return;
+    if (!window.confirm("Review ini akan diterbitkan ke halaman PopBeez. Tautan mengikuti aturan komentar pertama. Pastikan rating dan semua informasi sudah benar. Lanjutkan?")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -287,7 +287,7 @@ export default function Dashboard() {
       setMessage(result.error
         ? `Status publikasi belum pasti: ${result.error}`
         : result.provider === "facebook"
-          ? `Review “${result.title ?? reviewHeadline}” langsung diterbitkan ke halaman Facebook Popbeez.`
+          ? `Review “${result.title ?? reviewHeadline}” langsung diterbitkan ke halaman Facebook PopBeez.`
           : result.mediaFormat === "single"
             ? "Review tersimpan, tetapi Buffer hanya menerima cover satu gambar. Periksa batas carousel channel Buffer."
             : `Review “${result.title ?? reviewHeadline}” masuk ke antrean Buffer dalam format carousel enam slide.`);
@@ -383,7 +383,7 @@ export default function Dashboard() {
   }
 
   async function createQuizEdition() {
-    if (!window.confirm("Kuis Tebak Drama akan langsung diposting ke halaman Facebook Popbeez. Lanjutkan?")) return;
+    if (!window.confirm("Kuis Tebak Drama akan langsung diposting ke halaman Facebook PopBeez. Lanjutkan?")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -515,7 +515,8 @@ export default function Dashboard() {
   const waitingSlotCount = sections.done.length - liveCount - failedCount;
 
   function renderArticleCard(article: Article) {
-    const isManualReview = article.sourceName === "Review manual Popbeez";
+    // Rows created before the brand fix still say "Popbeez".
+    const isManualReview = /^review manual popbeez$/i.test(article.sourceName.trim());
     const previewSlides = isManualReview && article.postFormat === "carousel" ? [1, 2, 3, 4, 5, 6] : article.postFormat === "carousel" && article.carouselSlides?.length === 3 ? [1, 2, 3, 4] : [1];
     const slideTotal = isManualReview ? 6 : 4;
     const postUrl = facebookPostUrl(article.facebookPostId);
@@ -528,6 +529,7 @@ export default function Dashboard() {
           <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
           <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
           <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
+          {article.editorialVoice && <span className="status-tag voice-tag">{voiceLabelOf(article)}</span>}
           {article.originalityScore > 0 && <span className={`status-tag originality-${article.originalityNotes?.band ?? "watch"}`} title={article.originalityNotes?.reasons.join(" ") ?? ""}>Orisinalitas {article.originalityScore}</span>}
           {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
           {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
@@ -538,7 +540,7 @@ export default function Dashboard() {
         <div className="article-meta">{article.sourceName} · {article.category} · {article.sourcePublishedAt ? "Terbit sumber" : "Masuk antrean (perkiraan)"}: {formatDate(article.sourcePublishedAt || article.createdAt)}</div>
         {article.status === "published" && <div className="article-meta published-meta">Terbit di Facebook: {formatDate(article.publishedAt)}</div>}
         {article.status === "ready" && <div className="article-meta published-meta">Dikirim: {formatDate(article.updatedAt)}</div>}
-        {article.editorialTake && <p className="article-take">💡 Sudut pandang {voiceLabelOf(article)} · {article.editorialTake}</p>}
+        {article.editorialTake && <p className="article-take">{article.editorialTake}</p>}
         {article.narrationScript && <details className="article-narration"><summary>Naskah narasi Reel</summary><p>{article.narrationScript}</p></details>}
         {article.errorMessage && <p className="article-error">{article.errorMessage}</p>}
         <div className={`article-card-preview ${article.postFormat === "carousel" ? "carousel-preview" : ""}`}>
@@ -639,16 +641,16 @@ export default function Dashboard() {
         {checks.bufferApi && <button type="button" className="secondary-button" disabled={busy} onClick={() => void loadBufferChannels()}>{busy ? "Memeriksa…" : "Tes Buffer & tampilkan ID channel (hanya baca)"}</button>}
         {bufferMappings && <div className="setup-grid"><article className="setup-card"><span className={bufferMappings.news.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Berita</strong><p>{bufferMappingLabel(bufferMappings.news)}</p></div></article><article className="setup-card"><span className={bufferMappings.entertainment.status === "ready" ? "check-dot good" : "check-dot"} /><div><strong>Mapping channel Hiburan</strong><p>{bufferMappingLabel(bufferMappings.entertainment)}</p></div></article></div>}
         {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}
-        <p className="muted small-note">Logo Nusabeez dan Popbeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
+        <p className="muted small-note">Logo Nusabeez dan PopBeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
       </section>
 
       <section className="panel originality-panel">
         <div className="panel-heading"><div><p className="eyebrow">NILAI TAMBAH</p><h2>Penjaga orisinalitas</h2><p className="muted small-note">Setiap caption wajib membawa analisis, opini redaksi, dan pertanyaan diskusi. Sebelum dikirim, caption diperiksa otomatis: bila terlalu mirip sumber atau tidak punya sudut pandang, post <b>ditahan</b> dan tidak pernah sampai ke Facebook. Ambang lulus saat ini <b>{data?.originality.threshold ?? 45}/100</b> (<code>ORIGINALITY_MIN_SCORE</code>).</p></div><span className="format-tag carousel">Anti “Limited Originality”</span></div>
         <div className="queue-counts"><span>{data?.originality.scored ?? 0} post dinilai</span><span>rata-rata {data?.originality.average ?? 0}/100</span><span>{data?.originality.safe ?? 0} aman</span><span>{data?.originality.watch ?? 0} pantau</span><span className={(data?.originality.risky ?? 0) > 0 ? "count-alert" : ""}>{data?.originality.risky ?? 0} berisiko</span><span>{data?.originality.held ?? 0} ditahan</span></div>
         <div className="setup-grid">
-          <article className="setup-card"><span className="check-dot good" /><div><strong>Analisis + opini</strong><p>Paragraf “Sudut pandang Popbeez” ditulis ulang per berita: sebab-akibat, perbandingan, atau penilaian redaksi — bukan ringkasan sumber.</p></div></article>
+          <article className="setup-card"><span className="check-dot good" /><div><strong>Analisis + opini</strong><p>Paragraf opini ditulis ulang per berita dengan nada ngobrol (“Menurut PopBeez sih…”), plus alasan dan perbandingan — bukan ringkasan sumber, tanpa label section.</p></div></article>
           <article className="setup-card"><span className="check-dot good" /><div><strong>Larangan salin</strong><p>8 kata berurutan yang sama dengan sumber langsung menurunkan skor ke ambang tahan. Gagal sekali, caption ditulis ulang otomatis dengan brief lebih ketat; parafrase total, tanpa fakta baru.</p></div></article>
-          <article className="setup-card"><span className="check-dot good" /><div><strong>Pertanyaan diskusi</strong><p>Setiap post diakhiri pertanyaan spesifik agar komentar pembaca menjadi bagian dari nilai tambah, bukan hanya reaksi.</p></div></article>
+          <article className="setup-card"><span className="check-dot good" /><div><strong>Pertanyaan diskusi</strong><p>Setiap post diakhiri pertanyaan yang menyapa <b>Beezers</b>, jadi komentar pembaca ikut jadi nilai tambah, bukan cuma reaksi.</p></div></article>
           <article className="setup-card"><span className="check-dot good" /><div><strong>Jejak audit</strong><p>Skor, panjang salinan, dan alasan disimpan di kolom <code>originality_score</code>/<code>originality_notes</code> untuk ditinjau ulang.</p></div></article>
         </div>
         {data?.originality.schemaReady === false && <p className="muted small-note">Kolom <code>editorial_take</code>, <code>originality_score</code>, dan <code>originality_notes</code> belum ada. Jalankan <code>drizzle/0011_originality.sql</code> di Neon; penahanan caption tetap berjalan walau skor belum tersimpan.</p>}
@@ -679,7 +681,7 @@ export default function Dashboard() {
       </section>
 
       <section className="panel quiz-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual Popbeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis.</p></div><span className="format-tag carousel">Popbeez · 5 poster</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
         {data?.quiz.lastImageUrl ? <div className="quiz-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={data.quiz.lastImageUrl} alt="Edisi kuis terakhir" loading="lazy" />
@@ -692,11 +694,11 @@ export default function Dashboard() {
         </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Butuh minimal lima poster dari review manual; satu review manual sudah berisi lima poster.</span></div>}
         {!data?.quiz.schemaReady && <p className="muted small-note">Tabel <code>quiz_editions</code> belum ada. Jalankan <code>drizzle/0010_quiz_editions.sql</code> di Neon untuk mengaktifkan kuis.</p>}
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat & posting kuis sekarang"}</button>
-        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook Popbeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
+        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook PopBeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
       </section>
 
       <section className="panel manual-review-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KONTEN MANUAL</p><h2>Buat review mingguan</h2><p className="muted small-note">Isi lima pilihan film, drama, atau musik. Rating tertinggi otomatis menjadi nomor 1. Hasilnya satu carousel terpadu: cover lalu lima kartu rekomendasi.</p></div><span className="format-tag carousel">Popbeez · 6 slide</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">KONTEN MANUAL</p><h2>Buat review mingguan</h2><p className="muted small-note">Isi lima pilihan film, drama, atau musik. Rating tertinggi otomatis menjadi nomor 1. Hasilnya satu carousel terpadu: cover lalu lima kartu rekomendasi.</p></div><span className="format-tag carousel">PopBeez · 6 slide</span></div>
         <form className="manual-review-form" onSubmit={submitManualReview}>
           <div className="form-grid review-heading-grid">
             <label className="full-field">Judul posting<input value={reviewHeadline} onChange={(event) => setReviewHeadline(event.target.value)} required minLength={5} maxLength={100} placeholder="Contoh: 5 Drama Rating Tertinggi Minggu Ini" /></label>

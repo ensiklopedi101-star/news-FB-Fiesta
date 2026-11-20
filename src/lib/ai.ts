@@ -1,6 +1,7 @@
 import "server-only";
 import { GoogleGenAI, Type } from "@google/genai";
-import { editorialVoiceLabel, type EditorialVoice } from "@/lib/editorial-voices";
+import { composeCaption, normalizeBrand } from "@/lib/caption";
+import { VOICE_STYLE_GUIDE, type EditorialVoice } from "@/lib/editorial-voices";
 import { safeProviderError } from "@/lib/ai-error";
 
 const outputSchema = {
@@ -132,27 +133,30 @@ function buildPrompt(input: {
     ? `\n\nCATATAN PENILAI OTOMATIS (perbaiki ini): ${input.feedback.trim().slice(0, 400)}`
     : "";
   const voice = input.voice
-    ? `\n\nSUDUT PANDANG WAJIB UNTUK POST INI:\n${input.voice.brief}`
+    ? `\n\nNada kolom untuk post ini:\n${input.voice.brief}`
     : "";
-  return `Kamu editor senior Popbeez (media hiburan Indonesia). Kamu TIDAK menyalin berita; kamu menulis ulang berita dengan sudut pandang sendiri dan selalu menambahkan nilai baru, supaya konten aman dari penilaian "Limited Originality of Content" di Facebook.
+  return `Kamu penulis PopBeez (media hiburan Indonesia). Kamu TIDAK menyalin berita; kamu nulis ulang berita pakai sudut pandang sendiri dan selalu nambah nilai baru, supaya konten aman dari penilaian "Limited Originality of Content" di Facebook. Pembaca PopBeez disebut "Beezers".
+
+${VOICE_STYLE_GUIDE}
 
 Struktur wajib:
-1. paragraphs[0]: hook 1–2 kalimat + fakta inti, sepenuhnya dengan kalimat sendiri. Tidak menyalin judul mentah.
-2. paragraphs[1]: konteks dan analisis — hubungkan berita ini dengan tren industri, karya lain, atau implikasi buat penonton. Boleh memakai fakta dari bahan saja; jelaskan sebab-akibat, perbandingan, atau pola ("karena", "dibanding", "padahal", "artinya").
-3. take: 1–2 kalimat ANALISIS + OPINI redaksi yang jelas bersifat penilaian, misalnya "Menurut kami, ...". Boleh menilai gaya, arah cerita, atau strategi industri. Ini pendapat, bukan klaim fakta.
-4. question: satu pertanyaan diskusi spesifik maksimal 120 karakter yang mengundang cerita/pengalaman pembaca, bukan "setuju atau tidak".
-5. narration: naskah untuk Reels berdurasi 25-35 detik (70-85 kata), terdiri dari satu kalimat pembuka yang memancing rasa ingin tahu, dua fakta inti, satu penilaian redaksi, dan satu ajakan menjawab pertanyaan. Tanpa emoji, tanpa hashtag, tanpa URL, tanpa tanda kutip, tanpa "Halo semuanya".
+1. paragraphs[0]: hook 1–2 kalimat + fakta inti, kalimat sendiri. Jangan nyalin judul mentah.
+2. paragraphs[1]: konteks dan analisis. Sambungin berita ini sama tren industri, karya lain, atau efeknya buat penonton. Cuma boleh pakai fakta dari bahan; jelasin sebab-akibat atau perbandingan pakai kata kayak "karena", "tapi", "jadi", "dibanding", "padahal", "artinya".
+3. take: 1–2 kalimat opini + analisis dengan nada bicara. WAJIB dibuka dengan penyebutan nama brand, contoh "Menurut PopBeez sih, ..." atau "PopBeez rasa ...". Ini pendapat, bukan klaim fakta. Boleh satu emoji.
+4. question: satu pertanyaan buat Beezers, maksimal 120 karakter, ajak cerita atau pengalaman, bukan "setuju gak". Sebut "Beezers" di dalamnya.
+5. narration: naskah Reels 25-35 detik (70-85 kata): satu kalimat pembuka yang bikin penasaran, dua fakta inti, satu penilaian PopBeez, satu ajakan jawab. Ngobrol natural dan sebut Beezers sekali. Tanpa emoji, tanpa hashtag, tanpa URL, tanpa tanda kutip, tanpa "Halo semuanya".
 
 Larangan keras:
-- Jangan menyalin kalimat sumber; jangan memakai 5 kata berurutan yang sama dengan bahan.
-- Jangan mengarang fakta, angka, kutipan, tanggal, jadwal, aktor, atau status rilis di luar bahan.
-- Jangan menulis "sudah terverifikasi independen" atau klaim sensasional.
-- Jangan menyalin tagline atau siaran pers apa adanya.
+- Jangan nyalin kalimat sumber; jangan pakai 5 kata berurutan yang sama dengan bahan.
+- Jangan ngarang fakta, angka, kutipan, tanggal, jadwal, aktor, atau status rilis di luar bahan.
+- Jangan nulis "sudah terverifikasi independen" atau klaim sensasional.
+- Jangan nyalin tagline atau siaran pers apa adanya.
+- Jangan pernah nulis label seperti "Sudut pandang PopBeez" atau "Nada Santai" di dalam caption.
 
 Aturan tambahan:
-- Bahasa Indonesia santai dan akrab, maksimal 2 emoji relevan.
+- Nama brand selalu ditulis "PopBeez" (B kapital). Pembaca selalu "Beezers".
 - 3 hashtag spesifik dari nama/topik yang benar-benar ada di bahan.
-- 2 slidePoints: dua fakta inti berbeda, maksimal 120 karakter, tanpa fakta baru.
+- 2 slidePoints: dua fakta inti beda, maksimal 120 karakter, tanpa fakta baru.
 - Kembalikan hanya JSON valid: title, paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), hashtags (tepat 3).
 
 Kategori: ${input.category}
@@ -194,19 +198,13 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice } = {}): Gen
     throw new Error("Hasil AI tidak memenuhi format judul, 2 paragraf, sudut pandang redaksi, 2 fakta carousel, pertanyaan, dan 3 hashtag.");
   }
 
-  // The opinion block is labelled so readers (and reviewers) can see the added value.
-  const caption = [
-    paragraphs[0]!,
-    paragraphs[1]!,
-    `${editorialVoiceLabel(input.voice ?? null)}: ${take}`,
-    question,
-    hashtags.join(" "),
-  ].join("\n\n");
+  const spokenTake = normalizeBrand(take);
+  const caption = composeCaption({ paragraphs: [paragraphs[0]!, paragraphs[1]!], take: spokenTake, question, hashtags });
   return {
-    title: title.slice(0, 180),
+    title: normalizeBrand(title).slice(0, 180),
     caption,
-    take,
-    narration: narration.slice(0, 900),
+    take: spokenTake,
+    narration: normalizeBrand(narration).slice(0, 900),
     voiceId: input.voice?.id ?? null,
     question,
     carouselSlides: [slidePoints[0]!, slidePoints[1]!, question],
