@@ -155,7 +155,7 @@ async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: st
     .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
     .slice(0, policy.maxPerHour);
 
-  // Daily ceiling: three posts per WITA day by default, so every slot gets its hour.
+  // Daily ceiling: four posts per WITA day by default, matching the four configured slots.
   const todayRows = await getDb()
     .select({ value: sql<number>`count(*)` })
     .from(articles)

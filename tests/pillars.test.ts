@@ -11,6 +11,8 @@ test("headlines land in the right pillar", () => {
   assert.equal(classifyPillar({ title: "Pilih Bias Kamu Minggu Ini" }), "community");
   assert.equal(classifyPillar({ title: "NCT DREAM Menang Show Champion Lagi" }), "breaking");
   assert.equal(classifyPillar({ title: "Kabar terbaru dari agensi" }), "breaking");
+  assert.equal(classifyPillar({ title: "Top 10 Manga yang Rilis Bulan Ini" }), "manga");
+  assert.equal(classifyPillar({ title: "Chapter Baru Diumumkan", category: "Manga" }), "manga");
 });
 
 test("list wins over breaking when a title has both signals", () => {
