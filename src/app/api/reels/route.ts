@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
-import { put } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
@@ -126,9 +126,10 @@ async function handle(request: NextRequest, force: boolean) {
     const blobToken = process.env.BLOB_READ_WRITE_TOKEN?.trim();
 
     let video: Buffer;
+    let frameUrls: string[] = [];
     if (renderEndpoint) {
       if (!blobToken) throw new ReelEncoderMissingError("REELS_RENDER_URL butuh BLOB_READ_WRITE_TOKEN agar frame bisa diunduh worker.");
-      const frameUrls = await Promise.all(frames.map(async (png, index) =>
+      frameUrls = await Promise.all(frames.map(async (png, index) =>
         (await put(`reels/${reelId}/frame-${index}.png`, png, {
           access: "public", addRandomSuffix: false, contentType: "image/png", token: blobToken,
         })).url));
@@ -148,6 +149,17 @@ async function handle(request: NextRequest, force: boolean) {
       videoUrl = (await put(`reels/${reelId}.mp4`, video, {
         access: "public", addRandomSuffix: false, contentType: "video/mp4", token: blobToken,
       })).url;
+    }
+
+    // The 1080×1920 frame PNGs are only needed while the worker encodes the video.
+    // Deleting them here keeps the account-wide Blob quota from filling up.
+    if (frameUrls.length) {
+      try {
+        await del(frameUrls, { token: blobToken! });
+        console.info(`[reels] frames removed reel=${reelId} count=${frameUrls.length}`);
+      } catch (cleanupError) {
+        console.warn(`[reels] frame cleanup failed reel=${reelId}: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`);
+      }
     }
 
     const caption = buildReelCaption({

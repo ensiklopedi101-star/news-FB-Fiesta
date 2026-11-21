@@ -195,6 +195,7 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
 - `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
+- `GET /api/cron/blob-cleanup?dryRun=1` — bersih-bersih kuota Vercel Blob (frame Reel, video lama, gambar kuis, foto artikel). Wajib `Authorization: Bearer <CRON_SECRET>`; `dryRun=1` hanya melaporkan.
 - `GET /api/public/posts?page=entertainment|news&limit=12` — feed publik (CORS terbuka) berisi post yang sudah terbit di Facebook/Instagram. Dipakai landing page; tidak perlu autentikasi.
 - `GET /api/cron` — proses satu artikel: terbit langsung ke Facebook (PopBeez) atau masuk antrean Buffer (berita). Hanya jalan di dalam jendela slot WITA, mematuhi batas 5 pengiriman/jam dan jeda 12 menit. Tambahkan `?force=1` untuk melewati jadwal slot (dipakai tombol **Terbitkan** manual). Wajib header `Authorization: Bearer <CRON_SECRET>`.
 - `GET /api/reels` — membuat satu Reel dari artikel hiburan terbaru bila `REELS_ENABLED=1` dan jeda `REELS_MIN_GAP_HOURS` sudah lewat. `POST /api/reels` memaksa satu Reel sekarang (dipakai tombol dashboard, melewati flag & jeda). Wajib header `Authorization: Bearer <CRON_SECRET>`. Butuh encoder: `FFMPEG_PATH` atau `REELS_RENDER_URL`.
@@ -217,6 +218,24 @@ Jangan memanggil endpoint cron berulang-ulang untuk tes di production: setiap ar
 - Logo halaman selalu digambar **bulat**: `src/lib/og-card.ts` dan `src/lib/quiz-card.ts` memotong logo dengan mask lingkaran + cincin tipis. Mengganti `public/brand/popbeez_icon.png` dengan berkas persegi tidak lagi menghasilkan kotak putih.
 - Slide CTA carousel (`slide=4`) menampilkan ikon Facebook **dan** Instagram dengan handle `portalbeez` + `@popbeez.hive`; caption kuis, Reels, dan komentar sumber juga menyebut Instagram.
 - Gambar dari layanan aggregator seperti **rss.app** diblokir total (`isKnownAggregatorBrandImage()`), bukan hanya berkas logonya, dan route kartu memeriksa ulang gambar yang sudah tersimpan sehingga feed lama pun tidak bisa memunculkan placeholder itu lagi.
+
+## Kuota Vercel: Functions Storage dan Blob itu per akun, bukan per project
+
+Kuota Vercel dihitung **per team/akun**. Tiga project di akun yang sama berbagi satu jatah: Functions Storage (10 GB di Hobby, isinya salinan fungsi dari **setiap deployment yang masih disimpan**) dan Blob (1 GB). Jadi project yang tidak dipakai tetap memakan jatah selama deployment lamanya masih ada.
+
+### Yang bisa dilakukan di dashboard (tanpa deploy)
+
+1. **Settings → Deployment Retention** di tiap project: pakai `Keep 3` dan `Expire 3 days` untuk production maupun preview. Salinan fungsi dari deployment lama langsung dibuang, dan fungsi storage biasanya turun drastis setelah itu.
+2. **Hapus project yang sudah tidak dipakai** (bukan sekadar pause) supaya seluruh deployment-nya ikut hilang.
+3. Batasi preview deployment: hanya deploy branch yang sedang dikerjakan. Setiap deploy baru menambah satu salinan fungsi (aplikasi ini membawa `sharp`/libvips dan font DejaVu, jadi satu deployment bisa puluhan MB).
+
+### Yang sudah dirapikan dari sisi aplikasi
+
+- **Frame Reel dihapus segera** setelah video jadi (`del()` di `api/reels`). Sebelumnya PNG 1080×1920 per scene (6–10 berkas per Reel) menumpuk selamanya — ini penyumbang terbesar Blob.
+- **`/api/cron/blob-cleanup`** menyapu sisa berkas lama dengan batas dari env `BLOB_REEL_FRAME_DAYS` (1), `BLOB_REEL_VIDEO_DAYS` (30), `BLOB_QUIZ_DAYS` (45), `BLOB_ARTICLE_IMAGE_DAYS` (21). Jalankan dulu dengan `?dryRun=1`, lalu tanpa parameter; pasang sebagai tugas mingguan di cron-job.org. Hanya prefix milik sendiri (`reels/`, `quiz/`, `article-images/`) yang pernah dihapus.
+- Foto artikel disimpan dengan nama tetap per artikel (`allowOverwrite`), jadi artikel yang diproses ulang tidak menggandakan berkas.
+
+Jika kuota Blob tetap terasa sempit (video Reels cepat memakan 1 GB), media bisa dipindah ke Supabase Storage; kontrak penyimpanan di `src/lib/blob-image.ts` dan `api/reels` sengaja dibuat kecil supaya penggantinya cuma satu adapter.
 
 ## Pemeriksaan dan catatan penting
 

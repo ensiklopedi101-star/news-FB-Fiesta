@@ -45,8 +45,17 @@ test("the brand cell carries the PopBeez logo and the Tebak Drama wording", asyn
   const output = await renderQuizCard({ tiles });
 
   // The logo sits near the top of the brand cell and is pink, unlike any pastel poster cell.
-  const logo = await pixel(output, QUIZ_CELL_WIDTH + QUIZ_CELL_WIDTH / 2, QUIZ_CELL_HEIGHT * 2 + 78);
-  assert.ok(logo[0]! > logo[1]! + 20, "logo PopBeez harus berwarna merah muda");
+  // It is masked into a circle now, so scan the whole logo box for the brand pink.
+  const logoBox = await sharp(output)
+    .extract({ left: QUIZ_CELL_WIDTH + Math.round((QUIZ_CELL_WIDTH - 116) / 2), top: QUIZ_CELL_HEIGHT * 2 + 20, width: 116, height: 116 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  let pink = 0;
+  for (let offset = 0; offset < logoBox.length; offset += 3) {
+    if (logoBox[offset]! > 200 && logoBox[offset + 1]! < 140) pink += 1;
+  }
+  assert.ok(pink > 400, `logo PopBeez harus berwarna merah muda (${pink} piksel pink)`);
 
   // Yellow "TEBAK DRAMA" label line inside the brand cell.
   const labelBand = await sharp(output)
