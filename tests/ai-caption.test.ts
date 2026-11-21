@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { composeCaption, normalizeBrand, withAudience } from "@/lib/caption";
+import { composeCaption, formatRoundupStories, normalizeBrand, withAudience } from "@/lib/caption";
 
 const paragraphs: [string, string] = [
   "WayV akhirnya buka suara soal rencana tur lintas benua mereka. Kabarnya sih udah disiapin dari tahun lalu.",
   "Yang bikin beda, mereka milih nunggu waktu yang pas ketimbang buru-buru ikut tren.",
 ];
+
+test("roundup caption titles and summaries remain paired in the supplied article order", () => {
+  assert.deepEqual(
+    formatRoundupStories(["Judul pertama", "Judul kedua", "Judul ketiga", "Judul keempat"], ["Ringkasan satu", "Ringkasan dua", "Ringkasan tiga", "Ringkasan empat"]),
+    ["1. Judul pertama — Ringkasan satu", "2. Judul kedua — Ringkasan dua", "3. Judul ketiga — Ringkasan tiga", "4. Judul keempat — Ringkasan empat"],
+  );
+  assert.throws(() => formatRoundupStories(["Judul"], []), /jumlah yang sama/);
+});
 
 test("caption tidak memakai label sudut pandang", () => {
   const caption = composeCaption({

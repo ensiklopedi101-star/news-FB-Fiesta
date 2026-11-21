@@ -64,7 +64,7 @@ type DashboardData = {
   integrations: Record<string, boolean>;
   aiModels: { groq: string; gemini: string };
   schedule: { maxPerDay: number; maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
-  pillars?: { enabled: boolean; maxPerDay: number; list: Array<{ id: string; label: string; summary: string; share: string }> };
+  pillars?: { list: Array<{ id: string; label: string; summary: string; share: string }> };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
   originality: { schemaReady: boolean; threshold: number; scored: number; average: number; safe: number; watch: number; risky: number; held: number };
   reels: {
@@ -739,9 +739,7 @@ export default function Dashboard() {
             <div className="pillar-head">
               <strong>Pilar konten</strong>
               <span className="muted small-note">
-                {data.pillars.enabled
-                  ? `Maksimal ${data.pillars.maxPerDay} post per pilar per hari, pilar tidak berulang dua kali berturut-turut.`
-                  : "Kuota pilar dimatikan (PILLARS_ENABLED=0)."}
+                Pilar membantu variasi roundup, tetapi bukan kuota atau syarat wajib; roundup satu pilar tetap boleh terbit.
               </span>
             </div>
             <div className="pillar-strip">

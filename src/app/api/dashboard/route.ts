@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { publishPolicy } from "@/lib/schedule";
-import { PILLARS, pillarMaxPerDay, pillarQuotaEnabled } from "@/lib/pillars";
+import { PILLARS } from "@/lib/pillars";
 import { slotStateAt } from "@/lib/publish-slots";
 import { quizIntervalDays, QUIZ_MAX_USES, QUIZ_SCHEDULE_LABEL, QUIZ_TILES } from "@/lib/quiz";
 import { minimumOriginalityScore } from "@/lib/originality";
@@ -38,9 +38,9 @@ export async function GET(request: NextRequest) {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     const [articleTotal] = await db.select({ value: count() }).from(articles);
-    const [publishedToday] = await db.select({ value: count() }).from(articles)
+    const [publishedToday] = await db.select({ value: sql<number>`count(distinct coalesce(${articles.facebookPostId}, ${articles.id}::text))` }).from(articles)
       .where(and(eq(articles.status, "published"), gte(articles.publishedAt, today)));
-    const [bufferQueuedToday] = await db.select({ value: count() }).from(articles)
+    const [bufferQueuedToday] = await db.select({ value: sql<number>`count(distinct coalesce(${articles.facebookPostId}, ${articles.id}::text))` }).from(articles)
       .where(and(
         eq(articles.status, "ready"),
         like(articles.facebookPostId, "buffer:%"),
@@ -237,7 +237,7 @@ export async function GET(request: NextRequest) {
       originality,
       reels: reelsSummary,
       schedule: publishPolicy(),
-      pillars: { enabled: pillarQuotaEnabled(), maxPerDay: pillarMaxPerDay(), list: Object.values(PILLARS).map(({ id, label, summary, share }) => ({ id, label, summary, share })) },
+      pillars: { list: Object.values(PILLARS).map(({ id, label, summary, share }) => ({ id, label, summary, share })) },
       publishSchedule: slotStateAt(new Date()),
       quiz: {
         lastPostedAt: lastQuiz?.postedAt ?? null,

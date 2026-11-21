@@ -21,6 +21,11 @@ export function withAudience(question: string): string {
  * label. "Sudut pandang PopBeez · Santai:" in front of the opinion is the loudest
  * robot tell, so the opinion just continues the same voice.
  */
+export function formatRoundupStories(titles: string[], summaries: string[]): string[] {
+  if (!titles.length || titles.length !== summaries.length) throw new Error("Judul dan ringkasan roundup harus memiliki jumlah yang sama.");
+  return titles.map((title, index) => `${index + 1}. ${normalizeBrand(title.trim())} — ${normalizeBrand(summaries[index]!.trim())}`);
+}
+
 export function composeCaption(input: {
   paragraphs: [string, string];
   take: string;

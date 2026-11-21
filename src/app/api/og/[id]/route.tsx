@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderOgCard } from "@/lib/og-card";
 import { imageForCarouselSlide } from "@/lib/carousel-image";
+import { selectedRoundupImage } from "@/lib/roundup";
 import { manualImageReferer, parseManualReview } from "@/lib/manual-review";
 import { isKnownAggregatorBrandImage } from "@/lib/safe-url";
 
@@ -21,25 +22,46 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .limit(1);
   if (!article) return new Response("Not found", { status: 404 });
 
-  const debugImage = new URL(request.url).searchParams.get("debug") === "image";
-  const isEntertainment = article.pageKey === "entertainment";
+  const searchParams = new URL(request.url).searchParams;
+  const rawRoundupIds = searchParams.get("roundupIds");
+  const roundupIds = rawRoundupIds ? rawRoundupIds.split(",") : null;
+  if (roundupIds && (roundupIds.length < 4 || roundupIds.length > 5 || !roundupIds.includes(id) || roundupIds.some((storyId) => !/^[0-9a-f-]{36}$/i.test(storyId)))) {
+    return new Response("Invalid roundup articles", { status: 400 });
+  }
+  const roundupStories = roundupIds ? await getDb().select({ id: articles.id, title: articles.title, category: articles.category, pageKey: articles.pageKey, sourceName: articles.sourceName, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls, sourceUrl: articles.sourceUrl, postFormat: articles.postFormat, carouselSlides: articles.carouselSlides, rawText: articles.rawText, manualImageUrls: articles.manualImageUrls })
+    .from(articles).where(inArray(articles.id, roundupIds)) : [];
+  if (roundupIds && (roundupStories.length !== roundupIds.length || roundupStories.some((story) => story.pageKey !== "entertainment"))) {
+    return new Response("Roundup stories unavailable", { status: 404 });
+  }
+  const roundIndex = roundupIds?.indexOf(id) ?? -1;
+  const cardArticle = roundupIds && roundIndex >= 0
+    ? roundupStories.find((story) => story.id === roundupIds[Number.parseInt(searchParams.get("slide") ?? "1", 10) - 1]) ?? article
+    : article;
+
+  const debugImage = searchParams.get("debug") === "image";
+  const isEntertainment = cardArticle.pageKey === "entertainment";
   const brand = (
     (isEntertainment ? process.env.PAGE_BRAND_ENTERTAINMENT : process.env.PAGE_BRAND_NEWS)
     || process.env.PAGE_BRAND
     || (isEntertainment ? "PopBeez" : "Nusabeez")
   ).slice(0, 40);
-  const category = article.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
-  const manualReview = parseManualReview(article.rawText);
-  const requestedSlide = Number.parseInt(new URL(request.url).searchParams.get("slide") ?? "1", 10);
-  const slideTotal = manualReview ? 6 : 4;
+  const category = cardArticle.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
+  const manualReview = roundupIds ? null : parseManualReview(cardArticle.rawText);
+  const requestedSlide = Number.parseInt(searchParams.get("slide") ?? "1", 10);
+  const slideTotal = roundupIds?.length ?? (manualReview ? 6 : 4);
   if (!Number.isInteger(requestedSlide) || requestedSlide < 1 || requestedSlide > slideTotal) {
     return new Response("Invalid carousel slide", { status: 400 });
   }
   const carouselLabels = ["FAKTA UTAMA", "RINCIAN BERITA", "IKUT BERBAGI PENDAPAT"];
   // New image fields from the feed occasionally carry the rss.app placeholder again,
   // so stored rows are re-checked at render time instead of trusting the database.
-  const isFollowCtaSlide = !manualReview && isEntertainment && requestedSlide === 4;
-  const slide = article.postFormat === "carousel" && !manualReview ? {
+  const isFollowCtaSlide = !roundupIds && !manualReview && isEntertainment && requestedSlide === 4;
+  const slide = roundupIds ? {
+    number: requestedSlide,
+    total: roundupIds.length,
+    label: `BERITA ${requestedSlide}`,
+    text: `${cardArticle.title.slice(0, 90)} — ${article.carouselSlides?.[requestedSlide - 1] ?? "Ringkasan sedang disiapkan."}`,
+  } : article.postFormat === "carousel" && !manualReview ? {
     number: requestedSlide,
     total: 4,
     label: isFollowCtaSlide ? "IKUTI POPBEEZ" : requestedSlide === 1 ? "COVER" : carouselLabels[requestedSlide - 2]!,
@@ -60,12 +82,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const requestedImage = plainReviewCover
       ? null
       : manualReview
-        ? manualReview.items[requestedSlide - 2]?.imageUrl ?? article.imageUrl
-        : article.postFormat === "carousel"
-          ? imageForCarouselSlide(article.imageUrls, article.imageUrl, requestedSlide)
-          : article.imageUrl;
+        ? manualReview.items[requestedSlide - 2]?.imageUrl ?? cardArticle.imageUrl
+        : roundupIds
+          ? selectedRoundupImage(cardArticle)
+          : cardArticle.postFormat === "carousel"
+            ? imageForCarouselSlide(cardArticle.imageUrls, cardArticle.imageUrl, requestedSlide)
+            : cardArticle.imageUrl;
     const safeRequestedImage = isKnownAggregatorBrandImage(requestedImage) ? null : requestedImage;
-    const imageReferer = manualReview && safeRequestedImage ? manualImageReferer(safeRequestedImage) : article.sourceUrl;
+    const imageReferer = manualReview && safeRequestedImage ? manualImageReferer(safeRequestedImage) : cardArticle.sourceUrl;
     let imageFailure = "";
     const reportImageFailure = (reason: string) => {
       imageFailure = reason;
@@ -87,9 +111,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         console.warn(`[og-image] Secondary manual image rejected for ${article.id}: ${reason}.`);
       });
     }
-    if (!plainReviewCover && !photoJpeg && requestedImage !== article.imageUrl && article.imageUrl) {
-      photoJpeg = await fetchOgImageJpeg(article.imageUrl, manualReview ? manualImageReferer(article.imageUrl) : article.sourceUrl, fetch, (reason) => {
-        console.warn(`[og-image] Cover fallback rejected for ${article.id}: ${reason}.`);
+    if (!plainReviewCover && !photoJpeg && requestedImage !== cardArticle.imageUrl && cardArticle.imageUrl) {
+      photoJpeg = await fetchOgImageJpeg(cardArticle.imageUrl, manualReview ? manualImageReferer(cardArticle.imageUrl) : cardArticle.sourceUrl, fetch, (reason) => {
+        console.warn(`[og-image] Cover fallback rejected for ${cardArticle.id}: ${reason}.`);
       });
     }
 
@@ -115,8 +139,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const card = await renderOgCard({
       brand,
       category,
-      title: article.title.slice(0, 130),
-      sourceName: article.sourceName,
+      title: cardArticle.title.slice(0, 130),
+      sourceName: cardArticle.sourceName,
       isEntertainment,
       photoJpeg,
       photoJpegSecondary,

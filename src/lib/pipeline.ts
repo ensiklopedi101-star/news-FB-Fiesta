@@ -1,9 +1,10 @@
 import "server-only";
-import { and, asc, desc, eq, gt, isNull, like, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
 import { publishPolicy } from "@/lib/schedule";
-import { classifyPillar, pillarMaxPerDay, pillarQuotaEnabled, selectByPillar, type Pillar } from "@/lib/pillars";
+import { classifyPillar, type Pillar } from "@/lib/pillars";
+import { roundupSlideUrls, selectedRoundupImage, selectRoundup } from "@/lib/roundup";
 import { witaDayNumber } from "@/lib/publish-slots";
 import { MANUAL_REVIEW_SOURCE_NAMES } from "@/lib/manual-review";
 import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
@@ -32,11 +33,6 @@ function witaDayStart(now: Date): Date {
   return new Date(witaDayNumber(now) * 86_400_000 - WITA_OFFSET_MS);
 }
 
-/**
- * Pillar mix for today: how many posts each pillar already used and which pillar
- * ran last. Used to avoid three breaking-news posts in a row — the exact pattern
- * that buried the first week of content.
- */
 /** Postgres 42703 when a migration has not been applied yet. */
 function isMissingColumnError(error: unknown, column: string): boolean {
   const code = (error as { code?: unknown } | null)?.code;
@@ -44,26 +40,8 @@ function isMissingColumnError(error: unknown, column: string): boolean {
   return (code === "42703" || /does not exist/i.test(message)) && message.includes(column);
 }
 
-async function pillarContext(now: Date): Promise<{ counts: Partial<Record<Pillar, number>>; previousPillar: Pillar | null }> {
-  const rows = await getDb()
-    .select({ title: articles.title, category: articles.category })
-    .from(articles)
-    .where(and(
-      eq(articles.status, "published"),
-      gt(articles.publishedAt, witaDayStart(now)),
-      notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES]),
-    ))
-    .orderBy(desc(articles.publishedAt))
-    .limit(20);
-  const counts: Partial<Record<Pillar, number>> = {};
-  for (const row of rows) {
-    const pillar = classifyPillar(row);
-    counts[pillar] = (counts[pillar] ?? 0) + 1;
-  }
-  return { counts, previousPillar: rows[0] ? classifyPillar(rows[0]) : null };
-}
 
-async function claimNextArticle(): Promise<Article | null> {
+async function claimNextArticles(): Promise<Article[]> {
   const db = getDb();
   const now = new Date();
   const expiryCutoff = getQueueExpiryCutoff(now);
@@ -77,59 +55,72 @@ async function claimNextArticle(): Promise<Article | null> {
     .where(and(eq(articles.status, "queued"), isExpiredByAge));
   const configuredPages = (["news", "entertainment"] as const)
     .filter((pageKey) => getBufferConfigurationGaps([pageKey]).length === 0);
-  if (!configuredPages.length) return null;
+  if (!configuredPages.length) return [];
   const configuredPageFilter = or(...configuredPages.map((pageKey) => eq(articles.pageKey, pageKey)));
-  if (!configuredPageFilter) return null;
-  // Pull a handful of candidates so the pillar quota can pick a varied post instead
-  // of whichever headline happened to be oldest.
-  const queuedRows = await db.select({ id: articles.id, title: articles.title, category: articles.category })
-    .from(articles)
-    .where(and(eq(articles.status, "queued"), configuredPageFilter))
-    .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
-    .limit(30);
-  const quotaOn = pillarQuotaEnabled();
-  const mix = quotaOn && queuedRows.length ? await pillarContext(now) : { counts: {}, previousPillar: null };
-  const queued = selectByPillar(
-    queuedRows.map((row) => ({ ...row, pillar: classifyPillar(row) })),
-    {
-      todayCounts: mix.counts,
-      maxPerDay: pillarMaxPerDay(),
-      previousPillar: mix.previousPillar,
-      enabled: quotaOn,
-    },
-  );
+  if (!configuredPageFilter) return [];
+  const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
 
-  let candidateId = queued?.id;
-  if (!candidateId) {
-    const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
-    const [stale] = await db.select({ id: articles.id })
+  // PopBeez (entertainment) is assembled as one ordered Feed roundup. Pillars
+  // provide a soft diversity preference only; no mix is rejected as a rule.
+  let selectedIds: string[] = [];
+  if (configuredPages.includes("entertainment")) {
+    const rows = await db.select({ id: articles.id, title: articles.title, category: articles.category, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls, manualImageUrls: articles.manualImageUrls })
       .from(articles)
-      .where(and(eq(articles.status, "processing"), configuredPageFilter, lt(articles.updatedAt, staleBefore)))
-      .orderBy(asc(articles.updatedAt))
+      .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "entertainment")))
+      .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
+      .limit(30);
+    const eligibleRows = rows.filter((row) => selectedRoundupImage(row));
+    const selection = selectRoundup(eligibleRows.map((row) => ({ ...row, pillar: classifyPillar(row) })));
+    selectedIds = selection?.map((row) => row.id) ?? [];
+    // Three queued stories are held for the minimum four-card treatment. Keep
+    // other configured Pages moving rather than blocking their queue as well.
+  }
+  if (!selectedIds.length && configuredPages.includes("news")) {
+    const [news] = await db.select({ id: articles.id })
+      .from(articles)
+      .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "news")))
+      .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
       .limit(1);
-    if (stale?.id) {
-      const staleId = stale.id;
-      const [processingArticle] = await db.select({ sourcePublishedAt: articles.sourcePublishedAt, createdAt: articles.createdAt })
-        .from(articles).where(eq(articles.id, staleId)).limit(1);
-      if (processingArticle && isQueueItemExpired(processingArticle.sourcePublishedAt ?? processingArticle.createdAt, now)) {
-        await db.update(articles)
-          .set({ status: "expired", errorMessage: expiredMessage, updatedAt: now })
-          .where(and(eq(articles.id, staleId), eq(articles.status, "processing")));
-      } else {
-        await db.update(articles)
-          .set({ status: "queued", updatedAt: now })
-          .where(and(eq(articles.id, staleId), eq(articles.status, "processing")));
-        candidateId = staleId;
-      }
-    }
+    if (news) selectedIds = [news.id];
   }
 
-  if (!candidateId) return null;
-  const [claimed] = await db.update(articles)
-    .set({ status: "processing", updatedAt: new Date(), errorMessage: null })
-    .where(and(eq(articles.id, candidateId), eq(articles.status, "queued")))
+  if (!selectedIds.length) {
+    // Recover a stale claim as a whole batch, never leaving roundup companions
+    // stranded in `processing` if the worker died before publishing.
+    const [stale] = await db.select({ id: articles.id, facebookPostId: articles.facebookPostId })
+      .from(articles)
+      .where(and(eq(articles.status, "processing"), configuredPageFilter, lt(articles.updatedAt, staleBefore)))
+      .orderBy(asc(articles.updatedAt)).limit(1);
+    if (stale?.id) {
+      const claimGroup = stale.facebookPostId?.startsWith("claim:")
+        ? eq(articles.facebookPostId, stale.facebookPostId)
+        : eq(articles.id, stale.id);
+      const staleProcessing = and(eq(articles.status, "processing"), configuredPageFilter, lt(articles.updatedAt, staleBefore), claimGroup);
+      await db.update(articles)
+        .set({ status: "expired", errorMessage: expiredMessage, facebookPostId: null, updatedAt: new Date() })
+        .where(and(staleProcessing, isExpiredByAge));
+      await db.update(articles)
+        .set({ status: "queued", facebookPostId: null, updatedAt: new Date() })
+        .where(staleProcessing);
+    }
+    return [];
+  }
+
+  const claimedRows = await db.update(articles)
+    .set({ status: "processing", facebookPostId: `claim:${selectedIds[0]}`, updatedAt: new Date(), errorMessage: null })
+    .where(and(inArray(articles.id, selectedIds), eq(articles.status, "queued")))
     .returning();
-  return claimed ?? null;
+  const byId = new Map(claimedRows.map((row) => [row.id, row]));
+  // Only publish a complete claimed group. If another worker raced the claim,
+  // release any partial claim and wait for the next cycle.
+  if (claimedRows.length !== selectedIds.length) {
+    if (claimedRows.length) {
+      await db.update(articles).set({ status: "queued", facebookPostId: null, updatedAt: new Date() })
+        .where(and(inArray(articles.id, claimedRows.map((row) => row.id)), eq(articles.status, "processing")));
+    }
+    return [];
+  }
+  return selectedIds.map((id) => byId.get(id)!);
 }
 
 async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
@@ -139,25 +130,30 @@ async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: st
   const cutoff = new Date(now - policy.maxPerHour * 60 * 60 * 1000);
   const db = getDb();
   const [facebookPublished, bufferQueued] = await Promise.all([
-    db.select({ occurredAt: articles.publishedAt })
+    db.select({ occurredAt: articles.publishedAt, postKey: sql<string>`coalesce(${articles.facebookPostId}, ${articles.id}::text)` })
       .from(articles)
       .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff), notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES])))
       .orderBy(desc(articles.publishedAt))
-      .limit(policy.maxPerHour),
-    db.select({ occurredAt: articles.updatedAt })
+      .limit(100),
+    db.select({ occurredAt: articles.updatedAt, postKey: sql<string>`coalesce(${articles.facebookPostId}, ${articles.id}::text)` })
       .from(articles)
       .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff), notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES])))
       .orderBy(desc(articles.updatedAt))
-      .limit(policy.maxPerHour),
+      .limit(100),
   ]);
-  const recent = [...facebookPublished, ...bufferQueued]
-    .filter((item): item is { occurredAt: Date } => item.occurredAt instanceof Date)
-    .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
+  const uniquePosts = new Map<string, Date>();
+  for (const item of [...facebookPublished, ...bufferQueued]) {
+    if (!(item.occurredAt instanceof Date)) continue;
+    const previous = uniquePosts.get(item.postKey);
+    if (!previous || item.occurredAt > previous) uniquePosts.set(item.postKey, item.occurredAt);
+  }
+  const recent = [...uniquePosts.values()]
+    .sort((a, b) => b.getTime() - a.getTime())
     .slice(0, policy.maxPerHour);
 
   // Daily ceiling: four posts per WITA day by default, matching the four configured slots.
   const todayRows = await getDb()
-    .select({ value: sql<number>`count(*)` })
+    .select({ value: sql<number>`count(distinct coalesce(${articles.facebookPostId}, ${articles.id}::text))` })
     .from(articles)
     .where(and(
       or(eq(articles.status, "published"), like(articles.facebookPostId, "buffer:%")),
@@ -174,11 +170,11 @@ async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: st
     };
   }
 
-  const lastPublishedAt = recent[0]?.occurredAt.getTime();
+  const lastPublishedAt = recent[0]?.getTime();
   const minimumGapAt = lastPublishedAt === undefined ? now : lastPublishedAt + policy.minimumGapMinutes * 60 * 1000;
   const oldestInWindow = recent[policy.maxPerHour - 1];
   const hourlyLimitAt = recent.length >= policy.maxPerHour && oldestInWindow
-    ? oldestInWindow.occurredAt.getTime() + 60 * 60 * 1000
+    ? oldestInWindow.getTime() + 60 * 60 * 1000
     : now;
   const nextAllowedAt = Math.max(minimumGapAt, hourlyLimitAt);
   if (nextAllowedAt <= now) return null;
@@ -224,6 +220,7 @@ async function writeGuardedCopy(
   article: Article,
   logStage: (stage: string) => void,
   strictFirstDraft: boolean,
+  roundupArticles: Article[] = [],
 ): Promise<{ copy: GeneratedCopy; originality: OriginalityReport; drafts: number; pillar: Pillar }> {
   const maxDrafts = originalityMaxAttempts();
   const voice = pickEditorialVoice(article.id);
@@ -231,7 +228,7 @@ async function writeGuardedCopy(
     caption: copy.caption,
     take: copy.take,
     question: copy.question,
-    sourceText: article.rawText,
+    sourceText: (roundupArticles.length ? roundupArticles : [article]).map((story) => `${story.originalTitle}\n${story.rawText}`).join("\n\n"),
     title: article.originalTitle,
   });
 
@@ -246,6 +243,7 @@ async function writeGuardedCopy(
     budgetMs: AI_DRAFT_BUDGET_MS,
     voice,
     pillar,
+    ...(roundupArticles.length > 1 ? { roundupArticles: roundupArticles.map((story) => ({ title: story.originalTitle, sourceName: story.sourceName, category: story.category, rawText: story.rawText })) } : {}),
   });
   let originality = score(copy);
   let drafts = 1;
@@ -264,6 +262,7 @@ async function writeGuardedCopy(
         feedback: originality.reasons.join(" "),
         budgetMs: AI_DRAFT_BUDGET_MS,
         voice,
+        ...(roundupArticles.length > 1 ? { roundupArticles: roundupArticles.map((story) => ({ title: story.originalTitle, sourceName: story.sourceName, category: story.category, rawText: story.rawText })) } : {}),
       });
       copy = rewritten;
       originality = score(rewritten);
@@ -310,7 +309,8 @@ export async function runNewsPipeline(): Promise<RunResult> {
   const db = getDb();
   const pause = await getPublishingPause();
   if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
-  const article = await claimNextArticle();
+  const claimedArticles = await claimNextArticles();
+  const article = claimedArticles[0];
   if (!article) {
     const [blocked] = await db.select({ pageKey: articles.pageKey })
       .from(articles)
@@ -321,9 +321,17 @@ export async function runNewsPipeline(): Promise<RunResult> {
     if (missingChannel.length) {
       return { result: "failed", detail: `Artikel tetap di antrean: ${missingChannel.join(", ")} belum diatur untuk Page ini.` };
     }
+    const [popbeezQueued] = await db.select({ value: sql<number>`count(*)` }).from(articles)
+      .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "entertainment")));
+    if (Number(popbeezQueued?.value ?? 0) === 3) {
+      return { result: "idle", detail: "PopBeez menunggu satu artikel lagi untuk memenuhi carousel roundup minimum 4 gambar." };
+    }
     return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
   }
 
+  const isRoundup = article.pageKey === "entertainment" && claimedArticles.length >= 4;
+  const roundupArticles = isRoundup ? claimedArticles : [];
+  const articleIds = claimedArticles.map((story) => story.id);
   const directFacebook = usesDirectFacebookPublishing(article.pageKey);
 
   // Validate the publish channel for this specific page before spending an AI call.
@@ -331,7 +339,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
   if (channelGaps.length) {
     await db.update(articles)
       .set({ status: "queued", facebookPostId: null, updatedAt: new Date() })
-      .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
+      .where(and(inArray(articles.id, articleIds), eq(articles.status, "processing")));
     return {
       result: "failed",
       articleId: article.id,
@@ -344,7 +352,8 @@ export async function runNewsPipeline(): Promise<RunResult> {
   let publishProvider: "buffer" | "facebook" | null = null;
   let publishPostId: string | null = null;
   let publishMediaFormat: "single" | "carousel" | null = null;
-  let carouselSlides: [string, string, string] | null = null;
+  let carouselSlides: string[] | null = null;
+  const postFormat = isRoundup ? "carousel" : article.pageKey === "entertainment" ? "single" : article.postFormat;
   const pendingPrefix = directFacebook ? "facebook:pending" : "buffer:pending";
 
   try {
@@ -352,13 +361,13 @@ export async function runNewsPipeline(): Promise<RunResult> {
     // A retried article that was previously held by the originality guard gets the
     // stricter brief, so the rewrite is less likely to fail the same way again.
     const retryingHeldCopy = Boolean(article.errorMessage?.startsWith("Ditahan oleh penjaga orisinalitas"));
-    const { copy, originality, drafts, pillar } = await writeGuardedCopy(article, logStage, retryingHeldCopy);
+    const { copy, originality, drafts, pillar } = await writeGuardedCopy(article, logStage, retryingHeldCopy, roundupArticles);
     logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} drafts=${drafts} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
 
     if (isQueueItemExpired(article.sourcePublishedAt ?? article.createdAt)) {
       await db.update(articles)
         .set({ status: "expired", errorMessage: `Berita dikeluarkan dari antrean karena sudah lebih dari ${MAX_QUEUE_AGE_HOURS} jam sejak terbit.`, updatedAt: new Date() })
-        .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
+        .where(and(inArray(articles.id, articleIds), eq(articles.status, "processing")));
       return { result: "idle", articleId: article.id, detail: "Berita melewati batas usia 7 jam saat diproses dan dikeluarkan dari antrean." };
     }
     if (originalityBlocked(originality)) {
@@ -370,7 +379,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
           errorMessage: `Ditahan oleh penjaga orisinalitas setelah ${drafts} percobaan (skor ${originality.score}/100). ${originality.reasons.join(" ")}`.slice(0, 1_000),
           updatedAt: new Date(),
         })
-        .where(and(eq(articles.id, article.id), eq(articles.status, "processing")));
+        .where(and(inArray(articles.id, articleIds), eq(articles.status, "processing")));
       await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
       return {
         result: "failed",
@@ -379,20 +388,24 @@ export async function runNewsPipeline(): Promise<RunResult> {
         detail: `Ditahan setelah ${drafts} percobaan: orisinalitas ${originality.score}/100. ${originality.reasons[0]}`,
       };
     }
-    const sourceLinkTarget = article.pageKey === "entertainment"
-      ? indonesianTranslationUrl(article.sourceUrl)
-      : article.sourceUrl;
-    const shareLink = await shortenArticleUrl(sourceLinkTarget, article.id);
+    const sourceStories = isRoundup ? roundupArticles : [article];
+    const sourceLinks = await Promise.all(sourceStories.map(async (story) => {
+      const target = story.pageKey === "entertainment" ? indonesianTranslationUrl(story.sourceUrl) : story.sourceUrl;
+      return { name: story.sourceName, url: await shortenArticleUrl(target, story.id) };
+    }));
+    const sourceBlock = sourceLinks.map((source, index) => `${index + 1}. ${source.name}: ${source.url}`).join("\n");
     const followLink = article.pageKey === "entertainment"
       ? "\n\nIkuti PopBeez: https://www.facebook.com/portalbeez\nFollow juga Instagram: https://www.instagram.com/popbeez.hive/"
       : "";
-    // Direct Graph posts keep the caption link-free so Meta does not suppress reach;
-    // the source link is posted as the first comment right after publishing.
+    // Direct Graph posts keep caption links out of the post; ordered sources go
+    // into the first comment. Buffer captions retain an ordered source list.
     const caption = directFacebook
-      ? `${copy.caption}\n\n📰 ${article.sourceName}`
-      : `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${shareLink}${followLink}`;
-    const firstComment = directFacebook ? `🔗 Sumber: ${shareLink}${followLink}` : "";
-    carouselSlides = article.postFormat === "carousel" ? copy.carouselSlides : null;
+      ? copy.caption
+      : isRoundup
+        ? `${copy.caption}\n\n📰 Sumber:\n${sourceBlock}${followLink}`
+        : `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${sourceLinks[0]!.url}${followLink}`;
+    const firstComment = directFacebook ? `📰 Sumber:\n${sourceBlock}${followLink}` : "";
+    carouselSlides = isRoundup ? copy.carouselSlides : postFormat === "carousel" ? copy.carouselSlides : null;
     // `pillar` lives in migration 0015. If that SQL has not been run yet the write
     // would fail and a finished article would never publish, so fall back to the
     // same row without the pillar instead of losing the post.
@@ -400,6 +413,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
       title: copy.title,
       caption,
       carouselSlides,
+      postFormat,
       status: "ready" as const,
       facebookPostId: `${pendingPrefix}:${article.id}`,
       updatedAt: new Date(),
@@ -416,18 +430,29 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .set(readyRow)
         .where(eq(articles.id, article.id));
     }
+    if (articleIds.length > 1) {
+      await db.update(articles).set({
+        status: "ready",
+        postFormat,
+        facebookPostId: `${pendingPrefix}:${article.id}`,
+        updatedAt: new Date(),
+      }).where(inArray(articles.id, articleIds));
+    }
     await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
 
     const appUrl = getPublicAppUrl();
-    const imageUrls = article.postFormat === "carousel"
-      ? Array.from({ length: 4 }, (_, index) => `${appUrl}/api/og/${article.id}?slide=${index + 1}`)
-      : [`${appUrl}/api/og/${article.id}`];
-    logStage(`publish-start provider=${directFacebook ? "facebook" : "buffer"} format=${article.postFormat} assets=${imageUrls.length}`);
+    const imageUrls = isRoundup
+      ? roundupSlideUrls(appUrl, article.id, articleIds)
+      : postFormat === "carousel"
+        ? Array.from({ length: 4 }, (_, index) => `${appUrl}/api/og/${article.id}?slide=${index + 1}`)
+        : [`${appUrl}/api/og/${article.id}`];
+    logStage(`publish-start provider=${directFacebook ? "facebook" : "buffer"} format=${postFormat} assets=${imageUrls.length}`);
     const result = await publishPost({
       pageKey: article.pageKey,
       imageUrl: imageUrls[0]!,
       imageUrls,
       caption,
+      strictCarousel: isRoundup,
     });
     publishProvider = result.provider;
     publishPostId = result.postId;
@@ -440,13 +465,13 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .set({
           status: "published",
           postFormat: result.mediaFormat,
-          carouselSlides: result.mediaFormat === "carousel" ? carouselSlides : null,
           facebookPostId: result.postId,
           publishedAt: new Date(),
           updatedAt: new Date(),
           errorMessage: null,
         })
-        .where(eq(articles.id, article.id));
+        .where(inArray(articles.id, articleIds));
+      if (isRoundup) await db.update(articles).set({ carouselSlides }).where(eq(articles.id, article.id));
       logStage("facebook-published");
 
       if (firstComment) {
@@ -496,8 +521,10 @@ export async function runNewsPipeline(): Promise<RunResult> {
     // Buffer menerima konten ke antreannya; Facebook akan menerbitkannya pada slot jadwal Buffer.
     // Gunakan prefix untuk membedakan ID Buffer dari ID posting Facebook lama tanpa migrasi schema.
     await db.update(articles)
-      .set({ status: "ready", postFormat: result.mediaFormat, carouselSlides: result.mediaFormat === "carousel" ? carouselSlides : null, facebookPostId: `buffer:${result.postId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
-      .where(eq(articles.id, article.id));
+      .set({ status: "ready", postFormat: result.mediaFormat, facebookPostId: `buffer:${result.postId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
+      .where(inArray(articles.id, articleIds));
+    if (isRoundup) await db.update(articles).set({ carouselSlides }).where(eq(articles.id, article.id));
+    else await db.update(articles).set({ carouselSlides: result.mediaFormat === "carousel" ? carouselSlides : null }).where(eq(articles.id, article.id));
     logStage("tracking-saved");
 
     return { result: "queued", articleId: article.id, title: copy.title, detail: "Konten masuk ke antrean Buffer untuk dijadwalkan." };
@@ -515,14 +542,16 @@ export async function runNewsPipeline(): Promise<RunResult> {
         await db.update(articles)
           .set({
             status: provider === "facebook" && publishPostId ? "published" : "ready",
-            postFormat: publishMediaFormat ?? article.postFormat,
-            carouselSlides: (publishMediaFormat ?? article.postFormat) === "carousel" ? carouselSlides : null,
+            postFormat: publishMediaFormat ?? postFormat,
             facebookPostId: trackingReference,
             publishedAt: provider === "facebook" && publishPostId ? new Date() : null,
             errorMessage: outcomeUnknown ? `${message} Status tertunda untuk mencegah pengiriman duplikat.`.slice(0, 1_000) : null,
             updatedAt: new Date(),
           })
-          .where(eq(articles.id, article.id));
+          .where(inArray(articles.id, articleIds));
+        if (isRoundup && trackingReference.includes(":pending:")) {
+          await db.update(articles).set({ carouselSlides }).where(eq(articles.id, article.id));
+        }
         trackingRecovered = true;
       } catch (trackingError) {
         console.error(`[pipeline] tracking-recovery-failed article=${article.id}:`, trackingError instanceof Error ? trackingError.message : trackingError);
@@ -547,7 +576,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
 
     await db.update(articles)
       .set({ status: "failed", facebookPostId: null, attempts: article.attempts + 1, errorMessage: message.slice(0, 1_000), updatedAt: new Date() })
-      .where(and(eq(articles.id, article.id), or(eq(articles.status, "processing"), eq(articles.status, "ready"))));
+      .where(and(inArray(articles.id, articleIds), or(eq(articles.status, "processing"), eq(articles.status, "ready"))));
     logStage("failed");
     console.error(`[pipeline] artikel ${article.id}:`, message);
     return { result: "failed", articleId: article.id, detail: message };

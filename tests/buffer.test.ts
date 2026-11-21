@@ -96,6 +96,22 @@ test("falls back to a single image only after Buffer definitively rejects multip
   });
 });
 
+test("strict roundup carousel never falls back to one image with a multi-story caption", async () => {
+  await withBufferEnvironment(async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ data: { createPost: { __typename: "InvalidInputError", message: "Multiple images are not supported for this channel." } } }), { status: 200 });
+    }) as typeof fetch;
+    const urls = [1, 2, 3, 4].map((slide) => `https://news.example.test/api/og/article-1?slide=${slide}`);
+    await assert.rejects(
+      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: urls[0]!, imageUrls: urls, caption: "Roundup caption", strictCarousel: true }),
+      /Multiple images are not supported/,
+    );
+    assert.equal(calls, 1);
+  });
+});
+
 test("lists Buffer channels with read-only GraphQL requests", async () => {
   await withBufferEnvironment(async () => {
     let callCount = 0;
