@@ -37,6 +37,13 @@ function witaDayStart(now: Date): Date {
  * ran last. Used to avoid three breaking-news posts in a row — the exact pattern
  * that buried the first week of content.
  */
+/** Postgres 42703 when a migration has not been applied yet. */
+function isMissingColumnError(error: unknown, column: string): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (code === "42703" || /does not exist/i.test(message)) && message.includes(column);
+}
+
 async function pillarContext(now: Date): Promise<{ counts: Partial<Record<Pillar, number>>; previousPillar: Pillar | null }> {
   const rows = await getDb()
     .select({ title: articles.title, category: articles.category })
@@ -386,18 +393,29 @@ export async function runNewsPipeline(): Promise<RunResult> {
       : `${copy.caption}\n\n📰 ${article.sourceName}\n🔗 Sumber: ${shareLink}${followLink}`;
     const firstComment = directFacebook ? `🔗 Sumber: ${shareLink}${followLink}` : "";
     carouselSlides = article.postFormat === "carousel" ? copy.carouselSlides : null;
-    await db.update(articles)
-      .set({
-        title: copy.title,
-        caption,
-        carouselSlides,
-        pillar,
-        status: "ready",
-        facebookPostId: `${pendingPrefix}:${article.id}`,
-        updatedAt: new Date(),
-        errorMessage: null,
-      })
-      .where(eq(articles.id, article.id));
+    // `pillar` lives in migration 0015. If that SQL has not been run yet the write
+    // would fail and a finished article would never publish, so fall back to the
+    // same row without the pillar instead of losing the post.
+    const readyRow = {
+      title: copy.title,
+      caption,
+      carouselSlides,
+      status: "ready" as const,
+      facebookPostId: `${pendingPrefix}:${article.id}`,
+      updatedAt: new Date(),
+      errorMessage: null,
+    };
+    try {
+      await db.update(articles)
+        .set({ ...readyRow, pillar })
+        .where(eq(articles.id, article.id));
+    } catch (error) {
+      if (!isMissingColumnError(error, "pillar")) throw error;
+      logStage("pillar-column-missing: jalankan drizzle/0015_content_pillars.sql");
+      await db.update(articles)
+        .set(readyRow)
+        .where(eq(articles.id, article.id));
+    }
     await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
 
     const appUrl = getPublicAppUrl();
