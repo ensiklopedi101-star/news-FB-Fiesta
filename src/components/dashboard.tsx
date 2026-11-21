@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
+import { PILLARS, classifyPillar } from "@/lib/pillars";
 
 type Feed = {
   id: string;
@@ -62,7 +63,8 @@ type DashboardData = {
   readyToPublish: boolean;
   integrations: Record<string, boolean>;
   aiModels: { groq: string; gemini: string };
-  schedule: { maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
+  schedule: { maxPerDay: number; maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
+  pillars?: { enabled: boolean; maxPerDay: number; list: Array<{ id: string; label: string; summary: string; share: string }> };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
   originality: { schemaReady: boolean; threshold: number; scored: number; average: number; safe: number; watch: number; risky: number; held: number };
   reels: {
@@ -161,8 +163,8 @@ const TAB_STORAGE_KEY = "popbeez-dashboard-tab";
 
 /** One line under the tab bar so each tab explains itself without scrolling. */
 const TAB_HINTS: Record<DashboardTab, string> = {
-  overview: "Statistik, kesiapan layanan, dan jadwal slot tayang.",
-  queue: "Artikel yang masih menunggu dikirim. Panen RSS dan tombol Terbitkan ada di sini.",
+  overview: "Statistik, kesiapan layanan, kuota harian, dan jadwal slot tayang.",
+  queue: "Artikel yang masih menunggu dikirim. Maksimal 3 post/hari (pagi · sore · malam) dengan pilar yang bergantian.",
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
   manual: "Susun review mingguan enam slide sendiri.",
@@ -591,6 +593,7 @@ export default function Dashboard() {
           <span className={`tag ${article.pageKey}`}>{pageLabel(article.pageKey)}</span>
           <span className={`status-tag ${article.status}`}>{articleStatusLabel(article)}</span>
           <span className={`format-tag ${article.postFormat}`}>{isManualReview ? article.postFormat === "carousel" ? "Review · 6 slide" : "Review · cover saja" : article.postFormat === "carousel" ? "Carousel · 4 slide" : "Satu gambar"}</span>
+          {!isManualReview && <span className="status-tag pillar-tag" title={PILLARS[classifyPillar(article)].summary}>{PILLARS[classifyPillar(article)].label}</span>}
           {article.editorialVoice && <span className="status-tag voice-tag">{voiceLabelOf(article)}</span>}
           {article.originalityScore > 0 && <span className={`status-tag originality-${article.originalityNotes?.band ?? "watch"}`} title={article.originalityNotes?.reasons.join(" ") ?? ""}>Orisinalitas {article.originalityScore}</span>}
           {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
@@ -695,7 +698,7 @@ export default function Dashboard() {
       <section className="panel readiness-panel">
         <div className="panel-heading"><div><p className="eyebrow">PEMERIKSAAN LAYANAN</p><h2>Apa yang sudah siap?</h2></div><span className="muted">Refresh otomatis tiap menit</span></div>
         <div className="check-grid">{Object.entries(integrationLabels).map(([key, label]) => <div className="check-item" key={key}><span className={checks[key] ? "check-dot good" : "check-dot"} />{label}<strong>{checks[key] ? "Siap" : "Belum"}</strong></div>)}</div>
-        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. {data?.schedule.maxPerHour ?? 5} pengiriman/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 12} menit. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
+        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. <b>{data?.schedule.maxPerDay ?? 3} post/hari</b> (pagi · sore · malam), {data?.schedule.maxPerHour ?? 1} post/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 240} menit. Kuota ini sengaja kecil supaya setiap post dapat jam pertama yang bersih. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
         <div className="slot-row">
           <div className="slot-head">
             <strong>{publishSchedule?.enabled ? (publishSchedule.active ? `Jendela aktif: slot ${publishSchedule.activeSlot} WITA` : "Di luar jadwal tayang") : "Jadwal slot dimatikan"}</strong>
@@ -706,6 +709,26 @@ export default function Dashboard() {
         </div>
         {feedPages.size > 0 && [...feedPages].some((key) => key === "news" || key === "entertainment") && (
           <p className="muted small-note">Halaman tujuan aktif: {[...feedPages].map((key) => key === "news" ? "Berita" : "Hiburan").join(" · ")}</p>
+        )}
+        {data?.pillars?.list && (
+          <div className="pillar-block">
+            <div className="pillar-head">
+              <strong>Pilar konten</strong>
+              <span className="muted small-note">
+                {data.pillars.enabled
+                  ? `Maksimal ${data.pillars.maxPerDay} post per pilar per hari, pilar tidak berulang dua kali berturut-turut.`
+                  : "Kuota pilar dimatikan (PILLARS_ENABLED=0)."}
+              </span>
+            </div>
+            <div className="pillar-strip">
+              {data.pillars.list.map((pillar) => (
+                <span className="pillar-chip" key={pillar.id} title={pillar.summary}>
+                  <b>{pillar.label}</b>
+                  <i>{pillar.share}</i>
+                </span>
+              ))}
+            </div>
+          </div>
         )}
       </section>
       </>)}

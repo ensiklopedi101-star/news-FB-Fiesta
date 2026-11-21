@@ -1,11 +1,23 @@
 import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import sharp from "sharp";
 import { ensureBundledFonts } from "@/lib/og-card";
+import { circularLogoBuffer } from "@/lib/logo-circle";
+import { POWERED_BY } from "@/lib/brand";
 import type { ReelScene } from "@/lib/reel-script";
 
 /** Vertical Reels canvas. */
 export const REEL_WIDTH = 1080;
 export const REEL_HEIGHT = 1920;
+
+/**
+ * Reel palette follows the card palette: PopBeez pink, HIVECOMP yellow and the
+ * near-black ink the news cards use, so a Reel and its feed card look like one brand.
+ */
+const PINK = "#f20b55";
+const YELLOW = "#ffd12e";
+const INK = "#08080a";
 
 export type ReelFrameOptions = {
   brand: string;
@@ -13,6 +25,8 @@ export type ReelFrameOptions = {
   /** Small tag on the frame; the audience name by default. */
   voiceLabel: string;
   sourceName: string;
+  /** Shown as a quiet second handle so the Reel works on both apps. */
+  facebookHandle?: string;
 };
 
 const EMOJI_PATTERN = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu;
@@ -50,56 +64,132 @@ function wrapWords(value: string, maxCharacters: number): string[] {
   return lines;
 }
 
-/** Big sentence, sized down as it gets longer so it always fits the frame. */
+/** Usable text width between the frame gutters. */
+const TEXT_WIDTH = REEL_WIDTH - 144;
+/** DejaVu Sans Bold averages ~0.7 em per character; uppercase runs a little wider. */
+const CHARACTER_EM = 0.72;
+const MAX_BLOCK_HEIGHT = 880;
+
+/**
+ * Big sentence, sized down as it gets longer so it always fits the frame. Wrapping
+ * and font size are derived from the same estimate, so a long uppercase headline can
+ * never run past the gutter. Among the sizes that fit, the one with the fewest lines
+ * wins, which keeps short hooks from breaking into three lonely lines.
+ */
 function sentenceBlock(text: string): { lines: string[]; fontSize: number; lineHeight: number } {
   const length = text.length;
-  if (length <= 70) return { lines: wrapWords(text, 22), fontSize: 78, lineHeight: 96 };
-  if (length <= 120) return { lines: wrapWords(text, 26), fontSize: 66, lineHeight: 82 };
-  if (length <= 190) return { lines: wrapWords(text, 30), fontSize: 56, lineHeight: 70 };
-  return { lines: wrapWords(text, 34), fontSize: 48, lineHeight: 60 };
+  const base = length <= 70 ? 82 : length <= 120 ? 70 : length <= 190 ? 58 : 48;
+  let best: { lines: string[]; fontSize: number } | undefined;
+  for (let fontSize = base; fontSize >= 44; fontSize -= 4) {
+    const charsPerLine = Math.max(12, Math.floor(TEXT_WIDTH / (fontSize * CHARACTER_EM)));
+    const lines = wrapWords(text, charsPerLine);
+    const widest = lines.reduce((widest, line) => Math.max(widest, line.length), 0);
+    const fits = widest * fontSize * CHARACTER_EM <= TEXT_WIDTH
+      && lines.length * fontSize * 1.2 <= MAX_BLOCK_HEIGHT;
+    if (!fits) continue;
+    if (!best || lines.length < best.lines.length) best = { lines, fontSize };
+    if (lines.length <= 2) break;
+  }
+  if (!best) {
+    const fontSize = 40;
+    const charsPerLine = Math.max(12, Math.floor(TEXT_WIDTH / (fontSize * CHARACTER_EM)));
+    best = { lines: wrapWords(text, charsPerLine), fontSize };
+  }
+  return { lines: best.lines, fontSize: best.fontSize, lineHeight: Math.round(best.fontSize * 1.2) };
 }
 
-/** One 1080×1920 frame: brand lockup, the sentence, and the source footer. */
+const LOGO_SIZE = 108;
+const logoCache = new Map<string, Promise<Buffer>>();
+
+/** The page logo, always a real circle, cached per page. */
+function reelLogo(brand: string): Promise<Buffer> {
+  const file = brand.toLowerCase().includes("nusa") ? "nusabeez_icon.png" : "popbeez_icon.png";
+  let pending = logoCache.get(file);
+  if (!pending) {
+    pending = readFile(resolve(process.cwd(), "public/brand", file))
+      .then((buffer) => circularLogoBuffer(buffer, LOGO_SIZE));
+    logoCache.set(file, pending);
+  }
+  return pending;
+}
+
+/**
+ * One 1080×1920 frame: circular page logo, brand lockup, the sentence, the source
+ * footer, and the HIVECOMP credit — the same brand furniture as the feed cards.
+ */
 export async function renderReelFrame(scene: ReelScene, options: ReelFrameOptions, index: number): Promise<Buffer> {
   await ensureBundledFonts();
   const text = screenText(scene.text).slice(0, 260);
   const { lines, fontSize, lineHeight } = sentenceBlock(text);
   const blockHeight = lines.length * lineHeight;
-  const startY = (REEL_HEIGHT - blockHeight) / 2 + lineHeight * 0.72;
+  // Sit the sentence slightly above centre so the footer never crowds it.
+  const startY = (REEL_HEIGHT - blockHeight) / 2 - 40 + lineHeight * 0.72;
 
   const body = lines.length
     ? lines
-      .map((line, lineIndex) => `<text x="${REEL_WIDTH / 2}" y="${Math.round(startY + lineIndex * lineHeight)}" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff">${escapeXml(line)}</text>`)
+      .map((line, lineIndex) => `<text x="${REEL_WIDTH / 2}" y="${Math.round(startY + lineIndex * lineHeight)}" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="800" fill="#ffffff">${escapeXml(line)}</text>`)
       .join("")
     : "";
 
+  const voiceLabel = screenText(options.voiceLabel).slice(0, 28) || "BEEZERS";
+  const pillWidth = Math.min(430, 46 + voiceLabel.length * 15);
+  const pillX = REEL_WIDTH - 72 - pillWidth;
+  const brand = screenText(options.brand).toUpperCase().slice(0, 18);
+  const facebookHandle = options.facebookHandle ? screenText(options.facebookHandle).slice(0, 34) : "";
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${REEL_WIDTH}" height="${REEL_HEIGHT}" viewBox="0 0 ${REEL_WIDTH} ${REEL_HEIGHT}">
     <defs>
-      <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
-        <stop offset="0" stop-color="#080d12"/>
-        <stop offset="0.55" stop-color="#0d1a22"/>
-        <stop offset="1" stop-color="#05080b"/>
+      <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1">
+        <stop offset="0" stop-color="${INK}"/>
+        <stop offset="0.58" stop-color="#150810"/>
+        <stop offset="1" stop-color="#050507"/>
       </linearGradient>
-      <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#3ddc97"/>
-        <stop offset="1" stop-color="#2b9c74"/>
+      <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="${PINK}" stop-opacity="0.42"/>
+        <stop offset="1" stop-color="${PINK}" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="glow-yellow" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="${YELLOW}" stop-opacity="0.22"/>
+        <stop offset="1" stop-color="${YELLOW}" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="brandbar" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="${PINK}"/>
+        <stop offset="0.55" stop-color="${PINK}" stop-opacity="0.85"/>
+        <stop offset="1" stop-color="${YELLOW}"/>
       </linearGradient>
     </defs>
-    <rect width="${REEL_WIDTH}" height="${REEL_HEIGHT}" fill="url(#bg)"/>
-    <circle cx="${REEL_WIDTH - 90}" cy="180" r="320" fill="#3ddc97" fill-opacity="0.06"/>
-    <rect x="0" y="0" width="${REEL_WIDTH}" height="10" fill="url(#accent)"/>
 
-    <rect x="72" y="120" width="${Math.min(600, 34 + screenText(options.voiceLabel).length * 17)}" height="56" rx="28" fill="#ffffff" fill-opacity="0.10" stroke="#3ddc97" stroke-opacity="0.45" stroke-width="2"/>
-    <text x="98" y="157" font-family="DejaVu Sans, sans-serif" font-size="24" font-weight="700" fill="#9ff0cd">${escapeXml(screenText(options.voiceLabel).slice(0, 32))}</text>
-    <text x="${REEL_WIDTH - 72}" y="158" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" fill="#ffffff" fill-opacity="0.85">${escapeXml(options.brand)}</text>
+    <rect width="${REEL_WIDTH}" height="${REEL_HEIGHT}" fill="url(#bg)"/>
+    <circle cx="${REEL_WIDTH - 120}" cy="330" r="520" fill="url(#glow)"/>
+    <circle cx="140" cy="${REEL_HEIGHT - 260}" r="420" fill="url(#glow-yellow)"/>
+    <rect x="0" y="0" width="${REEL_WIDTH}" height="12" fill="url(#brandbar)"/>
+
+    <text x="206" y="184" font-family="DejaVu Sans, sans-serif" font-size="46" font-weight="900" letter-spacing="1.5" fill="#ffffff">${escapeXml(brand)}</text>
+    <text x="208" y="226" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="700" letter-spacing="4.2" fill="${YELLOW}" fill-opacity="0.9">FILM · DRAMA · MUSIK</text>
+
+    <rect x="${pillX}" y="146" width="${pillWidth}" height="54" rx="27" fill="${PINK}" fill-opacity="0.16" stroke="${PINK}" stroke-opacity="0.7" stroke-width="2"/>
+    <text x="${pillX + pillWidth / 2}" y="182" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="800" letter-spacing="1.6" fill="#ffd9e6">${escapeXml(voiceLabel)}</text>
 
     ${body}
 
-    <rect x="72" y="${REEL_HEIGHT - 250}" width="96" height="6" rx="3" fill="url(#accent)"/>
-    <text x="72" y="${REEL_HEIGHT - 190}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="700" fill="#ffffff" fill-opacity="0.78">${escapeXml(screenText(options.sourceName).slice(0, 40))}</text>
-    <text x="72" y="${REEL_HEIGHT - 146}" font-family="DejaVu Sans, sans-serif" font-size="24" font-weight="600" fill="#7fe3bb" fill-opacity="0.9">${escapeXml(options.handle)}</text>
-    <text x="${REEL_WIDTH - 72}" y="${REEL_HEIGHT - 146}" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="600" fill="#ffffff" fill-opacity="0.45">${index + 1}</text>
+    <text x="${REEL_WIDTH - 72}" y="1512" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="700" fill="#ffffff" fill-opacity="0.35">${String(index + 1).padStart(2, "0")}</text>
+
+    <path d="M72 1604H1008" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="72" y="1636" width="132" height="8" rx="4" fill="url(#brandbar)"/>
+    <text x="72" y="1700" font-family="DejaVu Sans, sans-serif" font-size="29" font-weight="700" fill="#ffffff" fill-opacity="0.82">${escapeXml(screenText(options.sourceName).slice(0, 42))}</text>
+    <text x="72" y="1754" font-family="DejaVu Sans, sans-serif" font-size="29" font-weight="900" fill="${YELLOW}">${escapeXml(options.handle)}</text>
+    ${facebookHandle
+      ? `<text x="72" y="1794" font-family="DejaVu Sans, sans-serif" font-size="20" font-weight="600" fill="#ffffff" fill-opacity="0.42">${escapeXml(facebookHandle)}</text>`
+      : ""}
+
+    <text x="1008" y="1726" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="500" letter-spacing="1.9" fill="#ffffff" fill-opacity="0.55">${escapeXml(POWERED_BY.prefix)}</text>
+    <text x="1008" y="1762" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="29" font-weight="900" letter-spacing="1.4"><tspan fill="#ffffff">${escapeXml(POWERED_BY.markWhite)}</tspan><tspan fill="${YELLOW}">${escapeXml(POWERED_BY.markAccent)}</tspan></text>
   </svg>`;
 
-  return sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer();
+  const logo = await reelLogo(options.brand).catch(() => undefined);
+  const base = sharp(Buffer.from(svg));
+  const composed = logo
+    ? await base.composite([{ input: logo, left: 72, top: 126 }]).png({ compressionLevel: 9 }).toBuffer()
+    : await base.png({ compressionLevel: 9 }).toBuffer();
+  return composed;
 }

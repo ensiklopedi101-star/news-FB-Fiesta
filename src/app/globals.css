@@ -48,4 +48,13 @@ button,input,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.
 .tab-badge.alert{background:#fff0ee;color:#b3423d}
 .tab-hint{margin:0 0 14px;color:#7d8c92;font-size:10px;line-height:1.6}
 @media(max-width:650px){.dashboard-tabs{position:static;border-radius:10px;padding:5px}.tab-button{font-size:10px;padding:8px 10px}.tab-hint{font-size:9px}}
+.pillar-block{margin-top:14px;padding-top:13px;border-top:1px solid #eef1ef;display:flex;flex-direction:column;gap:8px}
+.pillar-head{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.pillar-head strong{font-size:11px}
+.pillar-strip{display:flex;gap:6px;flex-wrap:wrap}
+.pillar-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border-radius:8px;background:#f4f8f5;border:1px solid #e6ece8}
+.pillar-chip b{font-size:10px;color:#2c4a3c}
+.pillar-chip i{font-style:normal;font-size:9px;color:#839a8d}
+.pillar-tag{background:#f3eefb;color:#6b4c96;text-transform:none;letter-spacing:0}
+@media(max-width:650px){.pillar-chip b{font-size:9px}}
 

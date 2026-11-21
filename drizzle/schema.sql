@@ -132,3 +132,6 @@ ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
 -- Re-mirror posts that are already live on Facebook to Instagram.
 ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
 ALTER TABLE "reels" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
+
+-- Content pillars so the publisher keeps the daily mix varied.
+ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "pillar" text;

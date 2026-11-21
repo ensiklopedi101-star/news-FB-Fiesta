@@ -2,7 +2,8 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNull, like, lt, notLike,
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { PUBLISH_POLICY } from "@/lib/schedule";
+import { publishPolicy } from "@/lib/schedule";
+import { PILLARS, pillarMaxPerDay, pillarQuotaEnabled } from "@/lib/pillars";
 import { slotStateAt } from "@/lib/publish-slots";
 import { quizIntervalDays, QUIZ_MAX_USES, QUIZ_SCHEDULE_LABEL, QUIZ_TILES } from "@/lib/quiz";
 import { minimumOriginalityScore } from "@/lib/originality";
@@ -235,7 +236,8 @@ export async function GET(request: NextRequest) {
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       originality,
       reels: reelsSummary,
-      schedule: PUBLISH_POLICY,
+      schedule: publishPolicy(),
+      pillars: { enabled: pillarQuotaEnabled(), maxPerDay: pillarMaxPerDay(), list: Object.values(PILLARS).map(({ id, label, summary, share }) => ({ id, label, summary, share })) },
       publishSchedule: slotStateAt(new Date()),
       quiz: {
         lastPostedAt: lastQuiz?.postedAt ?? null,
