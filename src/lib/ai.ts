@@ -60,11 +60,18 @@ export class AiGenerationError extends Error {
 type GeneratedDraft = { title?: unknown; paragraphs?: unknown; take?: unknown; narration?: unknown; question?: unknown; slidePoints?: unknown; roundupSummaries?: unknown; hashtags?: unknown };
 
 const AI_TOTAL_TIMEOUT_MS = 30_000;
-const AI_PROVIDER_TIMEOUT_MS = 8_000;
+const AI_PROVIDER_TIMEOUT_MS = 12_000;
 const AI_MIN_BUDGET_MS = 6_000;
 const AI_MAX_BUDGET_MS = 45_000;
 const GROQ_MODEL_PREFERENCES = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
 const GEMINI_MODEL_PREFERENCES = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"];
+const GEMINI_NON_TEXT_MODEL = /(?:image|tts|audio|embedding|aqa|robotics|live)/i;
+
+function isGeminiTextModel(model: string): boolean {
+  return /^gemini-.*(?:flash|lite)/i.test(model)
+    && !/(?:preview|latest)/i.test(model)
+    && !GEMINI_NON_TEXT_MODEL.test(model);
+}
 
 function modelCostRank(model: string): number {
   const id = model.toLowerCase();
@@ -111,11 +118,13 @@ async function selectGeminiModel(apiKey: string, timeoutMs: number): Promise<str
       .map((model) => model.name?.replace(/^models\//, ""))
       .filter((name): name is string => Boolean(name)));
     const discovered = [...available]
-      .filter((model) => /^gemini-.*(?:flash|lite)/i.test(model) && !/(?:preview|latest)/i.test(model))
+      .filter(isGeminiTextModel)
       .sort((left, right) => modelCostRank(left) - modelCostRank(right));
-    return [...new Set([preferred, ...GEMINI_MODEL_PREFERENCES, ...discovered].filter((model): model is string => Boolean(model)))].filter((model) => available.has(model));
+    return [...new Set([preferred, ...GEMINI_MODEL_PREFERENCES, ...discovered]
+      .filter((model): model is string => typeof model === "string" && isGeminiTextModel(model)))].filter((model) => available.has(model));
   } catch {
-    return [...new Set([preferred, ...GEMINI_MODEL_PREFERENCES].filter((model): model is string => Boolean(model)))];
+    return [...new Set([preferred, ...GEMINI_MODEL_PREFERENCES]
+      .filter((model): model is string => typeof model === "string" && isGeminiTextModel(model)))];
   }
 }
 
@@ -258,7 +267,9 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
       responseMimeType: "application/json",
       responseSchema: outputSchema,
       temperature: 0.35,
-      maxOutputTokens: 500,
+      // Roundups need one strict summary per story in addition to the full draft;
+      // 500 tokens can truncate valid responses before the JSON closes.
+      maxOutputTokens: roundupCount !== undefined ? 1_400 : 900,
       httpOptions: { timeout: timeoutMs },
     },
   });
@@ -281,7 +292,8 @@ async function generateWithGroq(apiKey: string, model: string, prompt: string, t
       ],
       response_format: { type: "json_object" },
       temperature: 0.35,
-      max_tokens: 500,
+      // Keep enough output budget for narration plus all ordered roundup summaries.
+      max_tokens: roundupCount !== undefined ? 1_400 : 900,
     }),
     signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",
