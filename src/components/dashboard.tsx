@@ -116,6 +116,12 @@ function pageLabel(pageKey: Feed["pageKey"]) {
   return pageKey === "news" ? "Berita" : "Hiburan";
 }
 
+function buildExternalReelPrompt(article: Article): string {
+  const narration = article.narrationScript?.trim() || article.editorialTake?.trim() || "";
+  const source = article.sourceUrl?.trim() || "Tidak tersedia";
+  return `Buat konsep dan video Reel untuk PopBeez berdasarkan artikel ini.\n\nJUDUL ARTIKEL: ${article.title}\nKATEGORI: ${article.category || "Hiburan"}\nSUMBER: ${article.sourceName || "Tidak diketahui"}\nTAUTAN SUMBER: ${source}\n\nNASKAH NARASI (gunakan persis; jangan menambah fakta):\n${narration}\n\nARAHAN PRODUKSI:\n- Format vertikal 9:16, resolusi 1080x1920, durasi sekitar 25–35 detik.\n- Susun visual mengikuti urutan narasi; pembuka harus menarik dalam 2 detik pertama, lalu tutup dengan pertanyaan atau ajakan diskusi yang sudah ada di naskah.\n- Gunakan Bahasa Indonesia untuk narasi dan subtitle. Jangan ubah makna, nama, angka, atau kutipan dalam naskah. Jangan mengarang fakta atau menampilkan klaim yang tidak didukung artikel.\n- Buat visual orisinal atau gunakan aset yang memang berlisensi. Jangan mengambil klip film/drama, foto selebritas, cuplikan acara, logo, atau musik berhak cipta tanpa izin. Jika visual nyata tidak tersedia, gunakan ilustrasi, tipografi sederhana, atau B-roll netral yang relevan; jangan menyamar sebagai rekaman kejadian nyata.\n- Jangan menggambar logo atau teks brand dengan AI. Sisakan ruang aman di bagian atas dan bawah untuk ditambahkan saat editing: logo lingkaran PopBeez, @popbeez.hive, kredit sumber, dan tulisan “powered by HIVECOMP”. Jangan tutupi elemen penting dengan subtitle.\n- Hasil akhir yang diinginkan: MP4 vertikal siap ditinjau redaksi. Sertakan juga daftar adegan singkat bila alat tidak dapat menghasilkan video langsung.\n\nSebelum dipublikasikan, cocokkan kembali isi video dengan artikel dan pastikan semua aset boleh digunakan.`;
+}
+
 function voiceLabelOf(article: Article) {
   const label = article.editorialVoice;
   if (!label) return "PopBeez";
@@ -169,7 +175,7 @@ const TAB_HINTS: Record<DashboardTab, string> = {
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
   manual: "Susun review mingguan enam slide sendiri.",
   quiz: "Kuis Tebak Drama dari poster review manual.",
-  reels: "Reel otomatis dari naskah narasi, plus suara Edge TTS.",
+  reels: "Pilih artikel hiburan dan salin prompt untuk membuat video dengan AI lain; render otomatis tersedia jika encoder disetel.",
   originality: "Penjaga orisinalitas: skor, opini redaksi, dan post yang ditahan.",
   setup: "Daftar environment variable, tes AI, dan tes Buffer.",
 };
@@ -191,6 +197,8 @@ export default function Dashboard() {
   const [bufferMappings, setBufferMappings] = useState<ApiResult["mappings"]>(undefined);
   const [aiDiagnostic, setAiDiagnostic] = useState<AiDiagnostic | null>(null);
   const [imageDrafts, setImageDrafts] = useState<Record<string, string>>({});
+  const [reelPromptArticleId, setReelPromptArticleId] = useState("");
+  const [reelPromptCopied, setReelPromptCopied] = useState(false);
   const [reviewHeadline, setReviewHeadline] = useState("");
   const [reviewMediaType, setReviewMediaType] = useState<ReviewMediaType>("DRAMA");
   const [reviewItems, setReviewItems] = useState<ReviewDraftItem[]>(() => Array.from({ length: 5 }, blankReviewItem));
@@ -408,6 +416,15 @@ export default function Dashboard() {
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyReelPrompt(article: Article) {
+    try {
+      await navigator.clipboard.writeText(buildExternalReelPrompt(article));
+      setReelPromptCopied(true);
+    } catch {
+      setReelPromptCopied(false);
     }
   }
 
@@ -643,6 +660,13 @@ export default function Dashboard() {
     );
   }
 
+  const reelPromptArticles = (data?.articles ?? []).filter((article) =>
+    article.pageKey === "entertainment" &&
+    Boolean(article.narrationScript?.trim()) &&
+    (article.status === "published" || article.status === "ready"),
+  );
+  const selectedReelPromptArticle = reelPromptArticles.find((article) => article.id === reelPromptArticleId) ?? reelPromptArticles[0];
+
   return (
     <main className="dashboard-shell">
       <header className="dashboard-header">
@@ -782,6 +806,23 @@ export default function Dashboard() {
 
       {activeTab === "reels" && (
       <section className="panel reels-panel">
+        <div className="reel-prompt-card">
+          <p className="eyebrow">BUAT VIDEO DENGAN AI LAIN</p>
+          <h3>Prompt Reel dari artikel</h3>
+          <p className="muted small-note">Pilih artikel hiburan yang sudah memiliki naskah narasi. Prompt disusun dari judul, kategori, sumber, dan naskah artikel agar bisa disalin ke layanan AI video pilihanmu. Fitur ini hanya menyiapkan prompt—tidak merender atau memposting video.</p>
+          {reelPromptArticles.length ? <>
+            <label className="reel-prompt-label">Pilih artikel
+              <select value={selectedReelPromptArticle?.id ?? ""} onChange={(event) => { setReelPromptArticleId(event.target.value); setReelPromptCopied(false); }}>
+                {reelPromptArticles.map((article) => <option key={article.id} value={article.id}>{article.title} · {article.status === "published" ? "sudah terbit" : "siap"}</option>)}
+              </select>
+            </label>
+            {selectedReelPromptArticle && <>
+              <textarea className="reel-prompt-textarea" aria-label="Prompt Reel yang bisa disalin" readOnly rows={18} value={buildExternalReelPrompt(selectedReelPromptArticle)} />
+              <button type="button" className="secondary-button" onClick={() => void copyReelPrompt(selectedReelPromptArticle)}>Salin prompt</button>
+              <span className="muted small-note" role="status">{reelPromptCopied ? "Prompt berhasil disalin—tempelkan ke AI video pilihanmu." : "Setelah video diunduh, tambahkan logo bulat PopBeez dan kredit HIVECOMP saat editing, lalu unggah manual ke Facebook Reels."}</span>
+            </>}
+          </> : <div className="empty-state"><strong>Belum ada artikel yang bisa dipilih.</strong><span>Prompt tersedia setelah artikel hiburan diproses dan memiliki naskah narasi.</span></div>}
+        </div>
         <div className="panel-heading"><div><p className="eyebrow">REELS &amp; SUARA</p><h2>Reel otomatis dari naskah narasi</h2><p className="muted small-note">Setiap artikel hiburan kini membawa naskah narasi 25–35 detik. Reels menyuarakannya dengan <b>Edge TTS</b> (gratis, tanpa API key — kuota Gemini tetap untuk penulisan dan kuis), menyusun frame 1080×1920, lalu mengunggah ke Facebook Reels. Maksimal satu Reel tiap <b>{data?.reels.minGapHours ?? 20} jam</b>.</p></div><span className={data?.reels.enabled ? "status-tag published" : "status-tag"}>{data?.reels.enabled ? "AKTIF" : "MATI"}</span></div>
         <div className="queue-counts"><span>{data?.reels.published ?? 0} Reel terbit</span><span>suara: {data?.reels.ttsVoice}</span><span>render: {data?.reels.renderMode}</span><span>naskah: {data?.reels.last?.frameCount ?? 0} frame</span></div>
         {data?.reels.last ? <div className="quiz-preview">

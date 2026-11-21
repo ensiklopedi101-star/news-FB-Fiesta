@@ -56,5 +56,13 @@ button,input,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.
 .pillar-chip b{font-size:10px;color:#2c4a3c}
 .pillar-chip i{font-style:normal;font-size:9px;color:#839a8d}
 .pillar-tag{background:#f3eefb;color:#6b4c96;text-transform:none;letter-spacing:0}
-@media(max-width:650px){.pillar-chip b{font-size:9px}}
+.reel-prompt-card{display:flex;flex-direction:column;gap:9px;padding:15px;margin:0 0 18px;border:1px solid #ead9e2;border-radius:10px;background:linear-gradient(135deg,#fff8fb,#fffdf3)}
+.reel-prompt-card h3{margin:0;font-size:15px;color:var(--ink)}
+.reel-prompt-card .eyebrow{margin:0;color:#b53b69}
+.reel-prompt-card .small-note{margin:0;line-height:1.55}
+.reel-prompt-label{display:flex;flex-direction:column;gap:5px;font-size:10px;font-weight:700;color:#536572}
+.reel-prompt-label select{width:100%;min-height:38px;border:1px solid #dbe3e1;border-radius:6px;background:#fff;padding:7px 10px;font-size:11px;color:var(--ink)}
+.reel-prompt-textarea{width:100%;min-height:300px;resize:vertical;border:1px solid #dbe3e1;border-radius:7px;background:#fff;padding:11px;font-family:inherit;font-size:11px;line-height:1.6;color:var(--ink)}
+.reel-prompt-card .secondary-button{align-self:flex-start;margin-top:0}
+@media(max-width:650px){.pillar-chip b{font-size:9px}.reel-prompt-card{padding:12px}.reel-prompt-textarea{min-height:340px}}
 
