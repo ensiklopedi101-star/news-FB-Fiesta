@@ -86,7 +86,7 @@ export type OriginalityInput = {
   take?: string;
   /** The discussion question. */
   question?: string;
-  /** Source material the caption was derived from. */
+  /** Source body text (without headlines that may be intentionally quoted for attribution). */
   sourceText: string;
   /** Source headline, excluded from the verbatim check as it is quoted for context. */
   title?: string;
@@ -95,7 +95,9 @@ export type OriginalityInput = {
 /** Scores how much of the caption is the Page's own work rather than the source's. */
 export function scoreOriginality(input: OriginalityInput): OriginalityReport {
   const captionWords = words(input.caption);
-  const sourceWords = words(`${input.title ?? ""} ${input.sourceText}`.slice(0, 6_000));
+  // Headlines are intentionally preserved in roundup captions for attribution;
+  // compare the generated copy against source body text, not the headline itself.
+  const sourceWords = words(input.sourceText.slice(0, 6_000));
   const captionShingles = shingles(captionWords, SHINGLE_SIZE);
   const sourceShingles = shingles(sourceWords, SHINGLE_SIZE);
 

@@ -228,7 +228,9 @@ async function writeGuardedCopy(
     caption: copy.caption,
     take: copy.take,
     question: copy.question,
-    sourceText: (roundupArticles.length ? roundupArticles : [article]).map((story) => `${story.originalTitle}\n${story.rawText}`).join("\n\n"),
+    // Roundup headlines are displayed verbatim by design; only compare captions
+    // with source bodies so those attributions don't trigger the verbatim guard.
+    sourceText: (roundupArticles.length ? roundupArticles : [article]).map((story) => story.rawText).join("\n\n"),
     title: article.originalTitle,
   });
 

@@ -14,6 +14,17 @@ const sourceText =
   "Drama Korea terbaru itu mencatat rating tertinggi sepanjang masa dengan 12,4 persen pada episode terakhirnya. " +
   "Produser menyebut musim kedua sedang dibahas dan pengambilan gambar akan dimulai tahun depan di Seoul.";
 
+test("judul sumber yang sengaja dipertahankan pada roundup tidak dihitung sebagai salinan isi", () => {
+  const headline = "Grup fiktif umumkan jadwal tur baru setelah menyelesaikan proses rekaman album studio mereka";
+  const report = scoreOriginality({
+    caption: `${headline} — ringkasan redaksi dengan susunan kata yang berbeda.`,
+    title: headline,
+    sourceText: "Isi artikel membahas rincian lain yang tidak muncul pada caption redaksi.",
+  });
+  assert.ok(report.longestRun < 8, `longestRun=${report.longestRun}`);
+  assert.equal(report.signals.noVerbatim, true);
+});
+
 test("caption yang menyalin sumber ditahan", () => {
   const report = scoreOriginality({
     caption: `${sourceText}\n\nMenurut kami drama ini bagus.\n\nKamu sudah menonton?`,
