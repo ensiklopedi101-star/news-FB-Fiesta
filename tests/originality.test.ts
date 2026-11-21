@@ -8,6 +8,7 @@ import {
   originalityMaxAttempts,
   scoreOriginality,
   shouldRetryForOriginality,
+  stripHeadlineFromSourceText,
 } from "@/lib/originality";
 
 const sourceText =
@@ -16,13 +17,15 @@ const sourceText =
 
 test("judul sumber yang sengaja dipertahankan pada roundup tidak dihitung sebagai salinan isi", () => {
   const headline = "Grup fiktif umumkan jadwal tur baru setelah menyelesaikan proses rekaman album studio mereka";
+  const scrapedBody = `${headline}. Isi artikel membahas rincian lain yang tidak muncul pada caption redaksi.`;
   const report = scoreOriginality({
     caption: `${headline} — ringkasan redaksi dengan susunan kata yang berbeda.`,
     title: headline,
-    sourceText: "Isi artikel membahas rincian lain yang tidak muncul pada caption redaksi.",
+    sourceText: stripHeadlineFromSourceText(headline, scrapedBody),
   });
   assert.ok(report.longestRun < 8, `longestRun=${report.longestRun}`);
   assert.equal(report.signals.noVerbatim, true);
+  assert.match(stripHeadlineFromSourceText(headline, scrapedBody), /Isi artikel membahas rincian lain/);
 });
 
 test("caption yang menyalin sumber ditahan", () => {
@@ -34,6 +37,7 @@ test("caption yang menyalin sumber ditahan", () => {
   });
   assert.equal(report.signals.noVerbatim, false);
   assert.ok(report.longestRun >= 8, `longestRun=${report.longestRun}`);
+  assert.ok(report.matchedPhrase.length > 0);
   assert.equal(report.band, "risky");
   assert.equal(originalityBlocked(report), true);
   assert.match(report.reasons.join(" "), /berurutan/);

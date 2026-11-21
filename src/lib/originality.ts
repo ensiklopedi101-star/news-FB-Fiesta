@@ -28,6 +28,8 @@ export type OriginalityReport = {
   overlap: number;
   /** Longest run of identical words shared with the source. */
   longestRun: number;
+  /** Exact matched phrase for feeding a targeted retry; never included in user-facing errors. */
+  matchedPhrase: string;
   signals: OriginalitySignals;
   reasons: string[];
 };
@@ -54,21 +56,25 @@ function shingles(tokens: string[], size: number): Set<string> {
 }
 
 /** Longest common contiguous word run; guards against "paraphrase" that is really a paste. */
-function longestCommonRun(left: string[], right: string[]): number {
-  if (!left.length || !right.length) return 0;
+function longestCommonRun(left: string[], right: string[]): { length: number; phrase: string } {
+  if (!left.length || !right.length) return { length: 0, phrase: "" };
   let previous = new Array<number>(right.length + 1).fill(0);
   let best = 0;
+  let bestEnd = 0;
   for (let i = 1; i <= left.length; i += 1) {
     const current = new Array<number>(right.length + 1).fill(0);
     for (let j = 1; j <= right.length; j += 1) {
       if (left[i - 1] === right[j - 1]) {
         current[j] = previous[j - 1]! + 1;
-        if (current[j]! > best) best = current[j]!;
+        if (current[j]! > best) {
+          best = current[j]!;
+          bestEnd = i;
+        }
       }
     }
     previous = current;
   }
-  return best;
+  return { length: best, phrase: left.slice(bestEnd - best, bestEnd).join(" ") };
 }
 
 /**
@@ -78,6 +84,22 @@ function longestCommonRun(left: string[], right: string[]): number {
  */
 const OPINION_MARKERS = /\b(menurut (?:kami|saya|redaksi|gue|popbeez)|popbeez (?:rasa|nilai|yakin|sih|anggap)|kami (?:menilai|rasa|anggap|lihat|sih)|saya (?:rasa|lihat|kira|pikir)|gue rasa|jujur(?:nya)?|yang bikin|menariknya|sayangnya|justru|patut|di mata kami)\b/i;
 const ANALYSIS_MARKERS = /\b(karena|tapi|soalnya|jadi|makanya|alhasil|sehingga|artinya|dampak(?:nya)?|dibanding(?:kan)?|padahal|kontras|membandingkan|implikasi|pola|tren|sinyal|konteksnya|bikin|bukan cuma|gak cuma)\b/i;
+
+/** Removes an exact headline copied into scraped body text before similarity checks. */
+export function stripHeadlineFromSourceText(headline: string, sourceText: string): string {
+  const search = headline.trim().toLocaleLowerCase("id-ID");
+  if (!search) return sourceText;
+
+  let cleaned = sourceText;
+  let lower = cleaned.toLocaleLowerCase("id-ID");
+  let index = lower.indexOf(search);
+  while (index >= 0) {
+    cleaned = `${cleaned.slice(0, index)} ${cleaned.slice(index + search.length)}`;
+    lower = cleaned.toLocaleLowerCase("id-ID");
+    index = lower.indexOf(search, index + 1);
+  }
+  return cleaned;
+}
 
 export type OriginalityInput = {
   /** Full caption, exactly as it would be posted. */
@@ -104,7 +126,8 @@ export function scoreOriginality(input: OriginalityInput): OriginalityReport {
   let shared = 0;
   for (const shingle of captionShingles) if (sourceShingles.has(shingle)) shared += 1;
   const overlap = captionShingles.size ? shared / captionShingles.size : 0;
-  const longestRun = longestCommonRun(captionWords, sourceWords);
+  const verbatimMatch = longestCommonRun(captionWords, sourceWords);
+  const longestRun = verbatimMatch.length;
 
   const take = input.take?.trim() || "";
   const question = input.question?.trim() || input.caption.split("\n").find((line) => line.trim().endsWith("?")) || "";
@@ -135,7 +158,7 @@ export function scoreOriginality(input: OriginalityInput): OriginalityReport {
   if (!reasons.length) reasons.push("Ada fakta, analisis, opini, dan pertanyaan — nilai tambah cukup.");
 
   const band: OriginalityBand = score >= 65 ? "safe" : score >= minimumOriginalityScore() ? "watch" : "risky";
-  return { score, band, overlap: Number(overlap.toFixed(3)), longestRun, signals, reasons };
+  return { score, band, overlap: Number(overlap.toFixed(3)), longestRun, matchedPhrase: verbatimMatch.phrase, signals, reasons };
 }
 
 const DEFAULT_MAX_ATTEMPTS = 2;
