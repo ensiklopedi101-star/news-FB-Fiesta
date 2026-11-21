@@ -2,7 +2,9 @@ import "server-only";
 import { and, asc, desc, eq, gt, isNull, like, lt, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
-import { PUBLISH_POLICY } from "@/lib/schedule";
+import { publishPolicy } from "@/lib/schedule";
+import { classifyPillar, pillarMaxPerDay, pillarQuotaEnabled, selectByPillar, type Pillar } from "@/lib/pillars";
+import { witaDayNumber } from "@/lib/publish-slots";
 import { MANUAL_REVIEW_SOURCE_NAMES } from "@/lib/manual-review";
 import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
 import { getBufferConfigurationGaps } from "@/lib/buffer";
@@ -23,6 +25,36 @@ import {
 } from "@/lib/originality";
 
 const LOCK_STALE_MS = 30 * 60 * 1000;
+const WITA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** Midnight of the current WITA day, expressed as a UTC instant. */
+function witaDayStart(now: Date): Date {
+  return new Date(witaDayNumber(now) * 86_400_000 - WITA_OFFSET_MS);
+}
+
+/**
+ * Pillar mix for today: how many posts each pillar already used and which pillar
+ * ran last. Used to avoid three breaking-news posts in a row — the exact pattern
+ * that buried the first week of content.
+ */
+async function pillarContext(now: Date): Promise<{ counts: Partial<Record<Pillar, number>>; previousPillar: Pillar | null }> {
+  const rows = await getDb()
+    .select({ title: articles.title, category: articles.category })
+    .from(articles)
+    .where(and(
+      eq(articles.status, "published"),
+      gt(articles.publishedAt, witaDayStart(now)),
+      notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES]),
+    ))
+    .orderBy(desc(articles.publishedAt))
+    .limit(20);
+  const counts: Partial<Record<Pillar, number>> = {};
+  for (const row of rows) {
+    const pillar = classifyPillar(row);
+    counts[pillar] = (counts[pillar] ?? 0) + 1;
+  }
+  return { counts, previousPillar: rows[0] ? classifyPillar(rows[0]) : null };
+}
 
 async function claimNextArticle(): Promise<Article | null> {
   const db = getDb();
@@ -41,11 +73,24 @@ async function claimNextArticle(): Promise<Article | null> {
   if (!configuredPages.length) return null;
   const configuredPageFilter = or(...configuredPages.map((pageKey) => eq(articles.pageKey, pageKey)));
   if (!configuredPageFilter) return null;
-  const [queued] = await db.select({ id: articles.id })
+  // Pull a handful of candidates so the pillar quota can pick a varied post instead
+  // of whichever headline happened to be oldest.
+  const queuedRows = await db.select({ id: articles.id, title: articles.title, category: articles.category })
     .from(articles)
     .where(and(eq(articles.status, "queued"), configuredPageFilter))
     .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
-    .limit(1);
+    .limit(30);
+  const quotaOn = pillarQuotaEnabled();
+  const mix = quotaOn && queuedRows.length ? await pillarContext(now) : { counts: {}, previousPillar: null };
+  const queued = selectByPillar(
+    queuedRows.map((row) => ({ ...row, pillar: classifyPillar(row) })),
+    {
+      todayCounts: mix.counts,
+      maxPerDay: pillarMaxPerDay(),
+      previousPillar: mix.previousPillar,
+      enabled: quotaOn,
+    },
+  );
 
   let candidateId = queued?.id;
   if (!candidateId) {
@@ -81,37 +126,59 @@ async function claimNextArticle(): Promise<Article | null> {
 }
 
 async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
+  const policy = publishPolicy();
   const now = Date.now();
-  const cutoff = new Date(now - PUBLISH_POLICY.maxPerHour * 60 * 60 * 1000);
+  const dayStart = witaDayStart(new Date(now));
+  const cutoff = new Date(now - policy.maxPerHour * 60 * 60 * 1000);
   const db = getDb();
   const [facebookPublished, bufferQueued] = await Promise.all([
     db.select({ occurredAt: articles.publishedAt })
       .from(articles)
       .where(and(eq(articles.status, "published"), gt(articles.publishedAt, cutoff), notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES])))
       .orderBy(desc(articles.publishedAt))
-      .limit(PUBLISH_POLICY.maxPerHour),
+      .limit(policy.maxPerHour),
     db.select({ occurredAt: articles.updatedAt })
       .from(articles)
       .where(and(eq(articles.status, "ready"), like(articles.facebookPostId, "buffer:%"), gt(articles.updatedAt, cutoff), notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES])))
       .orderBy(desc(articles.updatedAt))
-      .limit(PUBLISH_POLICY.maxPerHour),
+      .limit(policy.maxPerHour),
   ]);
   const recent = [...facebookPublished, ...bufferQueued]
     .filter((item): item is { occurredAt: Date } => item.occurredAt instanceof Date)
     .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
-    .slice(0, PUBLISH_POLICY.maxPerHour);
+    .slice(0, policy.maxPerHour);
+
+  // Daily ceiling: three posts per WITA day by default, so every slot gets its hour.
+  const todayRows = await getDb()
+    .select({ value: sql<number>`count(*)` })
+    .from(articles)
+    .where(and(
+      or(eq(articles.status, "published"), like(articles.facebookPostId, "buffer:%")),
+      gt(sql`coalesce(${articles.publishedAt}, ${articles.updatedAt})`, dayStart),
+      notInArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES]),
+    ))
+    .catch(() => [{ value: 0 }]);
+  const todaysPosts = Number(todayRows[0]?.value ?? 0);
+  if (todaysPosts >= policy.maxPerDay) {
+    const tomorrow = new Date((witaDayNumber(new Date(now)) + 1) * 86_400_000 - WITA_OFFSET_MS);
+    return {
+      detail: `Kuota harian tercapai: sudah ${todaysPosts}/${policy.maxPerDay} post hari ini. Lanjut besok pagi.`,
+      nextAllowedAt: tomorrow.toISOString(),
+    };
+  }
+
   const lastPublishedAt = recent[0]?.occurredAt.getTime();
-  const minimumGapAt = lastPublishedAt === undefined ? now : lastPublishedAt + PUBLISH_POLICY.minimumGapMinutes * 60 * 1000;
-  const oldestInWindow = recent[PUBLISH_POLICY.maxPerHour - 1];
-  const hourlyLimitAt = recent.length >= PUBLISH_POLICY.maxPerHour && oldestInWindow
+  const minimumGapAt = lastPublishedAt === undefined ? now : lastPublishedAt + policy.minimumGapMinutes * 60 * 1000;
+  const oldestInWindow = recent[policy.maxPerHour - 1];
+  const hourlyLimitAt = recent.length >= policy.maxPerHour && oldestInWindow
     ? oldestInWindow.occurredAt.getTime() + 60 * 60 * 1000
     : now;
   const nextAllowedAt = Math.max(minimumGapAt, hourlyLimitAt);
   if (nextAllowedAt <= now) return null;
   return {
-    detail: recent.length >= PUBLISH_POLICY.maxPerHour
-      ? `Batas publikasi tercapai: maksimal ${PUBLISH_POLICY.maxPerHour} artikel dalam 60 menit.`
-      : `Jeda publikasi minimum ${PUBLISH_POLICY.minimumGapMinutes} menit belum terpenuhi.`,
+    detail: recent.length >= policy.maxPerHour
+      ? `Batas per jam tercapai: maksimal ${policy.maxPerHour} post dalam 60 menit.`
+      : `Jeda publikasi minimum ${policy.minimumGapMinutes} menit belum terpenuhi.`,
     nextAllowedAt: new Date(nextAllowedAt).toISOString(),
   };
 }
@@ -150,7 +217,7 @@ async function writeGuardedCopy(
   article: Article,
   logStage: (stage: string) => void,
   strictFirstDraft: boolean,
-): Promise<{ copy: GeneratedCopy; originality: OriginalityReport; drafts: number }> {
+): Promise<{ copy: GeneratedCopy; originality: OriginalityReport; drafts: number; pillar: Pillar }> {
   const maxDrafts = originalityMaxAttempts();
   const voice = pickEditorialVoice(article.id);
   const score = (copy: GeneratedCopy) => scoreOriginality({
@@ -161,6 +228,8 @@ async function writeGuardedCopy(
     title: article.originalTitle,
   });
 
+  const pillar = classifyPillar({ title: article.originalTitle, category: article.category });
+  logStage(`pillar=${pillar}`);
   let copy = await writeNewsCopy({
     title: article.originalTitle,
     rawText: article.rawText,
@@ -169,6 +238,7 @@ async function writeGuardedCopy(
     strictOriginality: strictFirstDraft,
     budgetMs: AI_DRAFT_BUDGET_MS,
     voice,
+    pillar,
   });
   let originality = score(copy);
   let drafts = 1;
@@ -183,6 +253,7 @@ async function writeGuardedCopy(
         category: article.category,
         sourceName: article.sourceName,
         strictOriginality: true,
+        pillar,
         feedback: originality.reasons.join(" "),
         budgetMs: AI_DRAFT_BUDGET_MS,
         voice,
@@ -200,7 +271,7 @@ async function writeGuardedCopy(
   if (originalityBlocked(originality)) {
     logStage(`originality-blocked score=${originality.score} drafts=${drafts}`);
   }
-  return { copy, originality, drafts };
+  return { copy, originality, drafts, pillar };
 }
 
 /**
@@ -274,7 +345,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
     // A retried article that was previously held by the originality guard gets the
     // stricter brief, so the rewrite is less likely to fail the same way again.
     const retryingHeldCopy = Boolean(article.errorMessage?.startsWith("Ditahan oleh penjaga orisinalitas"));
-    const { copy, originality, drafts } = await writeGuardedCopy(article, logStage, retryingHeldCopy);
+    const { copy, originality, drafts, pillar } = await writeGuardedCopy(article, logStage, retryingHeldCopy);
     logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} drafts=${drafts} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
 
     if (isQueueItemExpired(article.sourcePublishedAt ?? article.createdAt)) {
@@ -320,6 +391,7 @@ export async function runNewsPipeline(): Promise<RunResult> {
         title: copy.title,
         caption,
         carouselSlides,
+        pillar,
         status: "ready",
         facebookPostId: `${pendingPrefix}:${article.id}`,
         updatedAt: new Date(),

@@ -1,23 +1,25 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { del, put } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { articles, reels } from "@/lib/schema";
-import { AUDIENCE_NAME, entertainmentBrand } from "@/lib/brand";
+import { AUDIENCE_NAME, FACEBOOK_PAGE_URL, INSTAGRAM_HANDLE, entertainmentBrand } from "@/lib/brand";
 import { buildReelScenes, totalSeconds, buildReelCaption } from "@/lib/reel-script";
 import { renderReelFrame, REEL_HEIGHT, REEL_WIDTH } from "@/lib/reel-frames";
 import { synthesizeNarration, TtsUnavailableError } from "@/lib/reel-tts";
 import { ReelEncoderMissingError, renderReelLocally, renderReelRemotely, type ReelSlide } from "@/lib/reel-video";
 import { publishFacebookReel } from "@/lib/reel-facebook";
 import { isInstagramPublishingEnabled, publishInstagramReel } from "@/lib/instagram";
+import { PILLARS, classifyPillar } from "@/lib/pillars";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // TTS + frame rendering + encoding + upload; the encoder may live on a VPS.
 export const maxDuration = 300;
 
-const REELS_HANDLE = "@portalbeez";
+/** Reels are mirrored to Instagram, so the printed handle is the Instagram one. */
+const REELS_HANDLE = INSTAGRAM_HANDLE;
 
 function reelsEnabled(): boolean {
   return process.env.REELS_ENABLED?.trim() === "1";
@@ -26,7 +28,7 @@ function reelsEnabled(): boolean {
 /** Reels are a bonus, not the backbone: at most one per `REELS_MIN_GAP_HOURS`. */
 function minimumGapHours(): number {
   const configured = Number(process.env.REELS_MIN_GAP_HOURS?.trim());
-  return Number.isFinite(configured) && configured >= 0 ? configured : 20;
+  return Number.isFinite(configured) && configured >= 0 ? configured : 24;
 }
 
 /** Cron calls GET once per hour; the dashboard button calls POST to force one now. */
@@ -59,14 +61,16 @@ async function handle(request: NextRequest, force: boolean) {
     }
   }
 
-  // Narration comes from the entertainment pipeline (PopBeez), newest first.
-  const [candidate] = await db.select({
+  // Narration comes from the entertainment pipeline (PopBeez). Reels lead discovery,
+  // so relatable/POV and list posts are preferred over plain news updates.
+  const candidates = await db.select({
     id: articles.id,
     title: articles.title,
+    category: articles.category,
     narration: articles.narrationScript,
     question: articles.caption,
+    publishedAt: articles.publishedAt,
     sourceName: articles.sourceName,
-    hashtags: articles.caption,
   }).from(articles)
     .where(and(
       eq(articles.pageKey, "entertainment"),
@@ -74,16 +78,29 @@ async function handle(request: NextRequest, force: boolean) {
       isNotNull(articles.narrationScript),
     ))
     .orderBy(desc(articles.publishedAt))
-    .limit(1);
+    .limit(20);
 
-  if (!candidate?.narration) {
+  const ranked = candidates
+    .map((row) => ({ row, pillar: classifyPillar({ title: row.title, category: row.category }) }))
+    .sort((a, b) => (PILLARS[b.pillar].reelsBoost - PILLARS[a.pillar].reelsBoost));
+  if (!ranked.length) {
     return NextResponse.json({ result: "idle", detail: "Belum ada artikel terbit dengan naskah narasi." });
   }
 
-  const [existing] = await db.select({ id: reels.id, status: reels.status })
-    .from(reels).where(eq(reels.articleId, candidate.id)).limit(1);
-  if (existing?.status === "published") {
-    return NextResponse.json({ result: "idle", detail: "Artikel terbaru sudah punya Reel." });
+  // Skip anything that already has a Reel, so the hourly cron keeps walking down the
+  // ranked list instead of stopping at the newest article forever.
+  const existingReels = await db.select({ articleId: reels.articleId, id: reels.id, status: reels.status })
+    .from(reels)
+    .where(inArray(reels.articleId, ranked.map(({ row }) => row.id)));
+  const byArticle = new Map(existingReels.map((row) => [row.articleId, row]));
+  const chosen = ranked.find(({ row }) => byArticle.get(row.id)?.status !== "published");
+  if (!chosen) {
+    return NextResponse.json({ result: "idle", detail: "Semua artikel bernarasi sudah punya Reel." });
+  }
+  const candidate = chosen.row;
+  const existing = byArticle.get(candidate.id);
+  if (!candidate.narration) {
+    return NextResponse.json({ result: "idle", detail: "Naskah narasi kosong." });
   }
 
   // The frame tag invites the audience; the editorial tone stays internal.
@@ -117,6 +134,7 @@ async function handle(request: NextRequest, force: boolean) {
       handle: REELS_HANDLE,
       voiceLabel,
       sourceName: candidate.sourceName,
+      facebookHandle: FACEBOOK_PAGE_URL.replace(/^https?:\/\/(www\.)?/, ""),
     }, index)));
 
     const audio = await synthesizeNarration(candidate.narration, { timeoutMs: 30_000 });

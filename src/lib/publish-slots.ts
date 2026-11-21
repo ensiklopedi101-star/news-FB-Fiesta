@@ -3,30 +3,22 @@
  * UTC+8, no DST). The cron endpoint is still called every 15 minutes; it only
  * publishes when the current WITA time falls inside a slot window.
  *
- * 16 slots by default, all at least 30 minutes apart so they never collide with
- * the 12-minute minimum gap enforced by the pipeline.
+ * Three slots by default (pagi/sore/malam), each far enough apart that the
+ * publisher's minimum gap still holds when a cron fires a few minutes late.
  */
 export const WITA_OFFSET_MINUTES = 8 * 60;
 export const MINUTES_PER_DAY = 24 * 60;
 export const DEFAULT_SLOT_GRACE_MINUTES = 14;
 
+/**
+ * Pagi, sore, malam — three slots, at least four hours apart so the publisher's
+ * 240-minute gap is satisfiable inside one day. Times are WITA (UTC+8), i.e.
+ * 07:30, 14:30 and 19:30 WIB.
+ */
 export const DEFAULT_SLOTS_WITA = [
-  "06:45",
-  "07:45",
-  "08:45",
-  "09:45",
-  "10:45",
-  "11:45",
-  "13:15",
-  "14:15",
-  "16:15",
-  "17:15",
-  "18:15",
-  "19:15",
-  "20:15",
-  "20:45",
-  "21:15",
-  "21:45",
+  "08:30",
+  "15:30",
+  "20:30",
 ] as const;
 
 /** Parses `HH:MM` (or `H.MM`) into minutes after midnight; returns null when invalid. */
@@ -58,7 +50,7 @@ export type SlotConfig = {
 
 /**
  * `PUBLISH_SLOTS_WITA` accepts a comma separated list (`"08:00, 12:30"`) or
- * `off`. Empty means the built-in 16-slot schedule.
+ * `off`. Empty means the built-in three-slot schedule.
  * `PUBLISH_SLOT_GRACE_MINUTES` defaults to 14 minutes, matching the 15-minute cron.
  */
 export function loadSlotConfig(env: Record<string, string | undefined> = process.env): SlotConfig {

@@ -10,6 +10,7 @@ out/
 
 # Local scratch space (previews, one-off scripts)
 .arena/
+.scratch/
 
 # Preview renders and source posters used for design checks
 /image-search/
