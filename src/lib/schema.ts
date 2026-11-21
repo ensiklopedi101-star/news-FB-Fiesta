@@ -57,7 +57,7 @@ export const articles = pgTable(
     facebookPostId: text("facebook_post_id"),
     /** Instagram media id when the post was mirrored to @popbeez.hive. */
     instagramMediaId: text("instagram_media_id"),
-    /** Content pillar (breaking/analysis/relatable/list/community); see src/lib/pillars.ts. */
+    /** Content pillar (breaking/analysis/relatable/list/community/manga); see src/lib/pillars.ts. */
     pillar: text("pillar"),
     errorMessage: text("error_message"),
     attempts: integer("attempts").notNull().default(0),

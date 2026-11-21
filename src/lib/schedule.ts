@@ -1,19 +1,14 @@
 /**
- * Publication cadence.
- *
- * The page is four days old, so volume is the enemy: 93 posts in five days gave
- * every post roughly twenty minutes before the next one buried it. The cadence is
- * now editorial — three posts a day (pagi, sore, malam), a four-hour gap, and one
- * post per hour at most. Meta does not publish a "wait N minutes" rule; the point
- * is to give each post a clean first hour and to keep the data readable.
+ * Publication cadence. Four planned Feed slots balance freshness with a measured
+ * publishing rhythm; this is an editorial experiment, not a guaranteed Meta rule.
  */
 export const PUBLISH_POLICY = {
   /** Hard cap per WITA calendar day, manual reviews excluded. */
-  maxPerDay: 3,
+  maxPerDay: 4,
   /** One post per hour so a slot never fires twice. */
   maxPerHour: 1,
-  /** Pagi → sore → malam leaves room for the 4-hour gap. */
-  minimumGapMinutes: 240,
+  /** The closest default slots are 3.5 hours apart. */
+  minimumGapMinutes: 210,
   harvestEveryHours: 4,
   maxArticlesPerHarvest: 50,
 } as const;
@@ -24,7 +19,7 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
   return Math.min(Math.max(Math.round(parsed), min), max);
 }
 
-/** Env-tunable view of the policy; defaults match the three-a-day cadence. */
+/** Env-tunable view of the policy; defaults match the four-a-day cadence. */
 export function publishPolicy(env: Record<string, string | undefined> = process.env): {
   maxPerDay: number;
   maxPerHour: number;

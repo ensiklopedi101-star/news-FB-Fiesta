@@ -170,7 +170,7 @@ const TAB_STORAGE_KEY = "popbeez-dashboard-tab";
 /** One line under the tab bar so each tab explains itself without scrolling. */
 const TAB_HINTS: Record<DashboardTab, string> = {
   overview: "Statistik, kesiapan layanan, kuota harian, dan jadwal slot tayang.",
-  queue: "Artikel yang masih menunggu dikirim. Maksimal 3 post/hari (pagi · sore · malam) dengan pilar yang bergantian.",
+  queue: "Artikel yang masih menunggu dikirim. Maksimal 4 post/hari (pagi · siang · sore · malam) dengan pilar yang bergantian.",
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
   manual: "Susun review mingguan enam slide sendiri.",
@@ -722,7 +722,7 @@ export default function Dashboard() {
       <section className="panel readiness-panel">
         <div className="panel-heading"><div><p className="eyebrow">PEMERIKSAAN LAYANAN</p><h2>Apa yang sudah siap?</h2></div><span className="muted">Refresh otomatis tiap menit</span></div>
         <div className="check-grid">{Object.entries(integrationLabels).map(([key, label]) => <div className="check-item" key={key}><span className={checks[key] ? "check-dot good" : "check-dot"} />{label}<strong>{checks[key] ? "Siap" : "Belum"}</strong></div>)}</div>
-        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. <b>{data?.schedule.maxPerDay ?? 3} post/hari</b> (pagi · sore · malam), {data?.schedule.maxPerHour ?? 1} post/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 240} menit. Kuota ini sengaja kecil supaya setiap post dapat jam pertama yang bersih. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
+        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. <b>{data?.schedule.maxPerDay ?? 4} post/hari</b> (pagi · siang · sore · malam), {data?.schedule.maxPerHour ?? 1} post/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 210} menit. Ini ritme editorial yang sedang diuji, bukan jaminan distribusi Meta. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
         <div className="slot-row">
           <div className="slot-head">
             <strong>{publishSchedule?.enabled ? (publishSchedule.active ? `Jendela aktif: slot ${publishSchedule.activeSlot} WITA` : "Di luar jadwal tayang") : "Jadwal slot dimatikan"}</strong>

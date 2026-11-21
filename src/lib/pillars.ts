@@ -1,14 +1,12 @@
 /**
- * Content pillars. A page this young cannot learn anything from five breaking-news
- * posts in one afternoon, so every article is classified into one of five pillars
- * and the publisher keeps the mix balanced: at most `PILLAR_MAX_PER_DAY` posts from
- * the same pillar per WITA day, and never the same pillar twice in a row when an
- * alternative is queued.
+ * Content pillars keep the publisher's daily mix varied. Each article is classified
+ * into one of six pillars, with at most `PILLAR_MAX_PER_DAY` posts from the same
+ * pillar per WITA day, and no repeat in a row when an alternative is queued.
  *
  * The classification is deterministic keyword matching (no AI call, so it cannot
  * fail mid-publish) and is used both for the caption brief and for queue selection.
  */
-export type Pillar = "breaking" | "analysis" | "relatable" | "list" | "community";
+export type Pillar = "breaking" | "analysis" | "relatable" | "list" | "community" | "manga";
 
 export type PillarDefinition = {
   id: Pillar;
@@ -64,6 +62,14 @@ export const PILLARS: Record<Pillar, PillarDefinition> = {
     share: "1/hari",
     reelsBoost: 1,
   },
+  manga: {
+    id: "manga",
+    label: "Manga",
+    summary: "Kabar manga, chapter/volume baru, kreator, serialisasi, dan adaptasi komik.",
+    brief: "Pilar MANGA. Utamakan informasi yang benar-benar ada di sumber—judul karya, kreator, status chapter/volume, jadwal, dan pengumuman. Jelaskan konteks singkat bagi pembaca, jangan mengarang spoiler atau tanggal rilis. Jika membahas beberapa judul, pisahkan tiap kabar dan sumbernya.",
+    share: "1/hari",
+    reelsBoost: 2,
+  },
 };
 
 export const PILLAR_IDS = Object.keys(PILLARS) as Pillar[];
@@ -74,6 +80,8 @@ export type PillarArticle = {
 };
 
 const KEYWORDS: Array<{ pillar: Pillar; pattern: RegExp }> = [
+  // Topic pillar wins over format labels: a ranked Manga roundup stays Manga.
+  { pillar: "manga", pattern: /\b(manga|mangaka|komik|komikus|webtoon|manhwa|manhua|shonen jump|manga plus|mangaplus|tankobon)\b/i },
   { pillar: "list", pattern: /\b(top|best|ranking|ranked|peringkat|chart|daftar|rekomendasi|wajib nonton|terbaik|terpopuler|urutan)\b/i },
   { pillar: "relatable", pattern: /\b(pov|meme|relatable|ekspektasi|expectation|reality|kenyataan|reaction|reaksi|funny|lucu|ngakak|viral|receh)\b/i },
   { pillar: "community", pattern: /\b(poll|kuis|quiz|q&a|tanya jawab|diskusi|fandom|bias|vote|survey|menurut kamu)\b/i },
@@ -82,9 +90,8 @@ const KEYWORDS: Array<{ pillar: Pillar; pattern: RegExp }> = [
 ];
 
 /**
- * Deterministic classification. Order matters: a title mentioning both "rating"
- * and "top" is a list, because list posts are internally consistent (ranked) while
- * breaking posts are time-sensitive.
+ * Deterministic classification. Manga is checked before format signals so Manga
+ * remains its own topic pillar even when the headline also says "top" or "ranking".
  */
 export function classifyPillar(article: PillarArticle): Pillar {
   const haystack = `${article.title} ${article.category ?? ""}`.trim();
@@ -99,7 +106,7 @@ export function pillarLabel(pillar: Pillar): string {
   return PILLARS[pillar]?.label ?? PILLARS.breaking.label;
 }
 
-/** Default cap per pillar per WITA day: one, so three daily posts stay varied. */
+/** Default cap per pillar per WITA day: one, so four daily posts draw from six pillars. */
 export function pillarMaxPerDay(env: Record<string, string | undefined> = process.env): number {
   const parsed = Number(env.PILLAR_MAX_PER_DAY?.trim());
   if (!Number.isFinite(parsed)) return 1;

@@ -21,16 +21,16 @@ function witaInstant(clock: string, dayOffset = 0): Date {
 
 const config: SlotConfig = { slots: [405, 465, 525], graceMinutes: 14, disabled: false }; // 06:45, 07:45, 08:45
 
-test("default schedule is pagi, sore, malam and leaves room for the 4-hour gap", () => {
-  assert.equal(DEFAULT_SLOTS_WITA.length, 3);
+test("default schedule has four requested WITA slots with at least 210 minutes between them", () => {
+  assert.equal(DEFAULT_SLOTS_WITA.length, 4);
   const minutes = DEFAULT_SLOTS_WITA.map(timeToMinutes);
   assert.ok(minutes.every((value) => value !== null));
   assert.deepEqual(minutes, [...minutes].sort((a, b) => a! - b!));
   for (let index = 1; index < minutes.length; index += 1) {
-    assert.ok(minutes[index]! - minutes[index - 1]! >= 240, "jarak slot harus minimal 4 jam (jeda publisher)");
+    assert.ok(minutes[index]! - minutes[index - 1]! >= 210, "jarak slot harus minimal 210 menit");
   }
-  // Pagi, sore, malam in WITA = 07:30, 14:30, 19:30 WIB.
-  assert.deepEqual(DEFAULT_SLOTS_WITA, ["08:30", "15:30", "20:30"]);
+  // WITA = UTC+8: 08:30, 12:00, 15:30, 20:30 = 07:30, 11:00, 14:30, 19:30 WIB.
+  assert.deepEqual(DEFAULT_SLOTS_WITA, ["08:30", "12:00", "15:30", "20:30"]);
 });
 
 test("WITA is UTC+8 without daylight saving", () => {
