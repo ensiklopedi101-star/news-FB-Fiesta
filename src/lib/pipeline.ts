@@ -22,6 +22,7 @@ import {
   originalityMaxAttempts,
   scoreOriginality,
   shouldRetryForOriginality,
+  stripHeadlineFromSourceText,
   type OriginalityReport,
 } from "@/lib/originality";
 
@@ -230,7 +231,9 @@ async function writeGuardedCopy(
     question: copy.question,
     // Roundup headlines are displayed verbatim by design; only compare captions
     // with source bodies so those attributions don't trigger the verbatim guard.
-    sourceText: (roundupArticles.length ? roundupArticles : [article]).map((story) => story.rawText).join("\n\n"),
+    sourceText: (roundupArticles.length ? roundupArticles : [article])
+      .map((story) => stripHeadlineFromSourceText(story.originalTitle, story.rawText))
+      .join("\n\n"),
     title: article.originalTitle,
   });
 
@@ -261,7 +264,12 @@ async function writeGuardedCopy(
         sourceName: article.sourceName,
         strictOriginality: true,
         pillar,
-        feedback: originality.reasons.join(" "),
+        feedback: [
+          ...originality.reasons,
+          ...(originality.matchedPhrase && !originality.signals.noVerbatim
+            ? [`Frasa sumber yang harus diparafrasekan secara menyeluruh (kutipan data): “${originality.matchedPhrase}”.`]
+            : []),
+        ].join(" "),
         budgetMs: AI_DRAFT_BUDGET_MS,
         voice,
         ...(roundupArticles.length > 1 ? { roundupArticles: roundupArticles.map((story) => ({ title: story.originalTitle, sourceName: story.sourceName, category: story.category, rawText: story.rawText })) } : {}),
