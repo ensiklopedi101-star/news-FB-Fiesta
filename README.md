@@ -59,6 +59,8 @@ Lalu di Vercel set `REELS_RENDER_URL=https://vps-kamu:8080`, `REELS_WORKER_TOKEN
 14. Jalankan [`drizzle/0011_originality.sql`](./drizzle/0011_originality.sql) untuk menyimpan blok opini (`editorial_take`), skor orisinalitas, dan alasan penilaian tiap artikel. Tanpa file ini pipeline tetap jalan, tetapi skor tidak tersimpan dan panel **Penjaga orisinalitas** akan kosong.
 15. Jalankan [`drizzle/0012_reels_voices.sql`](./drizzle/0012_reels_voices.sql) untuk menyimpan sudut pandang redaksi (`editorial_voice`), naskah narasi (`narration_script`), dan tabel `reels` (status render, durasi, URL video, ID video Facebook). Tanpa file ini artikel tetap terbit; Reels dan panel Reels akan menampilkan peringatan.
 16. Jalankan [`drizzle/0013_instagram.sql`](./drizzle/0013_instagram.sql) untuk menyimpan ID media Instagram (`instagram_media_id`) setiap post yang berhasil dicerminkan ke @popbeez.hive. Tanpa kolom ini posting Instagram tetap jalan, tetapi tautan post IG tidak tercatat.
+17. Jalankan [`drizzle/0014_instagram_mirror.sql`](./drizzle/0014_instagram_mirror.sql) untuk menandai post lama yang boleh dicerminkan ulang ke Instagram tanpa memposting ulang ke Facebook.
+18. **Wajib sebelum deploy ritme baru**: jalankan [`drizzle/0015_content_pillars.sql`](./drizzle/0015_content_pillars.sql) untuk menambah kolom `articles.pillar`. Publisher menyimpan pilar pada baris yang sama dengan status `ready`; tanpa kolom ini update tersebut gagal dan artikel tidak akan pernah tayang. Kalau ragu, jalankan dulu file SQL-nya, baru merge/deploy.
 11. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
