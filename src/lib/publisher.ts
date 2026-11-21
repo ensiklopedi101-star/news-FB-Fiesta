@@ -23,6 +23,7 @@ export async function publishPost(input: {
   imageUrl: string;
   imageUrls: string[];
   caption: string;
+  strictCarousel?: boolean;
 }): Promise<PublishResult> {
   if (usesDirectFacebookPublishing(input.pageKey)) {
     const result = await publishFacebookPagePost({
@@ -38,6 +39,7 @@ export async function publishPost(input: {
     imageUrl: input.imageUrl,
     imageUrls: input.imageUrls,
     caption: input.caption,
+    strictCarousel: input.strictCarousel,
   });
   return { provider: "buffer", ...result };
 }

@@ -149,6 +149,8 @@ export async function enqueueBufferFacebookPost(input: {
   imageUrl: string;
   imageUrls?: string[];
   caption: string;
+  /** Roundups must never silently degrade to one image while retaining a multi-story caption. */
+  strictCarousel?: boolean;
 }): Promise<BufferEnqueueResult> {
   const mutation = `mutation CreatePost($input: CreatePostInput!) {
     createPost(input: $input) {
@@ -192,7 +194,7 @@ export async function enqueueBufferFacebookPost(input: {
     const postId = await submit(requestedUrls);
     return { postId, mediaFormat: requestedUrls.length > 1 ? "carousel" : "single" };
   } catch (error) {
-    if (!(error instanceof BufferAssetsRejectedError)) throw error;
+    if (!(error instanceof BufferAssetsRejectedError) || input.strictCarousel) throw error;
     console.warn(`[buffer] carousel ditolak untuk channel ${input.pageKey}; mencoba fallback satu gambar: ${safeMessage(error.message, getApiKey())}`);
     const postId = await submit([input.imageUrl]);
     return { postId, mediaFormat: "single" };
