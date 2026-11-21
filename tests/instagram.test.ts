@@ -10,6 +10,7 @@ test("reports missing Instagram credentials instead of failing silently", () => 
 
 test("accepts the page token as the Instagram token when the account is linked", () => {
   assert.equal(isInstagramPublishingEnabled({ IG_USER_ID: "1784", FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN: "token" }), true);
+  assert.equal(isInstagramPublishingEnabled({ IG_USER_ID: "1784", FB_PAGE_ACCESS_TOKEN: "token" }), true);
   assert.deepEqual(getInstagramConfigurationGaps({ IG_USER_ID: "1784" }), ["IG_ACCESS_TOKEN"]);
   assert.deepEqual(instagramCredentials({ IG_USER_ID: "1784", IG_ACCESS_TOKEN: "t" }), { userId: "1784", token: "t" });
 });

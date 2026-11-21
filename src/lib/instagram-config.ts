@@ -11,7 +11,12 @@ function envValue(names: string[], env: Record<string, string | undefined> = pro
 }
 
 export const INSTAGRAM_USER_ID_ENV = ["IG_USER_ID", "INSTAGRAM_USER_ID"];
-export const INSTAGRAM_TOKEN_ENV = ["IG_ACCESS_TOKEN", "INSTAGRAM_ACCESS_TOKEN", "FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN"];
+export const INSTAGRAM_TOKEN_ENV = [
+  "IG_ACCESS_TOKEN",
+  "INSTAGRAM_ACCESS_TOKEN",
+  "FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN",
+  "FB_PAGE_ACCESS_TOKEN",
+];
 
 /** Which environment variables are still missing for Instagram publishing. */
 export function getInstagramConfigurationGaps(env: Record<string, string | undefined> = process.env): string[] {
@@ -29,4 +34,14 @@ export function instagramCredentials(env: Record<string, string | undefined> = p
   const userId = envValue(INSTAGRAM_USER_ID_ENV, env);
   const token = envValue(INSTAGRAM_TOKEN_ENV, env);
   return userId && token ? { userId, token } : null;
+}
+
+/** Username is only used for messages/diagnostics; publishing needs the numeric ID. */
+export function instagramUsername(env: Record<string, string | undefined> = process.env): string {
+  return env.IG_USERNAME?.trim() || "@popbeez.hive";
+}
+
+/** Page id used to verify that the IG account is really linked to our page. */
+export function facebookPageId(env: Record<string, string | undefined> = process.env): string | null {
+  return envValue(["FB_ENTERTAINMENT_PAGE_ID", "FB_PAGE_ID", "FB_NEWS_PAGE_ID"], env);
 }

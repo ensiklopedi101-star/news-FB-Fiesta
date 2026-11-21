@@ -219,6 +219,26 @@ Jangan memanggil endpoint cron berulang-ulang untuk tes di production: setiap ar
 - Slide CTA carousel (`slide=4`) menampilkan ikon Facebook **dan** Instagram dengan handle `portalbeez` + `@popbeez.hive`; caption kuis, Reels, dan komentar sumber juga menyebut Instagram.
 - Gambar dari layanan aggregator seperti **rss.app** diblokir total (`isKnownAggregatorBrandImage()`), bukan hanya berkas logonya, dan route kartu memeriksa ulang gambar yang sudah tersimpan sehingga feed lama pun tidak bisa memunculkan placeholder itu lagi.
 
+## Instagram: "Media ID is not available" dan cara mendiagnosisnya
+
+Error `Instagram Graph API: Media ID is not available` berarti Meta sudah membuat *container* media tetapi **belum selesai memprosesnya**, lalu kita memanggil `media_publish` terlalu cepat (kode 9007). Sejak perbaikan ini:
+
+1. Setiap container — foto tunggal, **setiap child carousel**, container carousel induk, dan Reel — dipoll lewat `?fields=status_code` sampai `FINISHED` (maks. 45 detik; Reel 60 detik) sebelum `media_publish`.
+2. Kalau Meta tetap menjawab 9007, publish dicoba ulang sampai 4 kali dengan jeda 4 → 8 → 12 detik, dan container diperiksa ulang di antara percobaan.
+3. Pesan error sekarang menyertakan kode/subkode Graph plus petunjuk: 9007 = media belum siap, 190 = token kedaluwarsa, 200/10 = izin kurang, 4/17/32 = kena rate limit, 100 = `IG_USER_ID` salah, 24 = URL gambar tidak bisa diunduh Meta.
+
+### Cek kesehatan Instagram tanpa memposting apa pun
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/admin/instagram-check"
+```
+
+Endpoint ini (hanya GET) memeriksa: kredensial, akun di balik `IG_USER_ID` (username, jumlah media, follower), **apakah halaman Facebook benar-benar tertaut ke akun IG itu**, dan sisa kuota `instagram_content_publish` per 24 jam. Kalau `IG_USER_ID` bukan ID akun yang tertaut ke halaman, hasilnya akan menyebutkan ID yang benar.
+
+Nilai yang dipakai PopBeez sekarang: `IG_USER_ID=17841480354041840` (`@popbeez.hive`), `IG_USERNAME=@popbeez.hive`, halaman Facebook `FB_PAGE_ID=1468363823021623`. Nama env `FB_PAGE_ID` dan `FB_PAGE_ACCESS_TOKEN` diterima sebagai alias.
+
+Pastikan juga: aplikasi Meta memakai izin `instagram_basic` + `instagram_content_publish` (+ `pages_show_list`, `pages_read_engagement`), akun IG berstatus **Business/Creator**, dan URL gambar kartu (`/api/og/<id>`) bisa diakses publik sebagai JPEG — keduanya sudah dipenuhi pipeline ini.
+
 ## Kuota Vercel: Functions Storage dan Blob itu per akun, bukan per project
 
 Kuota Vercel dihitung **per team/akun**. Tiga project di akun yang sama berbagi satu jatah: Functions Storage (10 GB di Hobby, isinya salinan fungsi dari **setiap deployment yang masih disimpan**) dan Blob (1 GB). Jadi project yang tidak dipakai tetap memakan jatah selama deployment lamanya masih ada.
