@@ -75,6 +75,9 @@ export async function GET(request: NextRequest) {
     };
     // The originality columns arrive with drizzle/0011; fall back to neutral values
     // so the dashboard keeps loading before that migration runs.
+    let instagramSchemaReady = true;
+    const instagramFields = { instagramMediaId: articles.instagramMediaId };
+    const legacyInstagramFields = { instagramMediaId: sql<string | null>`null` };
     let originalitySchemaReady = true;
     const originalityFields = {
       editorialTake: articles.editorialTake,
@@ -103,10 +106,16 @@ export async function GET(request: NextRequest) {
     ]);
     let rows: Awaited<ReturnType<typeof loadRows>>;
     try {
-      rows = await loadRows({ ...articleFields, ...originalityFields });
+      rows = await loadRows({ ...articleFields, ...instagramFields, ...originalityFields });
     } catch {
-      originalitySchemaReady = false;
-      rows = await loadRows({ ...articleFields, ...legacyOriginalityFields });
+      try {
+        rows = await loadRows({ ...articleFields, ...instagramFields, ...legacyOriginalityFields });
+        originalitySchemaReady = false;
+      } catch {
+        // drizzle/0013 not applied yet: keep the dashboard usable without the IG link.
+        instagramSchemaReady = false;
+        rows = await loadRows({ ...articleFields, ...legacyInstagramFields, ...legacyOriginalityFields });
+      }
     }
     const [queueRows, doneRows] = rows;
     const dashboardArticles = [
@@ -209,6 +218,7 @@ export async function GET(request: NextRequest) {
       bufferEntertainment: bufferChannels.entertainment,
       facebookEntertainment,
       instagram: isInstagramPublishingEnabled(),
+      instagramSchema: instagramSchemaReady,
       appUrl: Boolean(process.env.APP_URL),
       cronSecret: Boolean(process.env.CRON_SECRET),
       blobStorage: Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim()),

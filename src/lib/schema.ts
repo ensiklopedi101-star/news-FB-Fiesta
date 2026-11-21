@@ -129,6 +129,8 @@ export const reels = pgTable(
     frameCount: integer("frame_count").notNull().default(0),
     videoUrl: text("video_url"),
     facebookVideoId: text("facebook_video_id"),
+    /** Instagram Reels media id when the video was mirrored to @popbeez.hive. */
+    instagramMediaId: text("instagram_media_id"),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

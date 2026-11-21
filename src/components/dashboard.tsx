@@ -46,6 +46,8 @@ type Article = {
   editorialVoice: string | null;
   /** Spoken script for the matching Reel. */
   narrationScript: string | null;
+  /** Instagram media id when the post was mirrored to @popbeez.hive. */
+  instagramMediaId?: string | null;
 };
 
 type ReviewDraftItem = { title: string; rating: string; genre: string; reason: string; suitableFor: string; imageUrl: string };
@@ -83,7 +85,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; videoUrl?: string | null; frames?: number; durationSeconds?: number; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping } };
+type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; videoUrl?: string | null; frames?: number; durationSeconds?: number; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping }; mirrored?: number; failed?: number; results?: Array<{ id: string; title: string; ok: boolean; mediaId?: string; detail?: string }> };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -96,6 +98,7 @@ const integrationLabels: Record<string, string> = {
   bufferEntertainment: "Channel Buffer hiburan",
   facebookEntertainment: "Facebook Graph PopBeez",
   instagram: "Instagram @popbeez.hive",
+  instagramSchema: "Kolom Instagram (migrasi 0013)",
   appUrl: "URL publik aplikasi",
   cronSecret: "Pengaman cron",
   blobStorage: "Penyimpanan gambar Blob",
@@ -140,7 +143,37 @@ function bufferMappingLabel(mapping: BufferChannelMapping) {
   }
 }
 
+type DashboardTab = "overview" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
+
+const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
+  { key: "overview", label: "Ringkasan" },
+  { key: "queue", label: "Antrean" },
+  { key: "published", label: "Sudah terbit" },
+  { key: "feeds", label: "Feed RSS" },
+  { key: "manual", label: "Konten manual" },
+  { key: "quiz", label: "Kuis" },
+  { key: "reels", label: "Reels" },
+  { key: "originality", label: "Orisinalitas" },
+  { key: "setup", label: "Setup API" },
+];
+
+const TAB_STORAGE_KEY = "popbeez-dashboard-tab";
+
+/** One line under the tab bar so each tab explains itself without scrolling. */
+const TAB_HINTS: Record<DashboardTab, string> = {
+  overview: "Statistik, kesiapan layanan, dan jadwal slot tayang.",
+  queue: "Artikel yang masih menunggu dikirim. Panen RSS dan tombol Terbitkan ada di sini.",
+  published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
+  feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
+  manual: "Susun review mingguan enam slide sendiri.",
+  quiz: "Kuis Tebak Drama dari poster review manual.",
+  reels: "Reel otomatis dari naskah narasi, plus suara Edge TTS.",
+  originality: "Penjaga orisinalitas: skor, opini redaksi, dan post yang ditahan.",
+  setup: "Daftar environment variable, tes AI, dan tes Buffer.",
+};
+
 export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [secret, setSecret] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
@@ -189,6 +222,16 @@ export default function Dashboard() {
       setBusy(false);
     }
   }
+
+  // Remember the open tab so a refresh does not drop the user back to Ringkasan.
+  useEffect(() => {
+    const stored = window.localStorage.getItem(TAB_STORAGE_KEY);
+    if (stored && DASHBOARD_TABS.some((tab) => tab.key === stored)) setActiveTab(stored as DashboardTab);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(TAB_STORAGE_KEY, activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!authenticated) return;
@@ -325,6 +368,24 @@ export default function Dashboard() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal mengirim ulang komentar sumber.");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mirrorArticleToInstagram(article: Article) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/instagram-mirror", { method: "POST", body: JSON.stringify({ id: article.id }) });
+      const outcome = result.results?.[0];
+      setMessage(outcome?.ok
+        ? `Post dicerminkan ke Instagram: ${article.title}.`
+        : `Instagram belum berhasil: ${outcome?.detail || result.error || "lihat pesan di baris artikel."}`);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal mencerminkan post ke Instagram.");
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -535,6 +596,9 @@ export default function Dashboard() {
           {article.status === "queued" && <button type="button" className="quiet-button priority-button" disabled={busy} onClick={() => void toggleArticlePriority(article)}>{article.priorityAt ? "Batalkan prioritas" : "Jadikan prioritas"}</button>}
           {article.status === "queued" && <button type="button" className="danger-button article-remove" disabled={busy} onClick={() => void removeArticle(article)}>Hapus dari antrean</button>}
           {commentFailed && <button type="button" className="retry-comment-button" disabled={busy} onClick={() => void retrySourceComment(article)}>Kirim ulang komentar sumber</button>}
+          {checks.instagram && article.status === "published" && !article.instagramMediaId && (
+            <button type="button" className="quiet-button" disabled={busy} onClick={() => void mirrorArticleToInstagram(article)}>Mirror ke Instagram</button>
+          )}
           {article.status === "failed" && <button type="button" className="quiet-button" disabled={busy} onClick={() => void requeueArticle(article)}>Tulis ulang caption</button>}
         </div>
         <strong>{article.title}</strong>
@@ -570,6 +634,7 @@ export default function Dashboard() {
         <div className="article-links">
           <a className="article-source" href={article.sourceUrl} target="_blank" rel="noreferrer">Buka artikel sumber ↗</a>
           {article.status === "published" && postUrl && <a className="article-source" href={postUrl} target="_blank" rel="noreferrer">Buka post Facebook ↗</a>}
+          {article.instagramMediaId && <a className="article-source" href={`https://www.instagram.com/p/${article.instagramMediaId}/`} target="_blank" rel="noreferrer">Buka post Instagram ↗</a>}
         </div>
       </article>
     );
@@ -584,12 +649,38 @@ export default function Dashboard() {
       </header>
 
       <section className="dashboard-intro">
-        <div><p className="eyebrow">RINGKASAN SISTEM</p><h1>Dashboard redaksi</h1><p>Kelola sumber RSS untuk dua halaman dan lihat status artikel terbaru.</p></div>
+        <div><p className="eyebrow">RINGKASAN SISTEM</p><h1>Dashboard redaksi</h1><p>Pilih tab di bawah: antrean, feed RSS, konten manual, kuis, Reels, dan setup API dipisah supaya tidak perlu scroll panjang.</p></div>
         <div className="updated-at">Diperbarui {formatDate(data?.checkedAt ?? null)}</div>
       </section>
 
       {message && <div className="notice">{message}</div>}
 
+      <nav className="dashboard-tabs" role="tablist" aria-label="Bagian dashboard">
+        {DASHBOARD_TABS.map((tab) => {
+          const badge = tab.key === "queue" ? sections.queue.length
+            : tab.key === "published" ? sections.done.length
+            : tab.key === "feeds" ? (data?.feeds.length ?? 0)
+            : null;
+          const alert = tab.key === "published" && failedCount > 0;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              className={`tab-button ${activeTab === tab.key ? "active" : ""}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+              {badge !== null && <b className={`tab-badge ${alert ? "alert" : ""}`}>{badge}</b>}
+            </button>
+          );
+        })}
+      </nav>
+
+      <p className="tab-hint">{TAB_HINTS[activeTab]}</p>
+
+      {activeTab === "overview" && (<>
       <section className="stat-grid" aria-label="Statistik artikel">
         <article className="stat-card"><span>Total artikel tersimpan</span><strong>{data?.stats.articles ?? 0}</strong><small>Semua kategori</small></article>
         <article className="stat-card"><span>Antre sekarang</span><strong>{data?.stats.queued ?? 0}</strong><small>Belum dikirim ke Buffer/Facebook</small></article>
@@ -617,7 +708,9 @@ export default function Dashboard() {
           <p className="muted small-note">Halaman tujuan aktif: {[...feedPages].map((key) => key === "news" ? "Berita" : "Hiburan").join(" · ")}</p>
         )}
       </section>
+      </>)}
 
+      {activeTab === "setup" && (
       <section className="panel readiness-panel setup-panel">
         <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Buffer</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
         <div className="setup-grid">
@@ -647,7 +740,9 @@ export default function Dashboard() {
         {bufferChannels.length > 0 && <div className="feed-list">{bufferChannels.map((channel) => <article className="feed-row" key={channel.id}><div className="feed-row-main"><strong>{channel.name}</strong><small className="muted">{channel.service} · {channel.type}{channel.isDisconnected ? " · terputus" : ""}</small><code>{channel.id}</code></div></article>)}</div>}
         <p className="muted small-note">Logo Nusabeez dan PopBeez disertakan otomatis dari folder <code>public/brand</code>. Untuk logo pengganti, atur <code>PAGE_LOGO_NEWS_URL</code> atau <code>PAGE_LOGO_ENTERTAINMENT_URL</code> ke URL HTTPS publik.</p>
       </section>
+      )}
 
+      {activeTab === "originality" && (
       <section className="panel originality-panel">
         <div className="panel-heading"><div><p className="eyebrow">NILAI TAMBAH</p><h2>Penjaga orisinalitas</h2><p className="muted small-note">Setiap caption wajib membawa analisis, opini redaksi, dan pertanyaan diskusi. Sebelum dikirim, caption diperiksa otomatis: bila terlalu mirip sumber atau tidak punya sudut pandang, post <b>ditahan</b> dan tidak pernah sampai ke Facebook. Ambang lulus saat ini <b>{data?.originality.threshold ?? 45}/100</b> (<code>ORIGINALITY_MIN_SCORE</code>).</p></div><span className="format-tag carousel">Anti “Limited Originality”</span></div>
         <div className="queue-counts"><span>{data?.originality.scored ?? 0} post dinilai</span><span>rata-rata {data?.originality.average ?? 0}/100</span><span>{data?.originality.safe ?? 0} aman</span><span>{data?.originality.watch ?? 0} pantau</span><span className={(data?.originality.risky ?? 0) > 0 ? "count-alert" : ""}>{data?.originality.risky ?? 0} berisiko</span><span>{data?.originality.held ?? 0} ditahan</span></div>
@@ -660,7 +755,9 @@ export default function Dashboard() {
         {data?.originality.schemaReady === false && <p className="muted small-note">Kolom <code>editorial_take</code>, <code>originality_score</code>, dan <code>originality_notes</code> belum ada. Jalankan <code>drizzle/0011_originality.sql</code> di Neon; penahanan caption tetap berjalan walau skor belum tersimpan.</p>}
         {(data?.originality.scored ?? 0) === 0 && <p className="muted small-note">Belum ada post yang dinilai. Skor muncul setelah artikel berikutnya diproses pipeline.</p>}
       </section>
+      )}
 
+      {activeTab === "reels" && (
       <section className="panel reels-panel">
         <div className="panel-heading"><div><p className="eyebrow">REELS &amp; SUARA</p><h2>Reel otomatis dari naskah narasi</h2><p className="muted small-note">Setiap artikel hiburan kini membawa naskah narasi 25–35 detik. Reels menyuarakannya dengan <b>Edge TTS</b> (gratis, tanpa API key — kuota Gemini tetap untuk penulisan dan kuis), menyusun frame 1080×1920, lalu mengunggah ke Facebook Reels. Maksimal satu Reel tiap <b>{data?.reels.minGapHours ?? 20} jam</b>.</p></div><span className={data?.reels.enabled ? "status-tag published" : "status-tag"}>{data?.reels.enabled ? "AKTIF" : "MATI"}</span></div>
         <div className="queue-counts"><span>{data?.reels.published ?? 0} Reel terbit</span><span>suara: {data?.reels.ttsVoice}</span><span>render: {data?.reels.renderMode}</span><span>naskah: {data?.reels.last?.frameCount ?? 0} frame</span></div>
@@ -683,7 +780,9 @@ export default function Dashboard() {
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void createReel()}>{busy ? "Menyiapkan…" : "Buat & posting Reel sekarang"}</button>
         <p className="muted small-note">Butuh encoder: <code>FFMPEG_PATH</code> di server ini, atau <code>REELS_RENDER_URL</code> + <code>REELS_WORKER_TOKEN</code> ke worker VPS (<code>scripts/reels-render-worker.mjs</code>). Tanpa keduanya, Reel ditandai gagal dan pipeline teks tidak terpengaruh.</p>
       </section>
+      )}
 
+      {activeTab === "quiz" && (
       <section className="panel quiz-panel">
         <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
         {data?.quiz.lastImageUrl ? <div className="quiz-preview">
@@ -700,7 +799,9 @@ export default function Dashboard() {
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat & posting kuis sekarang"}</button>
         <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook PopBeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
       </section>
+      )}
 
+      {activeTab === "manual" && (
       <section className="panel manual-review-panel">
         <div className="panel-heading"><div><p className="eyebrow">KONTEN MANUAL</p><h2>Buat review mingguan</h2><p className="muted small-note">Isi lima pilihan film, drama, atau musik. Rating tertinggi otomatis menjadi nomor 1. Hasilnya satu carousel terpadu: cover lalu lima kartu rekomendasi.</p></div><span className="format-tag carousel">PopBeez · 6 slide</span></div>
         <form className="manual-review-form" onSubmit={submitManualReview}>
@@ -725,8 +826,9 @@ export default function Dashboard() {
           <p className="muted small-note">Pastikan kamu memiliki izin menggunakan tautan gambar. Caption review tidak memuat tautan; tautan follow ditaruh di komentar pertama. Rating dan urutan berasal dari data yang kamu isi. Jika review perlu diperbaiki setelah terbit, hapus dulu post lama di Facebook/Buffer, lalu terbitkan ulang sekali. Jangan menerbitkan dua kali tanpa menghapus yang lama supaya tidak ada duplikat.</p>
         </form>
       </section>
+      )}
 
-      <div className="dashboard-columns">
+      {activeTab === "feeds" && (
         <section className="panel feeds-panel">
           <div className="panel-heading"><div><p className="eyebrow">SUMBER BERITA</p><h2>Feed RSS</h2></div><button className="secondary-button" type="button" disabled={busy} onClick={() => void importPresets()}>Tambahkan preset hiburan</button></div>
           <form className="feed-form" onSubmit={addFeed}>
@@ -757,7 +859,9 @@ export default function Dashboard() {
             )) : <div className="empty-state"><strong>Belum ada feed.</strong><span>Tambahkan feed RSS di atas. Untuk berita hiburan, pilih halaman “Hiburan”.</span></div>}
           </div>
         </section>
+      )}
 
+      {activeTab === "queue" && (
         <section className="panel articles-panel">
           <div className="panel-heading"><div><p className="eyebrow">BELUM TERBIT</p><h2>Antrean yang belum dikirim</h2><p className="muted small-note">Bagian ini hanya berisi artikel yang masih menunggu dikirim. Artikel yang sedang dikirim, sudah dikirim, atau gagal dipindahkan ke panel <b>Sudah terbit</b> di bawah. Berita prioritas dipilih lebih dulu pada siklus publisher berikutnya; berita berumur lebih dari 7 jam dikeluarkan.</p></div><div className="queue-counts"><span>{sections.queue.length} antre</span></div></div>
 
@@ -772,12 +876,14 @@ export default function Dashboard() {
           {canPublish && <button type="button" onClick={() => void publishOne()} disabled={busy} className="primary-button run-button">{busy ? "Memproses…" : "Terbitkan"}</button>}
           {!canPublish && <p className="muted small-note">Tombol pengiriman aktif setelah feed, minimal satu penyedia AI, URL aplikasi, pengaman cron, Buffer API key, dan ID channel Buffer untuk setiap halaman tujuan siap.</p>}
         </section>
-      </div>
+      )}
 
+      {activeTab === "published" && (
       <section className="panel published-panel">
         <div className="panel-heading"><div><p className="eyebrow">SUDAH TERBIT</p><h2>Sudah terbit & terkirim</h2><p className="muted small-note">Semua artikel yang sudah keluar dari antrean, terbaru di atas (maksimal 20): <b>Terbit</b> sudah tayang di Facebook, <b>Antrean Buffer</b> sudah diterima Buffer dan menunggu slot jadwal, <b>Gagal</b> perlu dicoba ulang.</p></div><div className="queue-counts"><span>{liveCount} terbit</span><span>{waitingSlotCount} menunggu slot</span><span className={failedCount > 0 ? "count-alert" : ""}>{failedCount} gagal</span><span>{data?.stats.publishedToday ?? 0} terbit hari ini</span></div></div>
         {sections.done.length > 0 ? <div className="article-list">{sections.done.map((article) => renderArticleCard(article))}</div> : <div className="empty-state"><strong>Belum ada post terkirim.</strong><span>Setelah publisher memproses artikel, hasilnya muncul di sini.</span></div>}
       </section>
+      )}
 
       <footer className="dashboard-footer"><span>News FB Fiesta · Neon Postgres</span><span>Posting otomatis dapat menerbitkan konten sungguhan. Periksa feed dan izin gambar sebelum mengaktifkan jadwal.</span></footer>
     </main>

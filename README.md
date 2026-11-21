@@ -184,6 +184,24 @@ Satu database Neon menyimpan semua artikel beserta `page_key`; tidak perlu membu
 
 Jangan aktifkan pemicu otomatis lain yang memanggil endpoint yang sama. Publisher tetap menerapkan batas maksimal 2 pengiriman dalam 60 menit dan jeda minimum 15 menit. Post yang sudah masuk Buffer tidak diubah urutannya oleh antrean lokal.
 
+## Dashboard: tab per bagian
+
+Dashboard tidak lagi satu halaman panjang. Setiap bagian punya tab sendiri, dan tab terakhir yang dibuka diingat browser (localStorage), jadi refresh tidak melempar kamu ke atas:
+
+| Tab | Isi |
+| --- | --- |
+| Ringkasan | Statistik artikel, pemeriksaan layanan, jendela slot tayang |
+| Antrean | Artikel yang belum dikirim + tombol **Panen RSS sekarang** dan **Terbitkan** |
+| Sudah terbit | Post yang sudah keluar dari antrean (terbit, menunggu slot Buffer, gagal) |
+| Feed RSS | Daftar sumber, form tambah feed, preset hiburan |
+| Konten manual | Form review mingguan enam slide |
+| Kuis | Tebak Drama: pratinjau edisi terakhir + tombol buat sekarang |
+| Reels | Reel terakhir, daftar sudut pandang, tombol render sekarang |
+| Orisinalitas | Skor, ambang lulus, dan post yang ditahan |
+| Setup API | Daftar environment variable, tes AI, tes Buffer, status Instagram |
+
+Badge angka di tab Antrean / Sudah terbit / Feed RSS menunjukkan jumlah item, dan badge merah di **Sudah terbit** menandai artikel gagal. Tombol **Mirror ke Instagram** muncul di baris artikel terbit yang belum punya post Instagram.
+
 ## Dashboard dan endpoint
 
 Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kamu dapat mengimpor preset hiburan, menambah feed dengan filter kata kunci, menonaktifkan dan menghapus feed, melihat antrean artikel, menjalankan panen manual (tidak menerbitkan), membaca daftar channel Buffer secara read-only, dan menjalankan tes AI eksplisit yang menghabiskan sedikit kuota tetapi tidak menyimpan atau menerbitkan konten. Dashboard menampilkan ID model konfigurasi dan status percobaan AI; keberadaan key saja tidak berarti key/model valid. API key dan ID channel Buffer disimpan di Vercel Environment Variables—dashboard tidak meminta atau menyimpan API key. Tombol kirim manual hanya muncul saat konfigurasi siap; tombol itu mengirim post ke antrean Buffer, dan Buffer dapat menerbitkannya otomatis mengikuti jadwal channel.
@@ -195,6 +213,7 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
 - `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
+- `POST /api/admin/instagram-mirror` — cerminkan **post yang sudah terbit di Facebook** ke Instagram tanpa memposting ulang ke Facebook. Body `{ "id": "<uuid>" }` untuk satu artikel (atau `?id=` lewat GET), `{ "limit": 3 }` untuk beberapa post terbaru yang belum punya ID Instagram, `{ "reelId": "<uuid>" }` untuk satu Reel, dan `"force": true` untuk memaksa post yang sudah pernah dicerminkan. Wajib `Authorization: Bearer <CRON_SECRET>`.
 - `GET /api/cron/blob-cleanup?dryRun=1` — bersih-bersih kuota Vercel Blob (frame Reel, video lama, gambar kuis, foto artikel). Wajib `Authorization: Bearer <CRON_SECRET>`; `dryRun=1` hanya melaporkan.
 - `GET /api/public/posts?page=entertainment|news&limit=12` — feed publik (CORS terbuka) berisi post yang sudah terbit di Facebook/Instagram. Dipakai landing page; tidak perlu autentikasi.
 - `GET /api/cron` — proses satu artikel: terbit langsung ke Facebook (PopBeez) atau masuk antrean Buffer (berita). Hanya jalan di dalam jendela slot WITA, mematuhi batas 5 pengiriman/jam dan jeda 12 menit. Tambahkan `?force=1` untuk melewati jadwal slot (dipakai tombol **Terbitkan** manual). Wajib header `Authorization: Bearer <CRON_SECRET>`.

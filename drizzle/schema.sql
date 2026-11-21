@@ -128,3 +128,7 @@ CREATE INDEX IF NOT EXISTS "reels_created_idx" ON "reels" ("created_at");
 
 -- Mirror every published post to Instagram (@popbeez.hive).
 ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
+
+-- Re-mirror posts that are already live on Facebook to Instagram.
+ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
+ALTER TABLE "reels" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
