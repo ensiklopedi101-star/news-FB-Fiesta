@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { composeCaption, formatRoundupStories, normalizeBrand, withAudience } from "@/lib/caption";
+import { composeCaption, composeRoundupCaption, formatRoundupStories, normalizeBrand, withAudience } from "@/lib/caption";
 
 const paragraphs: [string, string] = [
   "WayV akhirnya buka suara soal rencana tur lintas benua mereka. Kabarnya sih udah disiapin dari tahun lalu.",
@@ -11,9 +11,25 @@ const paragraphs: [string, string] = [
 test("roundup caption titles and summaries remain paired in the supplied article order", () => {
   assert.deepEqual(
     formatRoundupStories(["Judul pertama", "Judul kedua", "Judul ketiga", "Judul keempat"], ["Ringkasan satu", "Ringkasan dua", "Ringkasan tiga", "Ringkasan empat"]),
-    ["1. Judul pertama — Ringkasan satu", "2. Judul kedua — Ringkasan dua", "3. Judul ketiga — Ringkasan tiga", "4. Judul keempat — Ringkasan empat"],
+    ["1️⃣ **Judul pertama**\nRingkasan satu", "2️⃣ **Judul kedua**\nRingkasan dua", "3️⃣ **Judul ketiga**\nRingkasan tiga", "4️⃣ **Judul keempat**\nRingkasan empat"],
   );
-  assert.throws(() => formatRoundupStories(["Judul"], []), /jumlah yang sama/);
+  assert.throws(() => formatRoundupStories(["Judul"], []), /berpasangan/);
+});
+
+test("roundup memakai template tetap dengan judul, pasangan berurutan, CTA, dan hashtag", () => {
+  const caption = composeRoundupCaption({
+    title: "🔥 POPBEEZ ROUNDUP: Rekor Global Disney+ Hingga Duel Masters Lanjut!",
+    titles: ["Berita satu", "Berita dua", "Berita tiga", "Berita empat"],
+    summaries: ["Ringkasan satu.", "Ringkasan dua.", "Ringkasan tiga.", "Ringkasan empat."],
+    question: "Dari 4 kabar ini, mana yang paling bikin kamu antusias?",
+    hashtags: ["#PopBeezRoundup", "#Topik1", "#Topik2", "#Topik3", "#Topik4", "#Update"],
+  });
+  assert.ok(caption.startsWith("🔥 POPBEEZ ROUNDUP: Rekor Global Disney+ Hingga Duel Masters Lanjut!"));
+  assert.match(caption, /Beezers, ada 4 kabar panas/);
+  assert.ok(caption.indexOf("Ringkasan satu") < caption.indexOf("2️⃣ **Berita dua**"));
+  assert.ok(caption.includes("💬 Beezers, dari 4 kabar ini, mana yang paling bikin kamu antusias?"));
+  assert.ok(caption.endsWith("#PopBeezRoundup #Topik1 #Topik2 #Topik3 #Topik4 #Update"));
+  assert.equal(caption.includes("Sudut pandang"), false);
 });
 
 test("caption tidak memakai label sudut pandang", () => {
