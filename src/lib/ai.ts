@@ -1,6 +1,6 @@
 import "server-only";
 import { GoogleGenAI, Type } from "@google/genai";
-import { composeCaption, composeRoundupCaption, normalizeBrand } from "@/lib/caption";
+import { composeCaption, composeRoundupCaption, isUntranslatedRoundupHeadline, normalizeBrand } from "@/lib/caption";
 import { PILLARS, type Pillar } from "@/lib/pillars";
 import { VOICE_STYLE_GUIDE, type EditorialVoice } from "@/lib/editorial-voices";
 import { safeProviderError } from "@/lib/ai-error";
@@ -14,10 +14,16 @@ const outputSchema = {
     narration: { type: Type.STRING },
     question: { type: Type.STRING },
     slidePoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+    roundupTitles: { type: Type.ARRAY, items: { type: Type.STRING } },
     roundupSummaries: { type: Type.ARRAY, items: { type: Type.STRING } },
     hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
   },
   required: ["title", "paragraphs", "take", "narration", "question", "slidePoints", "hashtags"],
+} as const;
+
+const roundupOutputSchema = {
+  ...outputSchema,
+  required: [...outputSchema.required, "roundupTitles", "roundupSummaries"],
 } as const;
 
 export type AiProviderAttempt = {
@@ -39,6 +45,8 @@ type GeneratedText = {
   voiceId: EditorialVoice["id"] | null;
   question: string;
   carouselSlides: string[];
+  /** Localized Indonesian headline per roundup story, in input article order. */
+  roundupTitles?: string[];
   /** One factual summary per roundup story, in input article order. */
   roundupSummaries?: string[];
 };
@@ -57,7 +65,7 @@ export class AiGenerationError extends Error {
   }
 }
 
-type GeneratedDraft = { title?: unknown; paragraphs?: unknown; take?: unknown; narration?: unknown; question?: unknown; slidePoints?: unknown; roundupSummaries?: unknown; hashtags?: unknown };
+type GeneratedDraft = { title?: unknown; paragraphs?: unknown; take?: unknown; narration?: unknown; question?: unknown; slidePoints?: unknown; roundupTitles?: unknown; roundupSummaries?: unknown; hashtags?: unknown };
 
 const AI_TOTAL_TIMEOUT_MS = 30_000;
 const AI_PROVIDER_TIMEOUT_MS = 12_000;
@@ -155,16 +163,16 @@ function buildPrompt(input: {
     ? `\n\nPilar konten post ini: ${PILLARS[input.pillar].label}.\n${PILLARS[input.pillar].brief}`
     : "";
   const roundup = input.roundupArticles?.length
-    ? `\n\nMODE ROUNDUP: Buat bahan untuk roundup Facebook dengan ${input.roundupArticles.length} cerita, mengikuti urutan sumber di bawah. Formatter akan menyusun caption final: judul roundup, pembuka tetap, setiap judul tepat di atas ringkasan pasangannya, CTA, lalu hashtag. Jangan menulis paragraf gabungan yang merangkum semua cerita; jangan mencampur fakta atau nama antar cerita. Wajib keluarkan roundupSummaries tepat ${input.roundupArticles.length} string sesuai urutan. Masing-masing 1–2 kalimat pendek (maksimal 240 karakter), hanya fakta dari cerita yang bersangkutan, dan parafrase dengan susunan kata sendiri. Judul, ringkasan, dan sumber harus tetap berpasangan sesuai indeks. Judul roundup harus merangkum beberapa topik, bukan hanya cerita pertama. Question harus berupa CTA ringan seperti “Dari ${input.roundupArticles.length} kabar ini, mana yang paling bikin kamu antusias?”\n${input.roundupArticles.map((story, index) => `CERITA ${index + 1} (PILAR ${story.category}; SUMBER ${story.sourceName}) — JUDUL: ${story.title}\nBAHAN: ${story.rawText.slice(0, 1_000) || "Isi tidak tersedia; gunakan judul saja."}`).join("\n\n")}`
+    ? `\n\nMODE ROUNDUP: Buat bahan untuk roundup Facebook dengan ${input.roundupArticles.length} cerita, mengikuti urutan sumber di bawah. Formatter akan menyusun caption final: judul roundup, pembuka tetap, setiap judul tepat di atas ringkasan pasangannya, CTA, lalu hashtag. Jangan menulis paragraf gabungan yang merangkum semua cerita; jangan mencampur fakta atau nama antar cerita. Wajib keluarkan dua daftar sesuai urutan sumber: roundupTitles berisi judul pendek dalam bahasa Indonesia yang menerjemahkan atau mengadaptasi judul asli secara akurat; roundupSummaries berisi ringkasan fakta. Judul wajib berbahasa Indonesia (bukan salinan judul Inggris), maksimal 120 karakter, tetap pertahankan nama orang, judul karya, dan istilah resmi yang memang nama diri. Jangan menambahkan fakta atau mengubah makna. Setiap ringkasan 1–2 kalimat pendek (maksimal 240 karakter), hanya fakta dari cerita bersangkutan, dan parafrase dengan susunan kata sendiri. Pasangkan judul, ringkasan, dan sumber menurut indeks. Judul roundup harus merangkum beberapa topik, bukan hanya cerita pertama. Question harus berupa CTA ringan seperti “Dari ${input.roundupArticles.length} kabar ini, mana yang paling bikin kamu antusias?”\n${input.roundupArticles.map((story, index) => `CERITA ${index + 1} (PILAR ${story.category}; SUMBER ${story.sourceName}) — JUDUL ASLI: ${story.title}\nBAHAN: ${story.rawText.slice(0, 1_000) || "Isi tidak tersedia; gunakan judul saja."}`).join("\n\n")}`
     : "";
   const responseFormat = input.roundupArticles?.length
-    ? `- roundupSummaries: tepat ${input.roundupArticles.length} string ringkasan sesuai urutan, masing-masing 1–2 kalimat dan maksimal 240 karakter.\n- hashtags: tepat 6 hashtag, satu #PopBeezRoundup dan lima nama/topik yang benar-benar ada pada berita.`
+    ? `- roundupTitles: tepat ${input.roundupArticles.length} judul pendek berbahasa Indonesia, diterjemahkan/adaptasi akurat dari judul sumber sesuai urutan, masing-masing maksimal 120 karakter. Jangan keluarkan judul Inggris mentah.\n- roundupSummaries: tepat ${input.roundupArticles.length} string ringkasan sesuai urutan, masing-masing 1–2 kalimat dan maksimal 240 karakter.\n- hashtags: tepat 6 hashtag, satu #PopBeezRoundup dan lima nama/topik yang benar-benar ada pada berita.`
     : "- slidePoints: tepat 2 fakta inti berbeda, maksimal 120 karakter, tanpa fakta baru.";
   const jsonFields = input.roundupArticles?.length
-    ? "title (judul gabungan roundup), paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), roundupSummaries (tepat sesuai jumlah berita), hashtags (tepat 6)"
+    ? "title (judul gabungan roundup), paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), roundupTitles (tepat sesuai jumlah berita), roundupSummaries (tepat sesuai jumlah berita), hashtags (tepat 6)"
     : "title, paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), hashtags (tepat 3)";
   const structure = input.roundupArticles?.length
-    ? `Struktur output untuk MODE ROUNDUP:\n1. title: judul yang merangkum beberapa topik dalam roundup.\n2. paragraphs: tetap isi 2 paragraf ringkas untuk kebutuhan metadata, tetapi jangan jadikan tempat untuk mengulang atau mencampur semua cerita; formatter tidak memasukkannya ke caption roundup.\n3. take: opini redaksi 1–2 kalimat yang relevan dan berbasis fakta, untuk metadata editorial.\n4. question: CTA ringan yang menanyakan kabar mana yang paling menarik bagi Beezers.\n5. narration: naskah Reels 25–35 detik sesuai fakta, tanpa emoji, hashtag, atau URL.\n6. roundupSummaries: ringkasan tiap cerita sesuai indeks dan urutan sumber.\n7. hashtags: 6 tag relevan.`
+    ? `Struktur output untuk MODE ROUNDUP:\n1. title: judul yang merangkum beberapa topik dalam roundup.\n2. paragraphs: tetap isi 2 paragraf ringkas untuk kebutuhan metadata, tetapi jangan jadikan tempat untuk mengulang atau mencampur semua cerita; formatter tidak memasukkannya ke caption roundup.\n3. take: opini redaksi 1–2 kalimat yang relevan dan berbasis fakta, untuk metadata editorial.\n4. question: CTA ringan yang menanyakan kabar mana yang paling menarik bagi Beezers.\n5. narration: naskah Reels 25–35 detik sesuai fakta, tanpa emoji, hashtag, atau URL.\n6. roundupTitles: terjemahan/adaptasi judul setiap cerita ke bahasa Indonesia, sesuai urutan.\n7. roundupSummaries: ringkasan tiap cerita sesuai indeks dan urutan sumber.\n8. hashtags: 6 tag relevan.`
     : `Struktur wajib:\n1. paragraphs[0]: hook 1–2 kalimat + fakta inti, kalimat sendiri. Jangan nyalin judul mentah.\n2. paragraphs[1]: konteks dan analisis. Sambungin berita ini sama tren industri, karya lain, atau efeknya buat penonton. Cuma boleh pakai fakta dari bahan; jelasin sebab-akibat atau perbandingan pakai kata kayak "karena", "tapi", "jadi", "dibanding", "padahal", "artinya".\n3. take: 1–2 kalimat opini + analisis dengan nada bicara. WAJIB dibuka dengan penyebutan nama brand, contoh "Menurut PopBeez sih, ..." atau "PopBeez rasa ...". Ini pendapat, bukan klaim fakta. Boleh satu emoji.\n4. question: satu pertanyaan buat Beezers, maksimal 120 karakter, ajak cerita atau pengalaman, bukan "setuju gak". Sebut "Beezers" di dalamnya.\n5. narration: naskah Reels 25-35 detik (70-85 kata): satu kalimat pembuka yang bikin penasaran, dua fakta inti, satu penilaian PopBeez, satu ajakan jawab. Ngobrol natural dan sebut Beezers sekali. Tanpa emoji, tanpa hashtag, tanpa URL, tanpa tanda kutip, tanpa "Halo semuanya".`;
   return `Kamu penulis PopBeez (media hiburan Indonesia). Kamu TIDAK menyalin berita; kamu nulis ulang berita pakai sudut pandang sendiri dan selalu nambah nilai baru, supaya konten aman dari penilaian "Limited Originality of Content" di Facebook. Pembaca PopBeez disebut "Beezers".
 
@@ -197,7 +205,7 @@ function normalizeHashtag(value: string): string | null {
   return tag.length >= 2 ? `#${tag}` : null;
 }
 
-function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCount?: number; roundupTitles?: string[] } = {}): GeneratedText {
+function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCount?: number; originalTitles?: string[] } = {}): GeneratedText {
   let data: GeneratedDraft;
   try {
     data = JSON.parse(raw) as GeneratedDraft;
@@ -221,11 +229,17 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCoun
   const hashtags = Array.isArray(data.hashtags)
     ? data.hashtags.filter((tag): tag is string => typeof tag === "string").map(normalizeHashtag).filter((tag): tag is string => Boolean(tag)).slice(0, hashtagCount)
     : [];
+  const roundupTitles = Array.isArray(data.roundupTitles)
+    ? data.roundupTitles.filter((part): part is string => typeof part === "string").map((part) => part.trim())
+    : [];
   const roundupSummaries = Array.isArray(data.roundupSummaries)
     ? data.roundupSummaries.filter((part): part is string => typeof part === "string").map((part) => part.trim())
     : [];
   const roundupInvalid = input.roundupCount !== undefined && (
-    roundupSummaries.length !== input.roundupCount || roundupSummaries.some((summary) => !summary || summary.length > 240)
+    roundupTitles.length !== input.roundupCount
+    || roundupTitles.some((headline, index) => !headline || headline.length > 120 || isUntranslatedRoundupHeadline(headline, input.originalTitles?.[index]))
+    || roundupSummaries.length !== input.roundupCount
+    || roundupSummaries.some((summary) => !summary || summary.length > 240)
   );
   if (!title || paragraphs.length !== 2 || !take || take.length < 40 || narration.length < 80 || narration.length > 900 || !question || question.length > 120 || slidePoints.length !== 2 || slidePoints.some((point) => point.length > 120) || hashtags.length !== hashtagCount || roundupInvalid) {
     throw new Error(`Hasil AI tidak memenuhi format artikel, pertanyaan, dan ${hashtagCount} hashtag.`);
@@ -235,7 +249,7 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCoun
   const caption = input.roundupCount !== undefined
     ? composeRoundupCaption({
       title,
-      titles: input.roundupTitles ?? roundupSummaries.map((_, index) => `Berita ${index + 1}`),
+      titles: roundupTitles,
       summaries: roundupSummaries,
       question,
       hashtags,
@@ -249,11 +263,11 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCoun
     voiceId: input.voice?.id ?? null,
     question,
     carouselSlides: input.roundupCount !== undefined ? roundupSummaries : [slidePoints[0]!, slidePoints[1]!, question],
-    ...(input.roundupCount !== undefined ? { roundupSummaries } : {}),
+    ...(input.roundupCount !== undefined ? { roundupTitles, roundupSummaries } : {}),
   };
 }
 
-async function generateWithGemini(apiKey: string, model: string, prompt: string, timeoutMs: number, voice?: EditorialVoice, roundupCount?: number, roundupTitles?: string[]): Promise<GeneratedText> {
+async function generateWithGemini(apiKey: string, model: string, prompt: string, timeoutMs: number, voice?: EditorialVoice, roundupCount?: number, originalTitles?: string[]): Promise<GeneratedText> {
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
@@ -263,19 +277,19 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
-      responseSchema: outputSchema,
+      responseSchema: roundupCount !== undefined ? roundupOutputSchema : outputSchema,
       temperature: 0.35,
       // Roundups need one strict summary per story in addition to the full draft;
       // 500 tokens can truncate valid responses before the JSON closes.
-      maxOutputTokens: roundupCount !== undefined ? 1_400 : 900,
+      maxOutputTokens: roundupCount !== undefined ? 1_600 : 900,
       httpOptions: { timeout: timeoutMs },
     },
   });
   if (!result.text) throw new Error("Gemini tidak mengembalikan ringkasan.");
-  return validateDraft(result.text, { voice, roundupCount, roundupTitles });
+  return validateDraft(result.text, { voice, roundupCount, originalTitles });
 }
 
-async function generateWithGroq(apiKey: string, model: string, prompt: string, timeoutMs: number, voice?: EditorialVoice, roundupCount?: number, roundupTitles?: string[]): Promise<GeneratedText> {
+async function generateWithGroq(apiKey: string, model: string, prompt: string, timeoutMs: number, voice?: EditorialVoice, roundupCount?: number, originalTitles?: string[]): Promise<GeneratedText> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -291,7 +305,7 @@ async function generateWithGroq(apiKey: string, model: string, prompt: string, t
       response_format: { type: "json_object" },
       temperature: 0.35,
       // Keep enough output budget for narration plus all ordered roundup summaries.
-      max_tokens: roundupCount !== undefined ? 1_400 : 900,
+      max_tokens: roundupCount !== undefined ? 1_600 : 900,
     }),
     signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",
@@ -307,7 +321,7 @@ async function generateWithGroq(apiKey: string, model: string, prompt: string, t
   }
   const raw = data?.choices?.[0]?.message?.content;
   if (typeof raw !== "string" || !raw.trim()) throw new Error("Groq tidak mengembalikan ringkasan.");
-  return validateDraft(raw, { voice, roundupCount, roundupTitles });
+  return validateDraft(raw, { voice, roundupCount, originalTitles });
 }
 
 export async function writeNewsCopy(input: {
@@ -338,7 +352,7 @@ export async function writeNewsCopy(input: {
 
   const prompt = buildPrompt(input);
   const roundupCount = input.roundupArticles?.length;
-  const roundupTitles = input.roundupArticles?.map((story) => story.title);
+  const originalTitles = input.roundupArticles?.map((story) => story.title);
   const attempts: AiProviderAttempt[] = [];
   const startedAt = Date.now();
   const budgetMs = Math.min(AI_MAX_BUDGET_MS, Math.max(AI_MIN_BUDGET_MS, Math.round(input.budgetMs ?? AI_TOTAL_TIMEOUT_MS)));
@@ -385,7 +399,7 @@ export async function writeNewsCopy(input: {
     const timeoutMs = providerTimeout();
     const models = timeoutMs > 0 ? await selectGroqModel(groqKey, Math.min(2_000, timeoutMs)) : [];
     for (const model of models) {
-      const result = await tryProvider("Groq", model, (attemptTimeout) => generateWithGroq(groqKey, model, prompt, attemptTimeout, input.voice, roundupCount, roundupTitles));
+      const result = await tryProvider("Groq", model, (attemptTimeout) => generateWithGroq(groqKey, model, prompt, attemptTimeout, input.voice, roundupCount, originalTitles));
       if (result) return result;
       if (/HTTP (?:401|403)|unauthorized|permission denied/i.test(attempts.at(-1)?.error || "") || Date.now() >= deadline) break;
     }
@@ -404,7 +418,7 @@ export async function writeNewsCopy(input: {
     if (timeoutMs <= 0) break;
     const models = await selectGeminiModel(provider.key, Math.min(2_000, timeoutMs));
     for (const model of models) {
-      const result = await tryProvider(provider.provider, model, (attemptTimeout) => generateWithGemini(provider.key, model, prompt, attemptTimeout, input.voice, roundupCount, roundupTitles));
+      const result = await tryProvider(provider.provider, model, (attemptTimeout) => generateWithGemini(provider.key, model, prompt, attemptTimeout, input.voice, roundupCount, originalTitles));
       if (result) return result;
       if (/HTTP (?:401|403)|unauthorized|permission denied/i.test(attempts.at(-1)?.error || "") || Date.now() >= deadline) break;
     }

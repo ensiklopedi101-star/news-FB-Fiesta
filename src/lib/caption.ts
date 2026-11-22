@@ -22,6 +22,34 @@ export function withAudience(question: string): string {
  * robot tell, so the opinion just continues the same voice.
  */
 const ROUNDUP_NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
+const INDONESIAN_HEADLINE_MARKER = /\b(dan|yang|di|ke|dari|untuk|dengan|pada|dalam|oleh|saat|usai|jelang|resmi|gelar|umumkan|mengumumkan|raih|meraih|cetak|mencetak|tayang|perdana|terbaru|tertinggi|kesan\s+pertama|kemenangan|lagu|pembuka|penutup|pemeran|jadwal|rilis|tampil|sukses|pecahkan|rekor|tembus|ungkap|mengungkap|kembali|siap|bakal|jadi|bikin|lewat|hingga|tanpa)\b/i;
+const ENGLISH_HEADLINE_MARKER = /^watch\s*:|\bfirst\s+impressions\b|\b(reveals?|unveils?|announces?|confirms?|teases?|soars?\s+to|takes?\s+\d+(?:st|nd|rd|th)\s+win|win\s+for|performances?\s+by|and\s+more|premiere\s+date|opening\s+theme(?:\s+song)?|ending\s+theme(?:\s+song)?|highest\s+(?:(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+)?ratings?|ratings?\s+yet|ahead\s+of|starring|shares?\s+(?:new|first|official)|drops?\s+(?:new|first|official))\b/i;
+
+function normalizeHeadlineComparison(value: string): string {
+  return value.replace(/[“”"‘’']/g, "\"").replace(/\s+/g, " ").trim().toLocaleLowerCase("id-ID");
+}
+
+/**
+ * Flags roundup story headlines that were left in English instead of localized
+ * into Indonesian, while keeping quoted or proper work titles intact.
+ */
+export function isUntranslatedRoundupHeadline(headline: string, originalTitle?: string): boolean {
+  const trimmed = headline.trim();
+  if (!trimmed) return true;
+  const unquoted = trimmed
+    .replace(/“[^”]*”|"[^"]*"|‘[^’]*’|'[^']*'/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (ENGLISH_HEADLINE_MARKER.test(unquoted)) {
+    return true;
+  }
+  if (!originalTitle?.trim()) return false;
+  const normalizedHeadline = normalizeHeadlineComparison(trimmed);
+  const normalizedOriginal = normalizeHeadlineComparison(originalTitle);
+  const copiesOriginal = normalizedHeadline === normalizedOriginal
+    || (normalizedHeadline.length >= 24 && normalizedOriginal.startsWith(normalizedHeadline));
+  return copiesOriginal && !INDONESIAN_HEADLINE_MARKER.test(originalTitle);
+}
 
 export function formatRoundupStories(titles: string[], summaries: string[]): string[] {
   if (titles.length !== ROUNDUP_NUMBER_EMOJIS.length || titles.length !== summaries.length) {

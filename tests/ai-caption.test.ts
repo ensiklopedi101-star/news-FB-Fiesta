@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { composeCaption, composeRoundupCaption, formatRoundupStories, normalizeBrand, withAudience } from "@/lib/caption";
+import { composeCaption, composeRoundupCaption, formatRoundupStories, isUntranslatedRoundupHeadline, normalizeBrand, withAudience } from "@/lib/caption";
 
 const paragraphs: [string, string] = [
   "WayV akhirnya buka suara soal rencana tur lintas benua mereka. Kabarnya sih udah disiapin dari tahun lalu.",
@@ -14,6 +14,45 @@ test("roundup caption titles and summaries remain paired in the supplied article
     ["1️⃣ **Judul pertama**\nRingkasan satu", "2️⃣ **Judul kedua**\nRingkasan dua", "3️⃣ **Judul ketiga**\nRingkasan tiga", "4️⃣ **Judul keempat**\nRingkasan empat"],
   );
   assert.throws(() => formatRoundupStories(["Judul"], []), /tepat empat/);
+});
+
+test("roundup caption memakai judul bahasa Indonesia yang berpasangan dengan ringkasan, bukan judul RSS Inggris", () => {
+  const caption = composeRoundupCaption({
+    title: "🔥 POPBEEZ ROUNDUP: Kemenangan NCT DREAM dan Drama Korea Tembus Rating Ganda",
+    titles: [
+      "The Blue Road: Kesan Pertama",
+      "Anime Bride of the Barrier Master Umumkan Tanggal Tayang",
+      "NCT DREAM Raih Kemenangan Ketiga di Music Core",
+      "100 Days of Deception Pecahkan Rating Tertinggi",
+    ],
+    summaries: ["Kasus lintas negara jadi fokus episode perdana.", "Anime ini tayang mulai Januari.", "Grup itu meraih kemenangan ketiga.", "Drama tersebut menyentuh rating dua digit."],
+    question: "Dari 4 kabar ini, mana yang paling bikin kamu antusias?",
+    hashtags: ["#PopBeezRoundup", "#NCTDREAM", "#DramaKorea", "#Anime", "#TheBlueRoad", "#Hiburan"],
+  });
+  assert.ok(caption.includes("2️⃣ **Anime Bride of the Barrier Master Umumkan Tanggal Tayang**"));
+  assert.ok(caption.includes("3️⃣ **NCT DREAM Raih Kemenangan Ketiga di Music Core**"));
+  assert.doesNotMatch(caption, /Takes 3rd Win|Trailer Reveals Premiere Date/);
+});
+
+test("guard judul roundup menolak judul RSS bahasa Inggris mentah dan menerima adaptasi bahasa Indonesia", () => {
+  const originals = [
+    "The Blue Road: Episode 1 (First Impressions)",
+    "Bride of the Barrier Master Anime Trailer Reveals Premiere Date, Opening Theme Song",
+    "Watch: NCT DREAM Takes 3rd Win For “Boogie Woogie” On “Music Core”; Performances By ITZY’s Chaeryeong, A2O SOUL, And More",
+    "“100 Days Of Deception” And “The Perfect Lie” Soar To Their Highest Saturday Ratings Yet",
+  ];
+  for (const original of originals) {
+    assert.equal(isUntranslatedRoundupHeadline(original, original), true, original);
+  }
+  assert.equal(isUntranslatedRoundupHeadline("NCT DREAM Takes 3rd Win For “Boogie Woogie” On “Music Core”", originals[2]), true);
+  assert.equal(isUntranslatedRoundupHeadline("The Blue Road Episode 1: Kesan Pertama Kasus Lintas Negara", originals[0]), false);
+  assert.equal(isUntranslatedRoundupHeadline("Trailer Anime Bride of the Barrier Master Umumkan Tanggal Tayang dan Lagu Pembuka", originals[1]), false);
+  assert.equal(isUntranslatedRoundupHeadline("NCT DREAM Raih Kemenangan Ketiga untuk “Boogie Woogie” di Music Core", originals[2]), false);
+  assert.equal(isUntranslatedRoundupHeadline("Drama “100 Days Of Deception” dan “The Perfect Lie” Cetak Rating Sabtu Tertinggi", originals[3]), false);
+  assert.equal(
+    isUntranslatedRoundupHeadline("Raisa Gelar Konser Tunggal di Stadion Madya Jakarta", "Raisa Gelar Konser Tunggal di Stadion Madya Jakarta"),
+    false,
+  );
 });
 
 test("roundup memakai template tetap dengan judul, pasangan berurutan, CTA, dan hashtag", () => {

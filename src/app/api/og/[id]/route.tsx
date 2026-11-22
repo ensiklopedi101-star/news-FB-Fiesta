@@ -39,6 +39,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     : article;
 
   const debugImage = searchParams.get("debug") === "image";
+  const localizedRoundupTitle = roundupIds ? searchParams.get("roundupTitle")?.trim() : null;
+  const displayTitle = localizedRoundupTitle || cardArticle.title;
   const isEntertainment = cardArticle.pageKey === "entertainment";
   const brand = (
     (isEntertainment ? process.env.PAGE_BRAND_ENTERTAINMENT : process.env.PAGE_BRAND_NEWS)
@@ -60,7 +62,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     number: requestedSlide,
     total: roundupIds.length,
     label: `BERITA ${requestedSlide}`,
-    text: `${cardArticle.title.slice(0, 90)} — ${article.carouselSlides?.[requestedSlide - 1] ?? "Ringkasan sedang disiapkan."}`,
+    text: `${displayTitle.slice(0, 95)} — ${article.carouselSlides?.[requestedSlide - 1] ?? "Ringkasan sedang disiapkan."}`,
   } : article.postFormat === "carousel" && !manualReview ? {
     number: requestedSlide,
     total: 4,
@@ -139,7 +141,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const card = await renderOgCard({
       brand,
       category,
-      title: cardArticle.title.slice(0, 130),
+      title: displayTitle.slice(0, 130),
       sourceName: cardArticle.sourceName,
       isEntertainment,
       photoJpeg,

@@ -21,13 +21,13 @@ export function selectedRoundupImage(article: {
  * is only a soft preference. Input order is editorial priority and stays aligned
  * across each image, caption summary, headline, and source.
  */
-export function roundupSlideUrls(appUrl: string, leadId: string, articleIds: readonly string[]): string[] {
-  if (articleIds.length !== POPBEEZ_ROUNDUP_MIN || articleIds[0] !== leadId) {
-    throw new Error("Roundup image URLs require exactly four ordered article IDs with the lead first.");
+export function roundupSlideUrls(appUrl: string, leadId: string, articleIds: readonly string[], localizedTitles: readonly string[]): string[] {
+  if (articleIds.length !== POPBEEZ_ROUNDUP_MIN || articleIds[0] !== leadId || localizedTitles.length !== POPBEEZ_ROUNDUP_MIN) {
+    throw new Error("Roundup image URLs require exactly four ordered article IDs and localized titles with the lead first.");
   }
   const orderedIds = articleIds.join(",");
   return articleIds.map((_, index) => {
-    const query = new URLSearchParams({ roundupIds: orderedIds, slide: String(index + 1) });
+    const query = new URLSearchParams({ roundupIds: orderedIds, slide: String(index + 1), roundupTitle: localizedTitles[index]! });
     return `${appUrl.replace(/\/$/, "")}/api/og/${leadId}?${query.toString()}`;
   });
 }
