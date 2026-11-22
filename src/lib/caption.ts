@@ -21,11 +21,11 @@ export function withAudience(question: string): string {
  * label. "Sudut pandang PopBeez · Santai:" in front of the opinion is the loudest
  * robot tell, so the opinion just continues the same voice.
  */
-const ROUNDUP_NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
+const ROUNDUP_NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
 
 export function formatRoundupStories(titles: string[], summaries: string[]): string[] {
-  if (!titles.length || titles.length !== summaries.length || titles.length > ROUNDUP_NUMBER_EMOJIS.length) {
-    throw new Error("Judul dan ringkasan roundup harus berpasangan, berurutan, dan maksimal lima cerita.");
+  if (titles.length !== ROUNDUP_NUMBER_EMOJIS.length || titles.length !== summaries.length) {
+    throw new Error("Roundup Feed harus berisi tepat empat judul dan empat ringkasan yang berpasangan.");
   }
   return titles.map((title, index) => `${ROUNDUP_NUMBER_EMOJIS[index]} **${normalizeBrand(title.trim())}**\n${normalizeBrand(summaries[index]!.trim())}`);
 }

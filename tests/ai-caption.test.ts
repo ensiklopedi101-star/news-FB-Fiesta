@@ -13,7 +13,7 @@ test("roundup caption titles and summaries remain paired in the supplied article
     formatRoundupStories(["Judul pertama", "Judul kedua", "Judul ketiga", "Judul keempat"], ["Ringkasan satu", "Ringkasan dua", "Ringkasan tiga", "Ringkasan empat"]),
     ["1️⃣ **Judul pertama**\nRingkasan satu", "2️⃣ **Judul kedua**\nRingkasan dua", "3️⃣ **Judul ketiga**\nRingkasan tiga", "4️⃣ **Judul keempat**\nRingkasan empat"],
   );
-  assert.throws(() => formatRoundupStories(["Judul"], []), /berpasangan/);
+  assert.throws(() => formatRoundupStories(["Judul"], []), /tepat empat/);
 });
 
 test("roundup memakai template tetap dengan judul, pasangan berurutan, CTA, dan hashtag", () => {

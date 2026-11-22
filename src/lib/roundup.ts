@@ -2,7 +2,7 @@ import type { Pillar } from "@/lib/pillars";
 import { isKnownAggregatorBrandImage, isSafePublicImageUrl } from "@/lib/safe-url";
 
 export const POPBEEZ_ROUNDUP_MIN = 4;
-export const POPBEEZ_ROUNDUP_MAX = 5;
+export const POPBEEZ_ROUNDUP_MAX = 4;
 
 export type RoundupCandidate = { id: string; pillar: Pillar };
 
@@ -16,14 +16,14 @@ export function selectedRoundupImage(article: {
 }
 
 /**
- * Select four or five queued stories. Pillar diversity is a soft preference only:
- * whenever there is a choice, prefer an unused pillar, but never reject a valid
- * roundup merely because its stories share a pillar. Input order is editorial
- * priority; the returned order is the exact image/caption/source order.
+ * Select exactly four queued stories for a full-size PopBeez carousel. Fewer than
+ * four eligible stories wait; extra stories stay queued for later. Pillar diversity
+ * is only a soft preference. Input order is editorial priority and stays aligned
+ * across each image, caption summary, headline, and source.
  */
 export function roundupSlideUrls(appUrl: string, leadId: string, articleIds: readonly string[]): string[] {
-  if (articleIds.length < POPBEEZ_ROUNDUP_MIN || articleIds.length > POPBEEZ_ROUNDUP_MAX || articleIds[0] !== leadId) {
-    throw new Error("Roundup image URLs require four or five ordered article IDs with the lead first.");
+  if (articleIds.length !== POPBEEZ_ROUNDUP_MIN || articleIds[0] !== leadId) {
+    throw new Error("Roundup image URLs require exactly four ordered article IDs with the lead first.");
   }
   const orderedIds = articleIds.join(",");
   return articleIds.map((_, index) => {
@@ -33,7 +33,6 @@ export function roundupSlideUrls(appUrl: string, leadId: string, articleIds: rea
 }
 
 export function selectRoundup<T extends RoundupCandidate>(candidates: readonly T[]): T[] | null {
-  if (candidates.length <= 2) return candidates.length ? [candidates[0]!] : [];
   if (candidates.length < POPBEEZ_ROUNDUP_MIN) return null;
 
   const target = Math.min(POPBEEZ_ROUNDUP_MAX, candidates.length);
