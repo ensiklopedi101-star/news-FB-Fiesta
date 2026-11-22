@@ -21,9 +21,31 @@ export function withAudience(question: string): string {
  * label. "Sudut pandang PopBeez · Santai:" in front of the opinion is the loudest
  * robot tell, so the opinion just continues the same voice.
  */
+const ROUNDUP_NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
+
 export function formatRoundupStories(titles: string[], summaries: string[]): string[] {
-  if (!titles.length || titles.length !== summaries.length) throw new Error("Judul dan ringkasan roundup harus memiliki jumlah yang sama.");
-  return titles.map((title, index) => `${index + 1}. ${normalizeBrand(title.trim())} — ${normalizeBrand(summaries[index]!.trim())}`);
+  if (titles.length !== ROUNDUP_NUMBER_EMOJIS.length || titles.length !== summaries.length) {
+    throw new Error("Roundup Feed harus berisi tepat empat judul dan empat ringkasan yang berpasangan.");
+  }
+  return titles.map((title, index) => `${ROUNDUP_NUMBER_EMOJIS[index]} **${normalizeBrand(title.trim())}**\n${normalizeBrand(summaries[index]!.trim())}`);
+}
+
+/** Fixed roundup layout keeps each summary directly under its matching headline. */
+export function composeRoundupCaption(input: {
+  title: string;
+  titles: string[];
+  summaries: string[];
+  question: string;
+  hashtags: string[];
+}): string {
+  const headline = input.title.replace(/^🔥\s*POPBEEZ ROUNDUP:\s*/i, "").trim();
+  return [
+    `🔥 POPBEEZ ROUNDUP: ${normalizeBrand(headline)}`,
+    `Beezers, ada ${input.titles.length} kabar panas yang nggak boleh kamu lewatin hari ini! PopBeez sudah rangkum biar kamu tetap up-to-date:`,
+    ...formatRoundupStories(input.titles, input.summaries),
+    `💬 ${withAudience(normalizeBrand(input.question))}`,
+    input.hashtags.join(" "),
+  ].join("\n\n");
 }
 
 export function composeCaption(input: {

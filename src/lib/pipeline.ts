@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db";
 import { articles, type Article } from "@/lib/schema";
 import { publishPolicy } from "@/lib/schedule";
 import { classifyPillar, type Pillar } from "@/lib/pillars";
-import { roundupSlideUrls, selectedRoundupImage, selectRoundup } from "@/lib/roundup";
+import { POPBEEZ_ROUNDUP_MIN, roundupSlideUrls, selectedRoundupImage, selectRoundup } from "@/lib/roundup";
 import { witaDayNumber } from "@/lib/publish-slots";
 import { MANUAL_REVIEW_SOURCE_NAMES } from "@/lib/manual-review";
 import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
@@ -331,15 +331,23 @@ export async function runNewsPipeline(): Promise<RunResult> {
     if (missingChannel.length) {
       return { result: "failed", detail: `Artikel tetap di antrean: ${missingChannel.join(", ")} belum diatur untuk Page ini.` };
     }
-    const [popbeezQueued] = await db.select({ value: sql<number>`count(*)` }).from(articles)
+    const popbeezQueued = await db.select({
+      imageUrl: articles.imageUrl,
+      imageUrls: articles.imageUrls,
+      manualImageUrls: articles.manualImageUrls,
+    }).from(articles)
       .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "entertainment")));
-    if (Number(popbeezQueued?.value ?? 0) === 3) {
-      return { result: "idle", detail: "PopBeez menunggu satu artikel lagi untuk memenuhi carousel roundup minimum 4 gambar." };
+    if (popbeezQueued.length) {
+      const imageReady = popbeezQueued.filter((row) => selectedRoundupImage(row)).length;
+      return {
+        result: "idle",
+        detail: `Feed Hiburan menunggu carousel tepat 4 gambar: ${imageReady}/4 artikel antrean punya gambar yang layak (total antrean ${popbeezQueued.length}).`,
+      };
     }
     return { result: "idle", detail: "Tidak ada berita baru di feed yang dikonfigurasi." };
   }
 
-  const isRoundup = article.pageKey === "entertainment" && claimedArticles.length >= 4;
+  const isRoundup = article.pageKey === "entertainment" && claimedArticles.length === POPBEEZ_ROUNDUP_MIN;
   const roundupArticles = isRoundup ? claimedArticles : [];
   const articleIds = claimedArticles.map((story) => story.id);
   const directFacebook = usesDirectFacebookPublishing(article.pageKey);

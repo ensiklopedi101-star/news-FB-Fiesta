@@ -734,6 +734,9 @@ export default function Dashboard() {
         {feedPages.size > 0 && [...feedPages].some((key) => key === "news" || key === "entertainment") && (
           <p className="muted small-note">Halaman tujuan aktif: {[...feedPages].map((key) => key === "news" ? "Berita" : "Hiburan").join(" · ")}</p>
         )}
+        {feedPages.has("entertainment") && (
+          <p className="muted small-note">Feed Hiburan hanya terbit sebagai carousel tepat 4 gambar yang layak. Jika belum ada 4, publisher menunggu; halaman Berita memakai alur post single terpisah.</p>
+        )}
         {data?.pillars?.list && (
           <div className="pillar-block">
             <div className="pillar-head">

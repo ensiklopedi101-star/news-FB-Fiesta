@@ -1,6 +1,6 @@
 import "server-only";
 import { GoogleGenAI, Type } from "@google/genai";
-import { composeCaption, formatRoundupStories, normalizeBrand } from "@/lib/caption";
+import { composeCaption, composeRoundupCaption, normalizeBrand } from "@/lib/caption";
 import { PILLARS, type Pillar } from "@/lib/pillars";
 import { VOICE_STYLE_GUIDE, type EditorialVoice } from "@/lib/editorial-voices";
 import { safeProviderError } from "@/lib/ai-error";
@@ -155,24 +155,22 @@ function buildPrompt(input: {
     ? `\n\nPilar konten post ini: ${PILLARS[input.pillar].label}.\n${PILLARS[input.pillar].brief}`
     : "";
   const roundup = input.roundupArticles?.length
-    ? `\n\nMODE ROUNDUP: Tulis roundup Facebook yang thumb-stopping dengan pembuka kuat dan CTA percakapan yang ringan. Ini ${input.roundupArticles.length} cerita, dalam urutan tetap berikut. Wajib keluarkan roundupSummaries berisi tepat ${input.roundupArticles.length} ringkasan; indeks 1 hanya merangkum cerita 1, indeks 2 hanya cerita 2, dan seterusnya. Jangan menukar, menggabungkan, atau mengaitkan fakta, judul, pilar, maupun sumber antar cerita. Setiap ringkasan 1 kalimat sangat singkat (maksimal 110 karakter), hanya fakta yang ada di bahan. paragraphs[0] adalah hook roundup, paragraphs[1] konteks singkat yang tidak menggantikan ringkasan per cerita. Caption disusun dari hook, daftar bernomor roundupSummaries, konteks, opini, pertanyaan/CTA, hashtag.\n${input.roundupArticles.map((story, index) => `CERITA ${index + 1} (PILAR ${story.category}; SUMBER ${story.sourceName}) — JUDUL: ${story.title}\nBAHAN: ${story.rawText.slice(0, 1_000) || "Isi tidak tersedia; gunakan judul saja."}`).join("\n\n")}`
+    ? `\n\nMODE ROUNDUP: Buat bahan untuk roundup Facebook dengan ${input.roundupArticles.length} cerita, mengikuti urutan sumber di bawah. Formatter akan menyusun caption final: judul roundup, pembuka tetap, setiap judul tepat di atas ringkasan pasangannya, CTA, lalu hashtag. Jangan menulis paragraf gabungan yang merangkum semua cerita; jangan mencampur fakta atau nama antar cerita. Wajib keluarkan roundupSummaries tepat ${input.roundupArticles.length} string sesuai urutan. Masing-masing 1–2 kalimat pendek (maksimal 240 karakter), hanya fakta dari cerita yang bersangkutan, dan parafrase dengan susunan kata sendiri. Judul, ringkasan, dan sumber harus tetap berpasangan sesuai indeks. Judul roundup harus merangkum beberapa topik, bukan hanya cerita pertama. Question harus berupa CTA ringan seperti “Dari ${input.roundupArticles.length} kabar ini, mana yang paling bikin kamu antusias?”\n${input.roundupArticles.map((story, index) => `CERITA ${index + 1} (PILAR ${story.category}; SUMBER ${story.sourceName}) — JUDUL: ${story.title}\nBAHAN: ${story.rawText.slice(0, 1_000) || "Isi tidak tersedia; gunakan judul saja."}`).join("\n\n")}`
     : "";
   const responseFormat = input.roundupArticles?.length
-    ? `- roundupSummaries: tepat ${input.roundupArticles.length} string ringkasan, berurutan sesuai daftar berita, masing-masing maksimal 110 karakter.`
+    ? `- roundupSummaries: tepat ${input.roundupArticles.length} string ringkasan sesuai urutan, masing-masing 1–2 kalimat dan maksimal 240 karakter.\n- hashtags: tepat 6 hashtag, satu #PopBeezRoundup dan lima nama/topik yang benar-benar ada pada berita.`
     : "- slidePoints: tepat 2 fakta inti berbeda, maksimal 120 karakter, tanpa fakta baru.";
   const jsonFields = input.roundupArticles?.length
-    ? "title, paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), roundupSummaries (tepat sesuai jumlah berita), hashtags (tepat 3)"
+    ? "title (judul gabungan roundup), paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), roundupSummaries (tepat sesuai jumlah berita), hashtags (tepat 6)"
     : "title, paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), hashtags (tepat 3)";
+  const structure = input.roundupArticles?.length
+    ? `Struktur output untuk MODE ROUNDUP:\n1. title: judul yang merangkum beberapa topik dalam roundup.\n2. paragraphs: tetap isi 2 paragraf ringkas untuk kebutuhan metadata, tetapi jangan jadikan tempat untuk mengulang atau mencampur semua cerita; formatter tidak memasukkannya ke caption roundup.\n3. take: opini redaksi 1–2 kalimat yang relevan dan berbasis fakta, untuk metadata editorial.\n4. question: CTA ringan yang menanyakan kabar mana yang paling menarik bagi Beezers.\n5. narration: naskah Reels 25–35 detik sesuai fakta, tanpa emoji, hashtag, atau URL.\n6. roundupSummaries: ringkasan tiap cerita sesuai indeks dan urutan sumber.\n7. hashtags: 6 tag relevan.`
+    : `Struktur wajib:\n1. paragraphs[0]: hook 1–2 kalimat + fakta inti, kalimat sendiri. Jangan nyalin judul mentah.\n2. paragraphs[1]: konteks dan analisis. Sambungin berita ini sama tren industri, karya lain, atau efeknya buat penonton. Cuma boleh pakai fakta dari bahan; jelasin sebab-akibat atau perbandingan pakai kata kayak "karena", "tapi", "jadi", "dibanding", "padahal", "artinya".\n3. take: 1–2 kalimat opini + analisis dengan nada bicara. WAJIB dibuka dengan penyebutan nama brand, contoh "Menurut PopBeez sih, ..." atau "PopBeez rasa ...". Ini pendapat, bukan klaim fakta. Boleh satu emoji.\n4. question: satu pertanyaan buat Beezers, maksimal 120 karakter, ajak cerita atau pengalaman, bukan "setuju gak". Sebut "Beezers" di dalamnya.\n5. narration: naskah Reels 25-35 detik (70-85 kata): satu kalimat pembuka yang bikin penasaran, dua fakta inti, satu penilaian PopBeez, satu ajakan jawab. Ngobrol natural dan sebut Beezers sekali. Tanpa emoji, tanpa hashtag, tanpa URL, tanpa tanda kutip, tanpa "Halo semuanya".`;
   return `Kamu penulis PopBeez (media hiburan Indonesia). Kamu TIDAK menyalin berita; kamu nulis ulang berita pakai sudut pandang sendiri dan selalu nambah nilai baru, supaya konten aman dari penilaian "Limited Originality of Content" di Facebook. Pembaca PopBeez disebut "Beezers".
 
 ${VOICE_STYLE_GUIDE}
 
-Struktur wajib:
-1. paragraphs[0]: hook 1–2 kalimat + fakta inti, kalimat sendiri. Jangan nyalin judul mentah.
-2. paragraphs[1]: konteks dan analisis. Sambungin berita ini sama tren industri, karya lain, atau efeknya buat penonton. Cuma boleh pakai fakta dari bahan; jelasin sebab-akibat atau perbandingan pakai kata kayak "karena", "tapi", "jadi", "dibanding", "padahal", "artinya".
-3. take: 1–2 kalimat opini + analisis dengan nada bicara. WAJIB dibuka dengan penyebutan nama brand, contoh "Menurut PopBeez sih, ..." atau "PopBeez rasa ...". Ini pendapat, bukan klaim fakta. Boleh satu emoji.
-4. question: satu pertanyaan buat Beezers, maksimal 120 karakter, ajak cerita atau pengalaman, bukan "setuju gak". Sebut "Beezers" di dalamnya.
-5. narration: naskah Reels 25-35 detik (70-85 kata): satu kalimat pembuka yang bikin penasaran, dua fakta inti, satu penilaian PopBeez, satu ajakan jawab. Ngobrol natural dan sebut Beezers sekali. Tanpa emoji, tanpa hashtag, tanpa URL, tanpa tanda kutip, tanpa "Halo semuanya".
+${structure}
 
 Larangan keras:
 - Jangan nyalin kalimat sumber; jangan pakai 5 kata berurutan yang sama dengan bahan.
@@ -183,7 +181,7 @@ Larangan keras:
 
 Aturan tambahan:
 - Nama brand selalu ditulis "PopBeez" (B kapital). Pembaca selalu "Beezers".
-- 3 hashtag spesifik dari nama/topik yang benar-benar ada di bahan.
+${input.roundupArticles?.length ? "- Untuk roundup: 6 hashtag, #PopBeezRoundup plus lima nama/topik yang benar-benar ada di berita." : "- Untuk post biasa: 3 hashtag spesifik dari nama/topik yang benar-benar ada di bahan."}
 ${responseFormat}
 - Kembalikan hanya JSON valid dengan field: ${jsonFields}.
 
@@ -219,29 +217,29 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCoun
   const slidePoints = Array.isArray(data.slidePoints)
     ? data.slidePoints.filter((part): part is string => typeof part === "string").map((part) => part.trim()).filter(Boolean).slice(0, 2)
     : [];
+  const hashtagCount = input.roundupCount !== undefined ? 6 : 3;
   const hashtags = Array.isArray(data.hashtags)
-    ? data.hashtags.filter((tag): tag is string => typeof tag === "string").map(normalizeHashtag).filter((tag): tag is string => Boolean(tag)).slice(0, 3)
+    ? data.hashtags.filter((tag): tag is string => typeof tag === "string").map(normalizeHashtag).filter((tag): tag is string => Boolean(tag)).slice(0, hashtagCount)
     : [];
   const roundupSummaries = Array.isArray(data.roundupSummaries)
     ? data.roundupSummaries.filter((part): part is string => typeof part === "string").map((part) => part.trim())
     : [];
   const roundupInvalid = input.roundupCount !== undefined && (
-    roundupSummaries.length !== input.roundupCount || roundupSummaries.some((summary) => !summary || summary.length > 110)
+    roundupSummaries.length !== input.roundupCount || roundupSummaries.some((summary) => !summary || summary.length > 240)
   );
-  if (!title || paragraphs.length !== 2 || !take || take.length < 40 || narration.length < 80 || narration.length > 900 || !question || question.length > 120 || slidePoints.length !== 2 || slidePoints.some((point) => point.length > 120) || hashtags.length !== 3 || roundupInvalid) {
-    throw new Error("Hasil AI tidak memenuhi format judul, 2 paragraf, sudut pandang redaksi, 2 fakta carousel, pertanyaan, dan 3 hashtag.");
+  if (!title || paragraphs.length !== 2 || !take || take.length < 40 || narration.length < 80 || narration.length > 900 || !question || question.length > 120 || slidePoints.length !== 2 || slidePoints.some((point) => point.length > 120) || hashtags.length !== hashtagCount || roundupInvalid) {
+    throw new Error(`Hasil AI tidak memenuhi format artikel, pertanyaan, dan ${hashtagCount} hashtag.`);
   }
 
   const spokenTake = normalizeBrand(take);
   const caption = input.roundupCount !== undefined
-    ? [
-      normalizeBrand(paragraphs[0]!),
-      ...formatRoundupStories(input.roundupTitles ?? roundupSummaries.map((_, index) => `Berita ${index + 1}`), roundupSummaries),
-      normalizeBrand(paragraphs[1]!),
-      spokenTake,
-      normalizeBrand(question),
-      hashtags.join(" "),
-    ].join("\n\n")
+    ? composeRoundupCaption({
+      title,
+      titles: input.roundupTitles ?? roundupSummaries.map((_, index) => `Berita ${index + 1}`),
+      summaries: roundupSummaries,
+      question,
+      hashtags,
+    })
     : composeCaption({ paragraphs: [paragraphs[0]!, paragraphs[1]!], take: spokenTake, question, hashtags });
   return {
     title: normalizeBrand(title).slice(0, 180),

@@ -11,30 +11,31 @@ test("roundup uses one selected image per article and ignores image-less article
   assert.equal(selectedRoundupImage({ imageUrl: "https://cdn.rss.app/brand.png", imageUrls: [] }), null);
 });
 
-test("each carousel image URL carries the same ordered source IDs and its matching slide index", () => {
-  const ids = ["a", "b", "c", "d", "e"].map((value) => `${value}0000000-0000-4000-8000-000000000000`);
+test("each carousel image URL carries exactly four ordered source IDs and its matching slide index", () => {
+  const ids = ["a", "b", "c", "d"].map((value) => `${value}0000000-0000-4000-8000-000000000000`);
   const urls = roundupSlideUrls("https://popbeez.example/", ids[0]!, ids);
-  assert.equal(urls.length, 5);
+  assert.equal(urls.length, 4);
   urls.forEach((url, index) => {
     const parsed = new URL(url);
     assert.equal(parsed.searchParams.get("roundupIds"), ids.join(","));
     assert.equal(parsed.searchParams.get("slide"), String(index + 1));
   });
-  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, ids.slice(0, 3)), /four or five/);
+  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, [...ids, "e0000000-0000-4000-8000-000000000000"]), /exactly four/);
+  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, ids.slice(0, 3)), /exactly four/);
 });
 
-test("roundup uses a single story for queues of one or two", () => {
-  assert.deepEqual(selectRoundup([breaking("a")])?.map((item) => item.id), ["a"]);
-  assert.deepEqual(selectRoundup([breaking("a"), breaking("b")])?.map((item) => item.id), ["a"]);
+test("entertainment waits instead of sending single stories until four image-eligible items exist", () => {
+  assert.equal(selectRoundup([breaking("a")]), null);
+  assert.equal(selectRoundup([breaking("a"), breaking("b")]), null);
 });
 
 test("three stories wait for a thumb-stopping roundup", () => {
   assert.equal(selectRoundup([breaking("a"), breaking("b"), breaking("c")]), null);
 });
 
-test("four or five stories from one pillar remain eligible", () => {
+test("roundups always contain exactly four stories even when more are queued", () => {
   assert.deepEqual(selectRoundup([1, 2, 3, 4].map((id) => breaking(String(id))))?.map((item) => item.id), ["1", "2", "3", "4"]);
-  assert.equal(selectRoundup([1, 2, 3, 4, 5, 6].map((id) => breaking(String(id))))?.length, 5);
+  assert.equal(selectRoundup([1, 2, 3, 4, 5, 6].map((id) => breaking(String(id))))?.length, 4);
 });
 
 test("pillar diversity is a preference and chosen ordering is preserved", () => {
@@ -43,5 +44,5 @@ test("pillar diversity is a preference and chosen ordering is preserved", () => 
     { id: "c", pillar: "analysis" as const },
     breaking("d"), { id: "e", pillar: "manga" as const },
   ]);
-  assert.deepEqual(selected?.map((item) => item.id), ["a", "c", "e", "b", "d"]);
+  assert.deepEqual(selected?.map((item) => item.id), ["a", "c", "e", "b"]);
 });
