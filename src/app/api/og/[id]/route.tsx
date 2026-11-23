@@ -39,6 +39,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     : article;
 
   const debugImage = searchParams.get("debug") === "image";
+  const localizedRoundupTitle = roundupIds ? searchParams.get("roundupTitle")?.replace(/\*+/g, "").trim() : null;
+  const displayTitle = (localizedRoundupTitle || cardArticle.title).replace(/\*+/g, "").trim();
   const isEntertainment = cardArticle.pageKey === "entertainment";
   const brand = (
     (isEntertainment ? process.env.PAGE_BRAND_ENTERTAINMENT : process.env.PAGE_BRAND_NEWS)
@@ -56,11 +58,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // New image fields from the feed occasionally carry the rss.app placeholder again,
   // so stored rows are re-checked at render time instead of trusting the database.
   const isFollowCtaSlide = !roundupIds && !manualReview && isEntertainment && requestedSlide === 4;
+  // Roundup slides show only the catchy localized headline in cover typography,
+  // never a combined "headline — summary" paragraph on top of the photo.
   const slide = roundupIds ? {
     number: requestedSlide,
     total: roundupIds.length,
     label: `BERITA ${requestedSlide}`,
-    text: `${cardArticle.title.slice(0, 90)} — ${article.carouselSlides?.[requestedSlide - 1] ?? "Ringkasan sedang disiapkan."}`,
   } : article.postFormat === "carousel" && !manualReview ? {
     number: requestedSlide,
     total: 4,
@@ -139,7 +142,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const card = await renderOgCard({
       brand,
       category,
-      title: cardArticle.title.slice(0, 130),
+      title: displayTitle.slice(0, 130),
       sourceName: cardArticle.sourceName,
       isEntertainment,
       photoJpeg,

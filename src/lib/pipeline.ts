@@ -229,8 +229,8 @@ async function writeGuardedCopy(
     caption: copy.caption,
     take: copy.take,
     question: copy.question,
-    // Roundup headlines are displayed verbatim by design; only compare captions
-    // with source bodies so those attributions don't trigger the verbatim guard.
+    // Roundup headlines are localized for readers; compare the caption with source
+    // bodies after stripping source headlines to avoid counting attribution as copying.
     sourceText: (roundupArticles.length ? roundupArticles : [article])
       .map((story) => stripHeadlineFromSourceText(story.originalTitle, story.rawText))
       .join("\n\n"),
@@ -449,18 +449,19 @@ export async function runNewsPipeline(): Promise<RunResult> {
         .where(eq(articles.id, article.id));
     }
     if (articleIds.length > 1) {
-      await db.update(articles).set({
+      await Promise.all(articleIds.map((storyId, index) => db.update(articles).set({
+        ...(index > 0 && copy.roundupTitles?.[index] ? { title: copy.roundupTitles[index] } : {}),
         status: "ready",
         postFormat,
         facebookPostId: `${pendingPrefix}:${article.id}`,
         updatedAt: new Date(),
-      }).where(inArray(articles.id, articleIds));
+      }).where(eq(articles.id, storyId))));
     }
     await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
 
     const appUrl = getPublicAppUrl();
     const imageUrls = isRoundup
-      ? roundupSlideUrls(appUrl, article.id, articleIds)
+      ? roundupSlideUrls(appUrl, article.id, articleIds, copy.roundupTitles ?? [])
       : postFormat === "carousel"
         ? Array.from({ length: 4 }, (_, index) => `${appUrl}/api/og/${article.id}?slide=${index + 1}`)
         : [`${appUrl}/api/og/${article.id}`];

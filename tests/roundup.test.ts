@@ -13,15 +13,18 @@ test("roundup uses one selected image per article and ignores image-less article
 
 test("each carousel image URL carries exactly four ordered source IDs and its matching slide index", () => {
   const ids = ["a", "b", "c", "d"].map((value) => `${value}0000000-0000-4000-8000-000000000000`);
-  const urls = roundupSlideUrls("https://popbeez.example/", ids[0]!, ids);
+  const localizedTitles = ["The Blue Road: Kesan Pertama", "Anime Bride of the Barrier Master Umumkan Tanggal Tayang", "NCT DREAM Raih Kemenangan Ketiga di Music Core", "100 Days of Deception Pecahkan Rating Tertinggi"];
+  const urls = roundupSlideUrls("https://popbeez.example/", ids[0]!, ids, localizedTitles);
   assert.equal(urls.length, 4);
   urls.forEach((url, index) => {
     const parsed = new URL(url);
     assert.equal(parsed.searchParams.get("roundupIds"), ids.join(","));
     assert.equal(parsed.searchParams.get("slide"), String(index + 1));
+    assert.equal(parsed.searchParams.get("roundupTitle"), localizedTitles[index]);
   });
-  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, [...ids, "e0000000-0000-4000-8000-000000000000"]), /exactly four/);
-  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, ids.slice(0, 3)), /exactly four/);
+  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, [...ids, "e0000000-0000-4000-8000-000000000000"], localizedTitles), /exactly four/);
+  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, ids.slice(0, 3), localizedTitles.slice(0, 3)), /exactly four/);
+  assert.throws(() => roundupSlideUrls("https://popbeez.example", ids[0]!, ids, localizedTitles.slice(0, 3)), /exactly four/);
 });
 
 test("entertainment waits instead of sending single stories until four image-eligible items exist", () => {

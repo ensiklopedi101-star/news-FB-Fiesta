@@ -99,7 +99,7 @@ function buildSvg(options: OgCardOptions): string {
     `<text x="540" y="${titleTop + index * title.lineHeight}" text-anchor="middle" fill="${index === 0 ? palette.highlight : "#fff"}" font-family="DejaVu Sans, sans-serif" font-size="${title.fontSize}" font-weight="900" letter-spacing="-1">${escapeXml(line)}</text>`,
   ).join("");
   const slideText = options.slide?.text?.trim();
-  const slideLines = slideText ? wrapWords(slideText, 34).slice(0, 6) : [];
+  const slideLines = slideText ? reviewTextLines(slideText, 34, 6) : [];
   const followSlideMarkup = options.slide?.isFollowCta
     ? `<text x="540" y="430" text-anchor="middle" fill="${palette.highlight}" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="800" letter-spacing="3">IKUTI POPBEEZ</text>
       <circle cx="430" cy="528" r="52" fill="#1877F2"/><text x="430" y="555" text-anchor="middle" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="84" font-weight="900">f</text>

@@ -69,6 +69,23 @@ test("renders a carousel information slide as a square branded JPEG", async () =
   assert.equal(metadata.height, 1080);
 });
 
+test("roundup carousel slide renders headline-only cover typography without summary body text", async () => {
+  const darkPhoto = await sharp({ create: { width: 60, height: 60, channels: 3, background: { r: 8, g: 8, b: 10 } } }).png().toBuffer();
+  const output = await renderOgCard({
+    brand: "PopBeez",
+    category: "K-POP",
+    title: "Album Baru P1Harmony Langsung Melesat ke Puncak Billboard",
+    sourceName: "Soompi",
+    isEntertainment: true,
+    photoJpeg: darkPhoto,
+    slide: { number: 2, total: 4, label: "BERITA 2" },
+  });
+  // First line of headline-only cover typography is highlighted in yellow around y=600..660,
+  // while the upper band where body-slide labels sit (y=440..485) stays clear over the photo.
+  assert.ok(await countYellowPixels(output, { left: 160, top: 560, width: 760, height: 130 }) > 80);
+  assert.equal(await countYellowPixels(output, { left: 320, top: 440, width: 440, height: 50 }), 0);
+});
+
 /** Scans a card region and returns how many pixels look like the HIVECOMP yellow. */
 async function countYellowPixels(image: Buffer, region: { left: number; top: number; width: number; height: number }) {
   const { data, info } = await sharp(image)
