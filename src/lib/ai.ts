@@ -1,6 +1,6 @@
 import "server-only";
 import { GoogleGenAI, Type } from "@google/genai";
-import { composeCaption, composeRoundupCaption, isUntranslatedRoundupHeadline, normalizeBrand } from "@/lib/caption";
+import { composeCaption, composeRoundupCaption, isUntranslatedRoundupHeadline, normalizeBrand, stripMarkdownBold } from "@/lib/caption";
 import { PILLARS, type Pillar } from "@/lib/pillars";
 import { VOICE_STYLE_GUIDE, type EditorialVoice } from "@/lib/editorial-voices";
 import { safeProviderError } from "@/lib/ai-error";
@@ -163,16 +163,16 @@ function buildPrompt(input: {
     ? `\n\nPilar konten post ini: ${PILLARS[input.pillar].label}.\n${PILLARS[input.pillar].brief}`
     : "";
   const roundup = input.roundupArticles?.length
-    ? `\n\nMODE ROUNDUP: Buat bahan untuk roundup Facebook dengan ${input.roundupArticles.length} cerita, mengikuti urutan sumber di bawah. Formatter akan menyusun caption final: judul roundup, pembuka tetap, setiap judul tepat di atas ringkasan pasangannya, CTA, lalu hashtag. Jangan menulis paragraf gabungan yang merangkum semua cerita; jangan mencampur fakta atau nama antar cerita. Wajib keluarkan dua daftar sesuai urutan sumber: roundupTitles berisi judul pendek dalam bahasa Indonesia yang menerjemahkan atau mengadaptasi judul asli secara akurat; roundupSummaries berisi ringkasan fakta. Judul wajib berbahasa Indonesia (bukan salinan judul Inggris), maksimal 120 karakter, tetap pertahankan nama orang, judul karya, dan istilah resmi yang memang nama diri. Jangan menambahkan fakta atau mengubah makna. Setiap ringkasan 1–2 kalimat pendek (maksimal 240 karakter), hanya fakta dari cerita bersangkutan, dan parafrase dengan susunan kata sendiri. Pasangkan judul, ringkasan, dan sumber menurut indeks. Judul roundup harus merangkum beberapa topik, bukan hanya cerita pertama. Question harus berupa CTA ringan seperti “Dari ${input.roundupArticles.length} kabar ini, mana yang paling bikin kamu antusias?”\n${input.roundupArticles.map((story, index) => `CERITA ${index + 1} (PILAR ${story.category}; SUMBER ${story.sourceName}) — JUDUL ASLI: ${story.title}\nBAHAN: ${story.rawText.slice(0, 1_000) || "Isi tidak tersedia; gunakan judul saja."}`).join("\n\n")}`
+    ? `\n\nMODE ROUNDUP: Buat bahan untuk roundup Facebook dengan ${input.roundupArticles.length} cerita, mengikuti urutan sumber di bawah. Formatter akan menyusun caption final: judul roundup, pembuka tetap, setiap judul tepat di atas ringkasan pasangannya, CTA, lalu hashtag. Jangan menulis paragraf gabungan yang merangkum semua cerita; jangan mencampur fakta atau nama antar cerita. Wajib keluarkan dua daftar sesuai urutan sumber: roundupTitles berisi judul pendek berbahasa Indonesia yang tajam, hidup, dan memancing rasa penasaran sehingga pembaca tertarik mengklik/membaca (gaya redaksi hiburan profesional, bukan terjemahan kaku dan DILARANG menyalin judul bahasa Inggris); roundupSummaries berisi ringkasan fakta. Setiap item roundupTitles wajib berbahasa Indonesia (ideal 6–11 kata, maksimal 95 karakter, tanpa tanda bintang Markdown **), tetap pertahankan nama artis/grup dan judul karya resmi, fokus pada sudut paling menarik dari cerita tersebut tanpa mendaftarkan deretan panjang nama artis mentah, dan jangan mengarang fakta atau membuat clickbait bohong. Setiap ringkasan 1–2 kalimat pendek (maksimal 240 karakter), hanya fakta dari cerita bersangkutan, dan parafrase dengan susunan kata sendiri. Pasangkan judul, ringkasan, dan sumber menurut indeks. Judul roundup utama (title) harus merangkum beberapa topik secara menarik, tanpa tanda bintang **. Question harus berupa CTA ringan seperti “Dari ${input.roundupArticles.length} kabar ini, mana yang paling bikin kamu antusias?”\n${input.roundupArticles.map((story, index) => `CERITA ${index + 1} (PILAR ${story.category}; SUMBER ${story.sourceName}) — JUDUL ASLI: ${story.title}\nBAHAN: ${story.rawText.slice(0, 1_000) || "Isi tidak tersedia; gunakan judul saja."}`).join("\n\n")}`
     : "";
   const responseFormat = input.roundupArticles?.length
-    ? `- roundupTitles: tepat ${input.roundupArticles.length} judul pendek berbahasa Indonesia, diterjemahkan/adaptasi akurat dari judul sumber sesuai urutan, masing-masing maksimal 120 karakter. Jangan keluarkan judul Inggris mentah.\n- roundupSummaries: tepat ${input.roundupArticles.length} string ringkasan sesuai urutan, masing-masing 1–2 kalimat dan maksimal 240 karakter.\n- hashtags: tepat 6 hashtag, satu #PopBeezRoundup dan lima nama/topik yang benar-benar ada pada berita.`
+    ? `- roundupTitles: tepat ${input.roundupArticles.length} judul pendek berbahasa Indonesia yang menarik rasa penasaran untuk kartu carousel & subjudul caption (6–11 kata, maksimal 95 karakter, akurat sesuai fakta, tanpa tanda bintang **, bukan judul bahasa Inggris).\n- roundupSummaries: tepat ${input.roundupArticles.length} string ringkasan sesuai urutan, masing-masing 1–2 kalimat dan maksimal 240 karakter.\n- hashtags: tepat 6 hashtag, satu #PopBeezRoundup dan lima nama/topik yang benar-benar ada pada berita.`
     : "- slidePoints: tepat 2 fakta inti berbeda, maksimal 120 karakter, tanpa fakta baru.";
   const jsonFields = input.roundupArticles?.length
     ? "title (judul gabungan roundup), paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), roundupTitles (tepat sesuai jumlah berita), roundupSummaries (tepat sesuai jumlah berita), hashtags (tepat 6)"
     : "title, paragraphs (tepat 2 string), take, narration, question, slidePoints (tepat 2 string), hashtags (tepat 3)";
   const structure = input.roundupArticles?.length
-    ? `Struktur output untuk MODE ROUNDUP:\n1. title: judul yang merangkum beberapa topik dalam roundup.\n2. paragraphs: tetap isi 2 paragraf ringkas untuk kebutuhan metadata, tetapi jangan jadikan tempat untuk mengulang atau mencampur semua cerita; formatter tidak memasukkannya ke caption roundup.\n3. take: opini redaksi 1–2 kalimat yang relevan dan berbasis fakta, untuk metadata editorial.\n4. question: CTA ringan yang menanyakan kabar mana yang paling menarik bagi Beezers.\n5. narration: naskah Reels 25–35 detik sesuai fakta, tanpa emoji, hashtag, atau URL.\n6. roundupTitles: terjemahan/adaptasi judul setiap cerita ke bahasa Indonesia, sesuai urutan.\n7. roundupSummaries: ringkasan tiap cerita sesuai indeks dan urutan sumber.\n8. hashtags: 6 tag relevan.`
+    ? `Struktur output untuk MODE ROUNDUP:\n1. title: judul gabungan yang menarik dan merangkum beberapa topik dalam roundup (tanpa **).\n2. paragraphs: tetap isi 2 paragraf ringkas untuk kebutuhan metadata, tetapi jangan jadikan tempat untuk mengulang atau mencampur semua cerita; formatter tidak memasukkannya ke caption roundup.\n3. take: opini redaksi 1–2 kalimat yang relevan dan berbasis fakta, untuk metadata editorial.\n4. question: CTA ringan yang menanyakan kabar mana yang paling menarik bagi Beezers.\n5. narration: naskah Reels 25–35 detik sesuai fakta, tanpa emoji, hashtag, atau URL.\n6. roundupTitles: judul pendek Bahasa Indonesia yang memikat rasa penasaran per cerita (untuk kartu gambar & caption), sesuai urutan sumber.\n7. roundupSummaries: ringkasan tiap cerita sesuai indeks dan urutan sumber.\n8. hashtags: 6 tag relevan.`
     : `Struktur wajib:\n1. paragraphs[0]: hook 1–2 kalimat + fakta inti, kalimat sendiri. Jangan nyalin judul mentah.\n2. paragraphs[1]: konteks dan analisis. Sambungin berita ini sama tren industri, karya lain, atau efeknya buat penonton. Cuma boleh pakai fakta dari bahan; jelasin sebab-akibat atau perbandingan pakai kata kayak "karena", "tapi", "jadi", "dibanding", "padahal", "artinya".\n3. take: 1–2 kalimat opini + analisis dengan nada bicara. WAJIB dibuka dengan penyebutan nama brand, contoh "Menurut PopBeez sih, ..." atau "PopBeez rasa ...". Ini pendapat, bukan klaim fakta. Boleh satu emoji.\n4. question: satu pertanyaan buat Beezers, maksimal 120 karakter, ajak cerita atau pengalaman, bukan "setuju gak". Sebut "Beezers" di dalamnya.\n5. narration: naskah Reels 25-35 detik (70-85 kata): satu kalimat pembuka yang bikin penasaran, dua fakta inti, satu penilaian PopBeez, satu ajakan jawab. Ngobrol natural dan sebut Beezers sekali. Tanpa emoji, tanpa hashtag, tanpa URL, tanpa tanda kutip, tanpa "Halo semuanya".`;
   return `Kamu penulis PopBeez (media hiburan Indonesia). Kamu TIDAK menyalin berita; kamu nulis ulang berita pakai sudut pandang sendiri dan selalu nambah nilai baru, supaya konten aman dari penilaian "Limited Originality of Content" di Facebook. Pembaca PopBeez disebut "Beezers".
 
@@ -213,7 +213,7 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCoun
     throw new Error("Respons AI bukan JSON yang valid.");
   }
 
-  const title = typeof data.title === "string" ? data.title.trim() : "";
+  const title = typeof data.title === "string" ? stripMarkdownBold(data.title) : "";
   const paragraphs = Array.isArray(data.paragraphs)
     ? data.paragraphs.filter((part): part is string => typeof part === "string").map((part) => part.trim()).filter(Boolean).slice(0, 2)
     : [];
@@ -230,14 +230,14 @@ function validateDraft(raw: string, input: { voice?: EditorialVoice; roundupCoun
     ? data.hashtags.filter((tag): tag is string => typeof tag === "string").map(normalizeHashtag).filter((tag): tag is string => Boolean(tag)).slice(0, hashtagCount)
     : [];
   const roundupTitles = Array.isArray(data.roundupTitles)
-    ? data.roundupTitles.filter((part): part is string => typeof part === "string").map((part) => part.trim())
+    ? data.roundupTitles.filter((part): part is string => typeof part === "string").map((part) => stripMarkdownBold(part))
     : [];
   const roundupSummaries = Array.isArray(data.roundupSummaries)
-    ? data.roundupSummaries.filter((part): part is string => typeof part === "string").map((part) => part.trim())
+    ? data.roundupSummaries.filter((part): part is string => typeof part === "string").map((part) => stripMarkdownBold(part))
     : [];
   const roundupInvalid = input.roundupCount !== undefined && (
     roundupTitles.length !== input.roundupCount
-    || roundupTitles.some((headline, index) => !headline || headline.length > 120 || isUntranslatedRoundupHeadline(headline, input.originalTitles?.[index]))
+    || roundupTitles.some((headline, index) => !headline || headline.length > 110 || isUntranslatedRoundupHeadline(headline, input.originalTitles?.[index]))
     || roundupSummaries.length !== input.roundupCount
     || roundupSummaries.some((summary) => !summary || summary.length > 240)
   );

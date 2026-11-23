@@ -41,6 +41,7 @@ const DEFAULT_MIN_SCORE = 45;
 
 function words(text: string): string[] {
   return text
+    .normalize("NFKC")
     .toLocaleLowerCase("id-ID")
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .split(/\s+/)

@@ -1,37 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { composeCaption, composeRoundupCaption, formatRoundupStories, isUntranslatedRoundupHeadline, normalizeBrand, withAudience } from "@/lib/caption";
+import { composeCaption, composeRoundupCaption, formatRoundupStories, isUntranslatedRoundupHeadline, normalizeBrand, toFacebookBold, withAudience } from "@/lib/caption";
 
 const paragraphs: [string, string] = [
   "WayV akhirnya buka suara soal rencana tur lintas benua mereka. Kabarnya sih udah disiapin dari tahun lalu.",
   "Yang bikin beda, mereka milih nunggu waktu yang pas ketimbang buru-buru ikut tren.",
 ];
 
-test("roundup caption titles and summaries remain paired in the supplied article order", () => {
-  assert.deepEqual(
-    formatRoundupStories(["Judul pertama", "Judul kedua", "Judul ketiga", "Judul keempat"], ["Ringkasan satu", "Ringkasan dua", "Ringkasan tiga", "Ringkasan empat"]),
-    ["1️⃣ **Judul pertama**\nRingkasan satu", "2️⃣ **Judul kedua**\nRingkasan dua", "3️⃣ **Judul ketiga**\nRingkasan tiga", "4️⃣ **Judul keempat**\nRingkasan empat"],
+test("roundup caption titles and summaries remain paired in the supplied article order without markdown asterisks", () => {
+  const formatted = formatRoundupStories(
+    ["**Judul pertama**", "Judul kedua", "Judul ketiga", "Judul keempat"],
+    ["Ringkasan satu", "Ringkasan dua", "Ringkasan tiga", "Ringkasan empat"],
   );
+  assert.deepEqual(formatted, [
+    `1️⃣ ${toFacebookBold("Judul pertama")}\nRingkasan satu`,
+    `2️⃣ ${toFacebookBold("Judul kedua")}\nRingkasan dua`,
+    `3️⃣ ${toFacebookBold("Judul ketiga")}\nRingkasan tiga`,
+    `4️⃣ ${toFacebookBold("Judul keempat")}\nRingkasan empat`,
+  ]);
+  assert.equal(formatted.some((entry) => entry.includes("*")), false);
   assert.throws(() => formatRoundupStories(["Judul"], []), /tepat empat/);
 });
 
-test("roundup caption memakai judul bahasa Indonesia yang berpasangan dengan ringkasan, bukan judul RSS Inggris", () => {
+test("roundup caption memakai judul bahasa Indonesia tebal Unicode tanpa asterik Markdown", () => {
   const caption = composeRoundupCaption({
-    title: "🔥 POPBEEZ ROUNDUP: Kemenangan NCT DREAM dan Drama Korea Tembus Rating Ganda",
+    title: "🔥 **POPBEEZ ROUNDUP: Sakamoto Days Tamat hingga P1Harmony Puncaki Billboard**",
     titles: [
-      "The Blue Road: Kesan Pertama",
-      "Anime Bride of the Barrier Master Umumkan Tanggal Tayang",
-      "NCT DREAM Raih Kemenangan Ketiga di Music Core",
-      "100 Days of Deception Pecahkan Rating Tertinggi",
+      "Manga Sakamoto Days Resmi Tamat Lewat Chapter Penutup",
+      "Album Baru P1Harmony Langsung Melesat ke Puncak Billboard",
+      "Drama 100 Days of Deception Kuasai Peringkat Drama Terpopuler",
+      "Jujutsu Kaisen Tembus Daftar Bestseller New York Times",
     ],
-    summaries: ["Kasus lintas negara jadi fokus episode perdana.", "Anime ini tayang mulai Januari.", "Grup itu meraih kemenangan ketiga.", "Drama tersebut menyentuh rating dua digit."],
+    summaries: ["Manga ini tamat di chapter 284.", "Album BLOW UP debut di puncak chart.", "Drama tvN ini kembali memuncaki daftar.", "Volume perdana masuk daftar terlaris."],
     question: "Dari 4 kabar ini, mana yang paling bikin kamu antusias?",
-    hashtags: ["#PopBeezRoundup", "#NCTDREAM", "#DramaKorea", "#Anime", "#TheBlueRoad", "#Hiburan"],
+    hashtags: ["#PopBeezRoundup", "#SakamotoDays", "#P1Harmony", "#100DaysOfDeception", "#JujutsuKaisen", "#MangaNews"],
   });
-  assert.ok(caption.includes("2️⃣ **Anime Bride of the Barrier Master Umumkan Tanggal Tayang**"));
-  assert.ok(caption.includes("3️⃣ **NCT DREAM Raih Kemenangan Ketiga di Music Core**"));
-  assert.doesNotMatch(caption, /Takes 3rd Win|Trailer Reveals Premiere Date/);
+  assert.equal(caption.includes("*"), false);
+  assert.ok(caption.includes(`2️⃣ ${toFacebookBold("Album Baru P1Harmony Langsung Melesat ke Puncak Billboard")}`));
+  assert.ok(caption.normalize("NFKC").includes("2️⃣ Album Baru P1Harmony Langsung Melesat ke Puncak Billboard"));
+  assert.doesNotMatch(caption.normalize("NFKC"), /Sweep Top Spots|Ends in Weekly Shonen Jump/);
 });
 
 test("guard judul roundup menolak judul RSS bahasa Inggris mentah dan menerima adaptasi bahasa Indonesia", () => {
@@ -40,6 +48,11 @@ test("guard judul roundup menolak judul RSS bahasa Inggris mentah dan menerima a
     "Bride of the Barrier Master Anime Trailer Reveals Premiere Date, Opening Theme Song",
     "Watch: NCT DREAM Takes 3rd Win For “Boogie Woogie” On “Music Core”; Performances By ITZY’s Chaeryeong, A2O SOUL, And More",
     "“100 Days Of Deception” And “The Perfect Lie” Soar To Their Highest Saturday Ratings Yet",
+    "Sakamoto Days Manga Ends in Weekly Shonen Jump",
+    "P1Harmony, ILLIT, Stray Kids, xikers, CORTIS, ENHYPEN, IVE, BTS, K/DA, And More Sweep Top Spots On Billboard World Albums Chart",
+    "“100 Days Of Deception” And Its Stars Dominate Most Buzzworthy Drama And Actor Rankings",
+    "Chainsaw Man, Jujutsu Kaisen, More Manga Rank on NYT November Bestseller List",
+    "Dan Da Dan Season 2 Key Visual",
   ];
   for (const original of originals) {
     assert.equal(isUntranslatedRoundupHeadline(original, original), true, original);
@@ -49,6 +62,10 @@ test("guard judul roundup menolak judul RSS bahasa Inggris mentah dan menerima a
   assert.equal(isUntranslatedRoundupHeadline("Trailer Anime Bride of the Barrier Master Umumkan Tanggal Tayang dan Lagu Pembuka", originals[1]), false);
   assert.equal(isUntranslatedRoundupHeadline("NCT DREAM Raih Kemenangan Ketiga untuk “Boogie Woogie” di Music Core", originals[2]), false);
   assert.equal(isUntranslatedRoundupHeadline("Drama “100 Days Of Deception” dan “The Perfect Lie” Cetak Rating Sabtu Tertinggi", originals[3]), false);
+  assert.equal(isUntranslatedRoundupHeadline("Manga Sakamoto Days Resmi Tamat Lewat Chapter Penutup di Shonen Jump", originals[4]), false);
+  assert.equal(isUntranslatedRoundupHeadline("Album Baru P1Harmony “BLOW UP” Langsung Melesat ke Puncak Billboard", originals[5]), false);
+  assert.equal(isUntranslatedRoundupHeadline("“100 Days of Deception” Kuasai Peringkat Drama dan Aktor Paling Ramai Dibahas", originals[6]), false);
+  assert.equal(isUntranslatedRoundupHeadline("Jujutsu Kaisen dan SPY x FAMILY Tembus Daftar Bestseller New York Times", originals[7]), false);
   assert.equal(
     isUntranslatedRoundupHeadline("Raisa Gelar Konser Tunggal di Stadion Madya Jakarta", "Raisa Gelar Konser Tunggal di Stadion Madya Jakarta"),
     false,
@@ -63,11 +80,12 @@ test("roundup memakai template tetap dengan judul, pasangan berurutan, CTA, dan 
     question: "Dari 4 kabar ini, mana yang paling bikin kamu antusias?",
     hashtags: ["#PopBeezRoundup", "#Topik1", "#Topik2", "#Topik3", "#Topik4", "#Update"],
   });
-  assert.ok(caption.startsWith("🔥 POPBEEZ ROUNDUP: Rekor Global Disney+ Hingga Duel Masters Lanjut!"));
+  assert.ok(caption.normalize("NFKC").startsWith("🔥 POPBEEZ ROUNDUP: Rekor Global Disney+ Hingga Duel Masters Lanjut!"));
   assert.match(caption, /Beezers, ada 4 kabar panas/);
-  assert.ok(caption.indexOf("Ringkasan satu") < caption.indexOf("2️⃣ **Berita dua**"));
+  assert.ok(caption.indexOf("Ringkasan satu.") < caption.indexOf(`2️⃣ ${toFacebookBold("Berita dua")}`));
   assert.ok(caption.includes("💬 Beezers, dari 4 kabar ini, mana yang paling bikin kamu antusias?"));
   assert.ok(caption.endsWith("#PopBeezRoundup #Topik1 #Topik2 #Topik3 #Topik4 #Update"));
+  assert.equal(caption.includes("*"), false);
   assert.equal(caption.includes("Sudut pandang"), false);
 });
 
