@@ -23,6 +23,7 @@ function configuredSecretValues(): string[] {
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_FALLBACK,
     process.env.GROQ_API_KEY,
+    process.env.OPENROUTER_API_KEY,
     process.env.BUFFER_API_KEY,
     process.env.FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN,
     process.env.IG_ACCESS_TOKEN,
