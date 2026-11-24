@@ -33,6 +33,7 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
+    version: "2.0.0",
     database: "connected",
     schema: schemaReady ? "ready" : "migration-required",
     activeFeeds,

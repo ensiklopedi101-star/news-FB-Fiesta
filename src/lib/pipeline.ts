@@ -7,7 +7,7 @@ import { classifyPillar, type Pillar } from "@/lib/pillars";
 import { POPBEEZ_ROUNDUP_MIN, roundupSlideUrls, selectedRoundupImage, selectRoundup } from "@/lib/roundup";
 import { witaDayNumber } from "@/lib/publish-slots";
 import { MANUAL_REVIEW_SOURCE_NAMES } from "@/lib/manual-review";
-import { writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
+import { AiGenerationError, writeNewsCopy, type GeneratedCopy } from "@/lib/ai";
 import { getBufferConfigurationGaps } from "@/lib/buffer";
 import { BufferEnqueueOutcomeUnknownError } from "@/lib/buffer-api";
 import { addPageComment, FacebookPublishOutcomeUnknownError, type PageKey } from "@/lib/facebook";
@@ -68,7 +68,7 @@ async function claimNextArticles(): Promise<Article[]> {
     const rows = await db.select({ id: articles.id, title: articles.title, category: articles.category, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls, manualImageUrls: articles.manualImageUrls })
       .from(articles)
       .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "entertainment")))
-      .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
+      .orderBy(asc(articles.priorityAt), asc(articles.attempts), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
       .limit(30);
     const eligibleRows = rows.filter((row) => selectedRoundupImage(row));
     const selection = selectRoundup(eligibleRows.map((row) => ({ ...row, pillar: classifyPillar(row) })));
@@ -606,8 +606,24 @@ export async function runNewsPipeline(options?: {
       };
     }
 
+    const transientAiFailure = error instanceof AiGenerationError && article.attempts + 1 < 3;
+    if (transientAiFailure) {
+      await db.update(articles)
+        .set({
+          status: "queued",
+          facebookPostId: null,
+          attempts: sql`${articles.attempts} + 1`,
+          errorMessage: `[Percobaan ${article.attempts + 1}/3] ${message}`.slice(0, 1_000),
+          updatedAt: new Date(),
+        })
+        .where(and(inArray(articles.id, articleIds), or(eq(articles.status, "processing"), eq(articles.status, "ready"))));
+      logStage(`requeued-after-ai-error attempt=${article.attempts + 1}`);
+      console.warn(`[pipeline] artikel ${article.id} dikembalikan ke antrean (percobaan ${article.attempts + 1}/3):`, message);
+      return { result: "failed", articleId: article.id, detail: `Gangguan AI sementara (dikembalikan ke antrean, percobaan ${article.attempts + 1}/3): ${message}` };
+    }
+
     await db.update(articles)
-      .set({ status: "failed", facebookPostId: null, attempts: article.attempts + 1, errorMessage: message.slice(0, 1_000), updatedAt: new Date() })
+      .set({ status: "failed", facebookPostId: null, attempts: sql`${articles.attempts} + 1`, errorMessage: message.slice(0, 1_000), updatedAt: new Date() })
       .where(and(inArray(articles.id, articleIds), or(eq(articles.status, "processing"), eq(articles.status, "ready"))));
     logStage("failed");
     console.error(`[pipeline] artikel ${article.id}:`, message);

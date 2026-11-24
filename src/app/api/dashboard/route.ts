@@ -230,12 +230,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      version: "2.0.0",
       checkedAt: new Date().toISOString(),
       diagnostics,
       integrations,
       aiModels: {
-        groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "llama-3.3-70b-versatile",
-        gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "gemini-3.8-flash",
+        groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "otomatis (router v2 · maks 850 OTPM)",
+        gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "otomatis (Gemini 3.x / 2.5 Flash-Lite)",
       },
       readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       originality,

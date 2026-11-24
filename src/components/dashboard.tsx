@@ -686,6 +686,32 @@ export default function Dashboard() {
     }
   }
 
+  async function requeueAllFailedArticles() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/admin/retry", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bulk: true }),
+        cache: "no-store",
+      });
+      const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || `Gagal memulihkan antrean (HTTP ${response.status}).`);
+      }
+      setMessage(result.message || "Artikel gagal dikembalikan ke antrean.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal memulihkan artikel gagal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function publishOne() {
     if (!window.confirm("Ini akan menerbitkan satu artikel sungguhan ke halaman tujuan. Posting langsung terbit di Facebook; jika memakai Buffer, post masuk antrean sesuai jadwal channel. Lanjutkan?")) return;
     setBusy(true);
@@ -810,7 +836,7 @@ export default function Dashboard() {
     <main className="dashboard-shell">
       <header className="dashboard-header">
         <div className="brand-mark">N</div>
-        <div className="header-title"><strong>News FB Fiesta</strong><span>Panel redaksi otomatis</span></div>
+        <div className="header-title"><strong>News FB Fiesta v2.0</strong><span>Panel redaksi otomatis · AI Engine v2</span></div>
         <div className="header-right"><span className={canPublish ? "system-pill ready" : "system-pill pending"}>{canPublish ? "SIAP PUBLIKASI" : "SETUP BELUM LENGKAP"}</span><button className="quiet-button" onClick={() => { setAuthenticated(false); setData(null); setSystemDiagnostics(null); setSecret(""); }}>Keluar</button></div>
       </header>
 
@@ -937,6 +963,11 @@ export default function Dashboard() {
           <button type="button" className="secondary-button" disabled={busy || !canPublish} onClick={() => void publishOne()}>
             Terbitkan 1 post manual
           </button>
+          {(activeDiagnostics?.failedArticles.length ?? 0) > 0 && (
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => void requeueAllFailedArticles()}>
+              Pulihkan artikel gagal ({activeDiagnostics?.failedArticles.length})
+            </button>
+          )}
           <button type="button" className="quiet-button" disabled={!activeDiagnostics} onClick={() => void copyDiagnosticsReport()}>
             {diagCopied ? "Laporan tersalin ✓" : "Salin laporan JSON"}
           </button>
