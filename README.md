@@ -1,6 +1,6 @@
-# News FB Fiesta
+# News FB Fiesta v2.0
 
-Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman, fallback RSS) → caption AI (Groq → Gemini → Gemini cadangan) → news card 1080×1350 → antrean Buffer → Facebook Page**. Satu database **Neon Postgres** melalui `DATABASE_URL` melayani dua channel publikasi: `news` dan `entertainment`. Supabase tidak dibutuhkan. Aplikasi ini tidak membuat video Reels.
+Backend Next.js untuk alur **RSS → cuplikan artikel (scrape aman hemat-waktu, fallback RSS) → AI Resilience Engine v2 (Groq OTPM-aware → Gemini 3.x/2.5 REST langsung → Gemini cadangan) → news card / roundup carousel 4 slide → Facebook Graph API / Buffer + cermin Instagram di latar belakang**. Satu database **Neon Postgres** melalui `DATABASE_URL` melayani dua channel publikasi (`news` dan `entertainment`) beserta telemetri & pemantau error mandiri (`automation_logs`). Supabase tidak dibutuhkan.
 
 > Repository tidak menyimpan kredensial. Hubungkan Neon lewat `DATABASE_URL`; daftar RSS dikelola dari Dashboard aplikasi dan disimpan di Neon. API AI dan Buffer diatur di Vercel Environment Variables.
 
@@ -61,7 +61,8 @@ Lalu di Vercel set `REELS_RENDER_URL=https://vps-kamu:8080`, `REELS_WORKER_TOKEN
 16. Jalankan [`drizzle/0013_instagram.sql`](./drizzle/0013_instagram.sql) untuk menyimpan ID media Instagram (`instagram_media_id`) setiap post yang berhasil dicerminkan ke @popbeez.hive. Tanpa kolom ini posting Instagram tetap jalan, tetapi tautan post IG tidak tercatat.
 17. Jalankan [`drizzle/0014_instagram_mirror.sql`](./drizzle/0014_instagram_mirror.sql) untuk menandai post lama yang boleh dicerminkan ulang ke Instagram tanpa memposting ulang ke Facebook.
 18. **Wajib sebelum deploy ritme baru**: jalankan [`drizzle/0015_content_pillars.sql`](./drizzle/0015_content_pillars.sql) untuk menambah kolom `articles.pillar`. Publisher menyimpan pilar pada baris yang sama dengan status `ready`; tanpa kolom ini update tersebut gagal dan artikel tidak akan pernah tayang. Kalau ragu, jalankan dulu file SQL-nya, baru merge/deploy.
-11. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
+19. Opsional / otomatis di v2.0: [`drizzle/0016_automation_logs.sql`](./drizzle/0016_automation_logs.sql) menyimpan detak eksekusi `/api/cron`, `/api/harvest`, auto-harvest, serta riwayat error sistem (tabel ini juga dibuat otomatis saat runtime bila belum ada).
+20. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -77,7 +78,7 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 - `GEMINI_API_KEY_FALLBACK`: key Gemini cadangan, dicoba jika key Gemini utama gagal.
 - `GEMINI_MODEL`: opsional, preferensi model Gemini. Aplikasi hanya memakai model yang terdaftar dan mendukung `generateContent`, lalu mencoba kandidat Flash/Flash-Lite yang hemat.
 
-Aplikasi memeriksa ketersediaan model per key saat proses generasi, memilih kandidat yang terdaftar, dan mencoba model berikutnya jika model gagal. Pilihan awal memprioritaskan model kecil berbiaya rendah; keluaran dibatasi 350 token. `GROQ_MODEL` dan `GEMINI_MODEL` tetap opsional sebagai preferensi yang hanya dipakai jika tersedia. Dashboard menampilkan model konfigurasi dan status percobaan AI; log diagnostik menampilkan provider, model, waktu, status HTTP dan pesan aman tanpa nilai API key. Kegagalan provider atau format hasil mengaktifkan provider berikutnya.
+Aplikasi v2.0 memakai **AI Resilience Engine v2** (`src/lib/ai.ts`, `src/lib/ai-draft.ts`): skema JSON ramping terpisah untuk mode Roundup vs Single, batas default Groq `max_tokens=850` (aman di bawah plafon `1000 OTPM` tier `on_demand` dengan *auto-downshift* bila limit organisasi lebih rendah), pembersih blok `<think>...</think>` untuk model penalaran Qwen/DeepSeek, transport REST `generateContent` langsung untuk Gemini yang memprioritaskan keluarga `gemini-3.x` di atas `2.5` dengan cache model 10 menit, serta pelindung antrean sementara (*transient retry shield* hingga 3 percobaan sebelum menandai artikel `failed`).
 - `BUFFER_API_KEY`: API key Buffer (Bearer token), simpan hanya sebagai environment variable Vercel.
 - `BUFFER_NEWS_CHANNEL_ID`: ID channel Facebook Page berita yang sudah terhubung ke Buffer.
 - `BUFFER_ENTERTAINMENT_CHANNEL_ID`: ID channel Facebook Page hiburan yang sudah terhubung ke Buffer.
@@ -183,8 +184,8 @@ Satu database Neon menyimpan semua artikel beserta `page_key`; tidak perlu membu
 1. Push branch/repository ke GitHub dan hubungkan project ke Vercel sebagai Next.js.
 2. Tambahkan environment variables di Vercel dan deploy. `APP_URL` harus sama dengan URL deployment publik; `CRON_SECRET` harus terisi dan dirahasiakan.
 3. Di [cron-job.org](https://cron-job.org/), buat dua tugas HTTPS. Untuk keduanya, atur header `Authorization: Bearer <CRON_SECRET>` menggunakan nilai yang sama dengan environment Vercel—jangan menaruh secret di URL.
-   - **Panen RSS:** `POST https://<domain-aplikasi>/api/harvest`, setiap 4 jam.
-   - **Publisher:** `GET https://<domain-aplikasi>/api/cron`, pada menit `00` dan `15` setiap jam. Di luar jam slot responsnya `outside-slot` (bukan kegagalan); aplikasi yang menghitung WITA, jadi zona waktu cron-job.org tetap UTC.
+   - **Panen RSS:** `GET` atau `POST https://<domain-aplikasi>/api/harvest`, setiap 2–4 jam (dibatasi ~22 detik agar aman dari timeout 30 detik `cron-job.org`).
+   - **Publisher:** `GET` atau `POST https://<domain-aplikasi>/api/cron`, pada menit `00` dan `15` setiap jam. Di luar jam slot responsnya `outside-slot` (dan otomatis memicu panen RSS cadangan bila feed belum diambil >= 4 jam atau kandidat gambar Hiburan < 4). Aplikasi yang menghitung WITA, jadi zona waktu cron-job.org tetap UTC. Jangan mengarahkan cron ke domain `SHORTLINK_ONLY_HOST` (`popbeez.hivecomp.my.id`) karena semua jalur selain `/s/*` diblokir 404.
    - **Kuis Tebak Drama:** `GET https://<domain-aplikasi>/api/quiz`, sekali sehari pada menit `15` jam `11` UTC (= 19:15 WITA). Endpoint hanya memposting bila hari itu Minggu dan sudah 14 hari sejak edisi terakhir; respons lain adalah `not-due` dan itu normal.
 4. Atur zona waktu UTC, aktifkan notifikasi kegagalan jika tersedia, lalu gunakan fungsi **Run now** untuk menguji masing-masing tugas. Panen hanya memasukkan berita ke antrean Neon. Publisher dapat mengirim satu artikel sungguhan ke antrean Buffer; Buffer menerbitkannya sesuai jadwal channel.
 
@@ -196,7 +197,8 @@ Dashboard tidak lagi satu halaman panjang. Setiap bagian punya tab sendiri, dan 
 
 | Tab | Isi |
 | --- | --- |
-| Ringkasan | Statistik artikel, pemeriksaan layanan, jendela slot tayang |
+| Ringkasan | Statistik artikel, peringatan kesehatan otomasi, pemeriksaan layanan, jendela slot tayang |
+| Diagnostik & Error | Detak `/api/cron` & panen RSS terakhir, diagnosis kemacetan otomatis, daftar feed/artikel gagal, pemulihan massal artikel gagal, dan ekspor laporan JSON |
 | Antrean | Artikel yang belum dikirim + tombol **Panen RSS sekarang** dan **Terbitkan** |
 | Sudah terbit | Post yang sudah keluar dari antrean (terbit, menunggu slot Buffer, gagal) |
 | Feed RSS | Daftar sumber, form tambah feed, preset hiburan |
@@ -217,7 +219,8 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `POST /api/admin/feeds/import-presets` — masukkan preset hiburan (wajib bearer secret).
 - `GET /api/admin/buffer/channels` — baca nama dan ID channel Buffer (wajib bearer secret; tidak membuat post).
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
-- `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
+- `GET/POST /api/admin/diagnostics/system` — baca laporan kesehatan otomasi, detak cron/harvest, daftar feed/artikel gagal, serta jalankan opsional `{ "runHarvest": true, "probeAi": true }` dari satu endpoint (wajib bearer secret).
+- `GET/POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
 - `POST /api/admin/instagram-mirror` — cerminkan **post yang sudah terbit di Facebook** ke Instagram tanpa memposting ulang ke Facebook. Body `{ "id": "<uuid>" }` untuk satu artikel (atau `?id=` lewat GET), `{ "limit": 3 }` untuk beberapa post terbaru yang belum punya ID Instagram, `{ "reelId": "<uuid>" }` untuk satu Reel, dan `"force": true` untuk memaksa post yang sudah pernah dicerminkan. Wajib `Authorization: Bearer <CRON_SECRET>`.
 - `GET /api/cron/blob-cleanup?dryRun=1` — bersih-bersih kuota Vercel Blob (frame Reel, video lama, gambar kuis, foto artikel). Wajib `Authorization: Bearer <CRON_SECRET>`; `dryRun=1` hanya melaporkan.
@@ -225,7 +228,7 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `GET /api/cron` — proses satu artikel: terbit langsung ke Facebook (PopBeez) atau masuk antrean Buffer (berita). Hanya jalan di dalam jendela slot WITA, mematuhi batas 5 pengiriman/jam dan jeda 12 menit. Tambahkan `?force=1` untuk melewati jadwal slot (dipakai tombol **Terbitkan** manual). Wajib header `Authorization: Bearer <CRON_SECRET>`.
 - `GET /api/reels` — membuat satu Reel dari artikel hiburan terbaru bila `REELS_ENABLED=1` dan jeda `REELS_MIN_GAP_HOURS` sudah lewat. `POST /api/reels` memaksa satu Reel sekarang (dipakai tombol dashboard, melewati flag & jeda). Wajib header `Authorization: Bearer <CRON_SECRET>`. Butuh encoder: `FFMPEG_PATH` atau `REELS_RENDER_URL`.
 - `GET /api/quiz` — membuat dan memposting kuis Tebak Drama (cron harian). `POST /api/quiz` memaksa satu edisi sekarang (dipakai tombol dashboard). Wajib header `Authorization: Bearer <CRON_SECRET>`. Poster diambil dari `raw_text` review manual, dipilih acak, diubah menjadi siluet oleh `GEMINI_IMAGE_MODEL` (default `gemini-2.5-flash-image`, bisa dimatikan dengan `QUIZ_SILHOUETTE_AI=0`), dan setiap poster berhenti dipakai setelah muncul di tiga edisi.
-- `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
+- `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}` untuk satu artikel atau `{"bulk":true}` untuk memulihkan seluruh artikel gagal yang belum kedaluwarsa.
 - `POST /api/admin/retry-comment` — mengulang komentar sumber untuk postingan yang sudah terbit. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`. Komentar dikirim ke `POST /<graph-version>/<post-id>/comments`; id postingan dari Facebook sudah memuat ID halaman, jadi ID halaman tidak boleh ditambahkan lagi (kalau ditambahkan, Graph menjawab `Unknown path components`). Dashboard menampilkan tombol **Kirim ulang komentar sumber** pada post yang komentarnya gagal.
 - `GET /api/og/{articleId}` — gambar news card untuk artikel tersimpan.
 
