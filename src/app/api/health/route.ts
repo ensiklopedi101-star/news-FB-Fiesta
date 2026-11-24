@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { publisherState, rssSources } from "@/lib/schema";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
+import { ensureContentManagerTables } from "@/lib/content-manager";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export async function GET() {
   }
 
   let schemaReady = true;
+  let contentManagerSchemaReady = false;
   let activeFeeds = 0;
   try {
     const [sourceCount] = await db.select({ value: count() }).from(rssSources).where(eq(rssSources.active, true));
@@ -26,6 +28,7 @@ export async function GET() {
     const [lockRow] = await db.select({ id: publisherState.id }).from(publisherState).limit(1);
     if (!lockRow) throw new Error("Migration scheduler belum diterapkan.");
     activeFeeds = sourceCount.value;
+    contentManagerSchemaReady = await ensureContentManagerTables();
   } catch (error) {
     schemaReady = false;
     console.error("[health:schema]", error instanceof Error ? error.message : error);
@@ -33,13 +36,15 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
-    version: "2.0.0",
+    version: "3.0.0",
     database: "connected",
     schema: schemaReady ? "ready" : "migration-required",
+    contentManagerSchema: contentManagerSchemaReady ? "ready" : "degraded",
     activeFeeds,
     integrations: {
-      gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
-      groq: Boolean(process.env.GROQ_API_KEY),
+      gemini: Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GEMINI_API_KEY_FALLBACK?.trim()),
+      groq: Boolean(process.env.GROQ_API_KEY?.trim()),
+      openRouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
       bufferApi: Boolean(process.env.BUFFER_API_KEY?.trim()),
       bufferNews: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
       bufferEntertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),

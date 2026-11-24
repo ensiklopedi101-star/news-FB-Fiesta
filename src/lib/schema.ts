@@ -160,9 +160,45 @@ export const automationLogs = pgTable(
   ],
 );
 
+export const contentManagerConfig = pgTable("content_manager_config", {
+  id: integer("id").primaryKey().default(1),
+  enabled: boolean("enabled").notNull().default(true),
+  autoArchiveDuplicates: boolean("auto_archive_duplicates").notNull().default(true),
+  customDirective: text("custom_directive").notNull().default(""),
+  focusPillars: jsonb("focus_pillars").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  avoidKeywords: jsonb("avoid_keywords").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  preferredVoice: text("preferred_voice").notNull().default("auto"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const contentManagerDecisions = pgTable(
+  "content_manager_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    mode: text("mode").notNull(),
+    trigger: text("trigger").notNull().default("publish"),
+    provider: text("provider"),
+    model: text("model"),
+    slotLabel: text("slot_label"),
+    selectedIds: jsonb("selected_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    duplicateIds: jsonb("duplicate_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    recommendedVoice: text("recommended_voice"),
+    seoKeywords: jsonb("seo_keywords").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    roundupTheme: text("roundup_theme"),
+    writerBrief: text("writer_brief"),
+    editorialReasoning: text("editorial_reasoning").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("content_manager_decisions_created_idx").on(table.createdAt),
+  ],
+);
+
 export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
 export type QuizEdition = typeof quizEditions.$inferSelect;
 export type Reel = typeof reels.$inferSelect;
 export type AutomationLog = typeof automationLogs.$inferSelect;
+export type ContentManagerConfigRow = typeof contentManagerConfig.$inferSelect;
+export type ContentManagerDecisionRow = typeof contentManagerDecisions.$inferSelect;

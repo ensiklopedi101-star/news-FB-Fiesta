@@ -14,7 +14,9 @@ import { addPageComment, FacebookPublishOutcomeUnknownError, type PageKey } from
 import { isInstagramPublishingEnabled, publishInstagramPost } from "@/lib/instagram";
 import { publishPost, usesDirectFacebookPublishing } from "@/lib/publisher";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS, isQueueItemExpired } from "@/lib/queue-policy";
-import { pickEditorialVoice } from "@/lib/editorial-voices";
+import { EDITORIAL_VOICES, pickEditorialVoice } from "@/lib/editorial-voices";
+import { curateRoundupWithManager, getContentManagerSettings } from "@/lib/content-manager";
+import type { ContentManagerDecision } from "@/lib/content-manager-core";
 import { indonesianTranslationUrl } from "@/lib/translation-url";
 import { shortenArticleUrl } from "@/lib/shortlink";
 import {
@@ -42,7 +44,10 @@ function isMissingColumnError(error: unknown, column: string): boolean {
 }
 
 
-async function claimNextArticles(): Promise<Article[]> {
+async function claimNextArticles(): Promise<{
+  articles: Article[];
+  managerDecision: ContentManagerDecision | null;
+}> {
   const db = getDb();
   const now = new Date();
   const expiryCutoff = getQueueExpiryCutoff(now);
@@ -56,23 +61,45 @@ async function claimNextArticles(): Promise<Article[]> {
     .where(and(eq(articles.status, "queued"), isExpiredByAge));
   const configuredPages = (["news", "entertainment"] as const)
     .filter((pageKey) => publishingConfigurationGaps(pageKey).length === 0);
-  if (!configuredPages.length) return [];
+  if (!configuredPages.length) return { articles: [], managerDecision: null };
   const configuredPageFilter = or(...configuredPages.map((pageKey) => eq(articles.pageKey, pageKey)));
-  if (!configuredPageFilter) return [];
+  if (!configuredPageFilter) return { articles: [], managerDecision: null };
   const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
 
-  // PopBeez (entertainment) is assembled as one ordered Feed roundup. Pillars
-  // provide a soft diversity preference only; no mix is rejected as a rule.
+  // PopBeez (entertainment) is curated & ordered by the Smart Content Manager Agent
+  // (falling back deterministically to selectRoundup if AI curation is unavailable).
   let selectedIds: string[] = [];
+  let managerDecision: ContentManagerDecision | null = null;
   if (configuredPages.includes("entertainment")) {
-    const rows = await db.select({ id: articles.id, title: articles.title, category: articles.category, imageUrl: articles.imageUrl, imageUrls: articles.imageUrls, manualImageUrls: articles.manualImageUrls })
+    const rows = await db.select({
+      id: articles.id,
+      title: articles.title,
+      sourceName: articles.sourceName,
+      category: articles.category,
+      rawText: articles.rawText,
+      imageUrl: articles.imageUrl,
+      imageUrls: articles.imageUrls,
+      manualImageUrls: articles.manualImageUrls,
+      priorityAt: articles.priorityAt,
+      attempts: articles.attempts,
+      sourcePublishedAt: articles.sourcePublishedAt,
+      createdAt: articles.createdAt,
+    })
       .from(articles)
       .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "entertainment")))
       .orderBy(asc(articles.priorityAt), asc(articles.attempts), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
       .limit(30);
     const eligibleRows = rows.filter((row) => selectedRoundupImage(row));
-    const selection = selectRoundup(eligibleRows.map((row) => ({ ...row, pillar: classifyPillar(row) })));
-    selectedIds = selection?.map((row) => row.id) ?? [];
+    if (eligibleRows.length >= POPBEEZ_ROUNDUP_MIN) {
+      const curated = await curateRoundupWithManager(eligibleRows, { trigger: "publish", budgetMs: 8_500 }).catch(() => null);
+      if (curated) {
+        selectedIds = curated.decision.selectedIds;
+        managerDecision = curated.decision;
+      } else {
+        const selection = selectRoundup(eligibleRows.map((row) => ({ ...row, pillar: classifyPillar(row) })));
+        selectedIds = selection?.map((row) => row.id) ?? [];
+      }
+    }
     // Three queued stories are held for the minimum four-card treatment. Keep
     // other configured Pages moving rather than blocking their queue as well.
   }
@@ -82,7 +109,10 @@ async function claimNextArticles(): Promise<Article[]> {
       .where(and(eq(articles.status, "queued"), eq(articles.pageKey, "news")))
       .orderBy(asc(articles.priorityAt), asc(sql`coalesce(${articles.sourcePublishedAt}, ${articles.createdAt})`))
       .limit(1);
-    if (news) selectedIds = [news.id];
+    if (news) {
+      selectedIds = [news.id];
+      managerDecision = null;
+    }
   }
 
   if (!selectedIds.length) {
@@ -104,7 +134,7 @@ async function claimNextArticles(): Promise<Article[]> {
         .set({ status: "queued", facebookPostId: null, updatedAt: new Date() })
         .where(staleProcessing);
     }
-    return [];
+    return { articles: [], managerDecision: null };
   }
 
   const claimedRows = await db.update(articles)
@@ -119,9 +149,27 @@ async function claimNextArticles(): Promise<Article[]> {
       await db.update(articles).set({ status: "queued", facebookPostId: null, updatedAt: new Date() })
         .where(and(inArray(articles.id, claimedRows.map((row) => row.id)), eq(articles.status, "processing")));
     }
-    return [];
+    return { articles: [], managerDecision: null };
   }
-  return selectedIds.map((id) => byId.get(id)!);
+
+  if (managerDecision && managerDecision.duplicateIds.length > 0) {
+    const cmSettings = await getContentManagerSettings().catch(() => null);
+    if (cmSettings?.autoArchiveDuplicates) {
+      await db.update(articles)
+        .set({
+          status: "removed",
+          errorMessage: "Diarsipkan otomatis oleh Content Manager: topik kembar dengan berita utama di edisi roundup.",
+          updatedAt: new Date(),
+        })
+        .where(and(inArray(articles.id, managerDecision.duplicateIds), eq(articles.status, "queued"), isNull(articles.priorityAt)))
+        .catch(() => undefined);
+    }
+  }
+
+  return {
+    articles: selectedIds.map((id) => byId.get(id)!),
+    managerDecision,
+  };
 }
 
 async function getPublishingPause(): Promise<{ detail: string; nextAllowedAt: string } | null> {
@@ -222,9 +270,19 @@ async function writeGuardedCopy(
   logStage: (stage: string) => void,
   strictFirstDraft: boolean,
   roundupArticles: Article[] = [],
+  managerDecision: ContentManagerDecision | null = null,
 ): Promise<{ copy: GeneratedCopy; originality: OriginalityReport; drafts: number; pillar: Pillar }> {
   const maxDrafts = originalityMaxAttempts();
-  const voice = pickEditorialVoice(article.id);
+  const voice = managerDecision
+    ? (EDITORIAL_VOICES.find((v) => v.id === managerDecision.recommendedVoice) ?? pickEditorialVoice(article.id))
+    : pickEditorialVoice(article.id);
+  const managerBrief = managerDecision
+    ? [
+        managerDecision.roundupTheme ? `Tema edisi: ${managerDecision.roundupTheme}.` : "",
+        managerDecision.writerBrief,
+      ].filter(Boolean).join(" ")
+    : undefined;
+  const seoKeywords = managerDecision?.seoKeywords;
   const score = (copy: GeneratedCopy) => scoreOriginality({
     caption: copy.caption,
     take: copy.take,
@@ -238,7 +296,7 @@ async function writeGuardedCopy(
   });
 
   const pillar = classifyPillar({ title: article.originalTitle, category: article.category });
-  logStage(`pillar=${pillar}`);
+  logStage(`pillar=${pillar}${managerDecision ? ` cm=${managerDecision.mode} cmVoice=${voice.id}` : ""}`);
   let copy = await writeNewsCopy({
     title: article.originalTitle,
     rawText: article.rawText,
@@ -248,6 +306,8 @@ async function writeGuardedCopy(
     budgetMs: AI_DRAFT_BUDGET_MS,
     voice,
     pillar,
+    managerBrief,
+    seoKeywords,
     ...(roundupArticles.length > 1 ? { roundupArticles: roundupArticles.map((story) => ({ title: story.originalTitle, sourceName: story.sourceName, category: story.category, rawText: story.rawText })) } : {}),
   });
   let originality = score(copy);
@@ -264,6 +324,8 @@ async function writeGuardedCopy(
         sourceName: article.sourceName,
         strictOriginality: true,
         pillar,
+        managerBrief,
+        seoKeywords,
         feedback: [
           ...originality.reasons,
           ...(originality.matchedPhrase && !originality.signals.noVerbatim
@@ -321,7 +383,7 @@ export async function runNewsPipeline(options?: {
   const db = getDb();
   const pause = await getPublishingPause();
   if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
-  const claimedArticles = await claimNextArticles();
+  const { articles: claimedArticles, managerDecision } = await claimNextArticles();
   const article = claimedArticles[0];
   if (!article) {
     const [blocked] = await db.select({ pageKey: articles.pageKey })
@@ -381,7 +443,7 @@ export async function runNewsPipeline(options?: {
     // A retried article that was previously held by the originality guard gets the
     // stricter brief, so the rewrite is less likely to fail the same way again.
     const retryingHeldCopy = Boolean(article.errorMessage?.startsWith("Ditahan oleh penjaga orisinalitas"));
-    const { copy, originality, drafts, pillar } = await writeGuardedCopy(article, logStage, retryingHeldCopy, roundupArticles);
+    const { copy, originality, drafts, pillar } = await writeGuardedCopy(article, logStage, retryingHeldCopy, roundupArticles, managerDecision);
     logStage(`ai-complete provider=${copy.provider} model=${copy.model} elapsedMs=${copy.elapsedMs} drafts=${drafts} attempts=${copy.attempts.map((attempt) => `${attempt.provider}:${attempt.outcome}`).join(",")}`);
 
     if (isQueueItemExpired(article.sourcePublishedAt ?? article.createdAt)) {

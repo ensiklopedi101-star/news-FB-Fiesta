@@ -20,6 +20,8 @@ export const GROQ_DEFAULT_ROUNDUP_MAX_TOKENS = 850;
 export const GROQ_DEFAULT_SINGLE_MAX_TOKENS = 700;
 export const GEMINI_DEFAULT_ROUNDUP_MAX_TOKENS = 1_300;
 export const GEMINI_DEFAULT_SINGLE_MAX_TOKENS = 900;
+export const OPENROUTER_DEFAULT_ROUNDUP_MAX_TOKENS = 1_100;
+export const OPENROUTER_DEFAULT_SINGLE_MAX_TOKENS = 850;
 
 export function isGeminiTextModel(model: string): boolean {
   if (!/^gemini-.*(?:flash|lite)/i.test(model)) return false;
@@ -79,8 +81,45 @@ export function rankGeminiModels(availableNames: string[], preferred?: string): 
     });
   const cleanPreferred = preferred?.trim().replace(/^models\//, "");
   const ordered = [
-    ...(cleanPreferred && available.has(cleanPreferred) && !GEMINI_NON_TEXT_MODEL.test(cleanPreferred) ? [cleanPreferred] : []),
+    ...(cleanPreferred && available.has(cleanPreferred) && isGeminiTextModel(cleanPreferred) ? [cleanPreferred] : []),
     ...candidates,
+  ];
+  return [...new Set(ordered)];
+}
+
+const OPENROUTER_EXCLUDED_MODEL = /(?:guard|embed|whisper|tts|audio|vl\b|vision-only|image|coder|math|prover|moderation)/i;
+
+function openRouterModelPriority(model: string): number {
+  const id = model.toLowerCase();
+  if (/llama-3\.3-70b-instruct:free/.test(id)) return 0;
+  if (/gemma-3-27b-it:free/.test(id)) return 1;
+  if (/mistral-small.*:free/.test(id)) return 2;
+  if (/llama-4.*:free|llama-3\.\d+.*instruct:free/.test(id)) return 3;
+  if (/qwen.*(?:32b|72b).*instruct:free|qwen3-(?:14b|30b|32b).*:free/.test(id)) return 4;
+  if (id === "openrouter/free") return 5;
+  if (/(?:llama|gemma|mistral|qwen).*:free$/.test(id)) return 6;
+  return 7;
+}
+
+/**
+ * Selects only zero-cost OpenRouter models (`:free` or `openrouter/free`), even
+ * when an operator sets `OPENROUTER_MODEL`, ordered for Indonesian editorial JSON reliability.
+ */
+export function rankOpenRouterFreeModels(availableIds: string[], preferred?: string): string[] {
+  const normalized = availableIds.map((id) => id.trim()).filter(Boolean);
+  const available = new Set(normalized);
+  const isFreeModel = (id: string) => id.endsWith(":free") || id === "openrouter/free";
+  const candidates = [...available]
+    .filter((id) => isFreeModel(id) && !OPENROUTER_EXCLUDED_MODEL.test(id))
+    .sort((left, right) => openRouterModelPriority(left) - openRouterModelPriority(right));
+  const cleanPreferred = preferred?.trim();
+  const ordered = [
+    ...(cleanPreferred && isFreeModel(cleanPreferred) && !OPENROUTER_EXCLUDED_MODEL.test(cleanPreferred)
+      && (available.size === 0 || available.has(cleanPreferred) || cleanPreferred === "openrouter/free")
+      ? [cleanPreferred]
+      : []),
+    ...candidates,
+    "openrouter/free",
   ];
   return [...new Set(ordered)];
 }

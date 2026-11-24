@@ -129,12 +129,72 @@ type SystemDiagnostics = {
   }>;
 };
 
+type ContentManagerSettings = {
+  enabled: boolean;
+  autoArchiveDuplicates: boolean;
+  customDirective: string;
+  focusPillars: string[];
+  avoidKeywords: string[];
+  preferredVoice: "auto" | "kritis" | "santai" | "industri" | "penonton";
+};
+
+type ContentManagerOverview = {
+  schemaReady: boolean;
+  settings: ContentManagerSettings;
+  performance: {
+    totalClicks7d: number;
+    publishedPosts7d: number;
+    averageOriginality7d: number;
+    topPillars: Array<{ pillar: string; clicks: number; posts: number }>;
+    topPerformers: Array<{ title: string; pillar: string | null; clicks: number }>;
+  };
+  eligibleQueueCount: number;
+  recentDecisions: Array<{
+    id: string;
+    mode: string;
+    trigger: string;
+    provider: string | null;
+    model: string | null;
+    slotLabel: string | null;
+    selectedIds: string[];
+    duplicateIds: string[];
+    recommendedVoice: string | null;
+    seoKeywords: string[];
+    roundupTheme: string | null;
+    writerBrief: string | null;
+    editorialReasoning: string;
+    createdAt: string;
+  }>;
+};
+
+type ContentManagerSimulation = {
+  ok: boolean;
+  eligibleCount: number;
+  error?: string;
+  provider?: string | null;
+  model?: string | null;
+  elapsedMs?: number;
+  decision?: {
+    mode: string;
+    selectedIds: string[];
+    duplicateIds: string[];
+    recommendedVoice: string;
+    seoKeywords: string[];
+    roundupTheme: string;
+    writerBrief: string;
+    editorialReasoning: string;
+  };
+  selectedArticles?: Array<{ slide: number; id: string; title: string; sourceName: string; category: string; pillar: string }>;
+  duplicateArticles?: Array<{ id: string; title: string; sourceName: string }>;
+};
+
 type DashboardData = {
   checkedAt: string;
   diagnostics?: SystemDiagnostics | null;
   readyToPublish: boolean;
   integrations: Record<string, boolean>;
-  aiModels: { groq: string; gemini: string };
+  aiModels: { groq: string; gemini: string; openRouter: string };
+  contentManager: ContentManagerOverview | null;
   schedule: { maxPerDay: number; maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   pillars?: { list: Array<{ id: string; label: string; summary: string; share: string }> };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
@@ -164,9 +224,11 @@ type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: str
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
   schema: "Skema database",
+  contentManagerSchema: "Memori Content Manager di Neon",
   feeds: "RSS aktif",
   groq: "Groq AI (utama)",
   gemini: "Gemini AI (cadangan)",
+  openRouter: "OpenRouter Free (cadangan)",
   bufferApi: "Buffer API key",
   bufferNews: "Channel Buffer berita",
   bufferEntertainment: "Channel Buffer hiburan",
@@ -223,10 +285,11 @@ function bufferMappingLabel(mapping: BufferChannelMapping) {
   }
 }
 
-type DashboardTab = "overview" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
+type DashboardTab = "overview" | "contentManager" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
 
 const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
   { key: "overview", label: "Ringkasan" },
+  { key: "contentManager", label: "Content Manager" },
   { key: "diagnostics", label: "Diagnostik & Error" },
   { key: "queue", label: "Antrean" },
   { key: "published", label: "Sudah terbit" },
@@ -243,6 +306,7 @@ const TAB_STORAGE_KEY = "popbeez-dashboard-tab";
 /** One line under the tab bar so each tab explains itself without scrolling. */
 const TAB_HINTS: Record<DashboardTab, string> = {
   overview: "Statistik, kesiapan layanan, kuota harian, dan jadwal slot tayang.",
+  contentManager: "Atur strategi PopBeez, lihat performa klik, simulasi kurasi editorial, dan jejak keputusan agent.",
   diagnostics: "Pantau error sistem, detak cron & panen RSS otomatis, kegagalan feed/AI/publikasi, dan ekspor laporan diagnostik.",
   queue: "Artikel yang masih menunggu dikirim. Maksimal 4 post/hari (pagi · siang · sore · malam) dengan pilar yang bergantian.",
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
@@ -259,6 +323,8 @@ export default function Dashboard() {
   const [secret, setSecret] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
+  const [contentManagerDraft, setContentManagerDraft] = useState<ContentManagerSettings | null>(null);
+  const [contentManagerSimulation, setContentManagerSimulation] = useState<ContentManagerSimulation | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [name, setName] = useState("");
@@ -291,9 +357,13 @@ export default function Dashboard() {
 
   const refresh = useCallback(async () => {
     const result = await api("/api/dashboard");
-    setData(result as DashboardData);
+    const dashboard = result as DashboardData;
+    setData(dashboard);
+    if (dashboard.contentManager) {
+      setContentManagerDraft((current) => current ?? dashboard.contentManager!.settings);
+    }
     setAuthenticated(true);
-    return result as DashboardData;
+    return dashboard;
   }, [api]);
 
   async function unlock(event: FormEvent<HTMLFormElement>) {
@@ -610,6 +680,44 @@ export default function Dashboard() {
     }
   }
 
+  async function saveContentManagerSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!contentManagerDraft) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/content-manager", {
+        method: "PUT",
+        body: JSON.stringify(contentManagerDraft),
+      }) as unknown as { settings: ContentManagerSettings };
+      if (result.settings) setContentManagerDraft(result.settings);
+      setMessage("Strategi dan preferensi Content Manager tersimpan di Neon.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal menyimpan pengaturan Content Manager.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function simulateContentManager() {
+    setBusy(true);
+    setMessage("");
+    setContentManagerSimulation(null);
+    try {
+      const result = await api("/api/admin/content-manager", { method: "POST" }) as unknown as ContentManagerSimulation;
+      setContentManagerSimulation(result);
+      setMessage(result.ok
+        ? `Simulasi selesai melalui ${result.provider ?? "Fallback deterministik"}${result.model ? ` · ${result.model}` : ""}. Tidak ada artikel yang diubah atau diterbitkan.`
+        : result.error ?? "Belum cukup kandidat untuk simulasi.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Simulasi Content Manager gagal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function harvestNow() {
     setBusy(true);
     setMessage("");
@@ -836,8 +944,8 @@ export default function Dashboard() {
     <main className="dashboard-shell">
       <header className="dashboard-header">
         <div className="brand-mark">N</div>
-        <div className="header-title"><strong>News FB Fiesta v2.0</strong><span>Panel redaksi otomatis · AI Engine v2</span></div>
-        <div className="header-right"><span className={canPublish ? "system-pill ready" : "system-pill pending"}>{canPublish ? "SIAP PUBLIKASI" : "SETUP BELUM LENGKAP"}</span><button className="quiet-button" onClick={() => { setAuthenticated(false); setData(null); setSystemDiagnostics(null); setSecret(""); }}>Keluar</button></div>
+        <div className="header-title"><strong>News FB Fiesta v3.0</strong><span>Smart Content Manager · Multi-Free-AI</span></div>
+        <div className="header-right"><span className={canPublish ? "system-pill ready" : "system-pill pending"}>{canPublish ? "SIAP PUBLIKASI" : "SETUP BELUM LENGKAP"}</span><button className="quiet-button" onClick={() => { setAuthenticated(false); setData(null); setContentManagerDraft(null); setContentManagerSimulation(null); setSystemDiagnostics(null); setSecret(""); }}>Keluar</button></div>
       </header>
 
       <section className="dashboard-intro">
@@ -850,6 +958,7 @@ export default function Dashboard() {
       <nav className="dashboard-tabs" role="tablist" aria-label="Bagian dashboard">
         {DASHBOARD_TABS.map((tab) => {
           const badge = tab.key === "diagnostics" ? diagIssueCount
+            : tab.key === "contentManager" ? (data?.contentManager?.eligibleQueueCount ?? 0)
             : tab.key === "queue" ? sections.queue.length
             : tab.key === "published" ? sections.done.length
             : tab.key === "feeds" ? (data?.feeds.length ?? 0)
@@ -937,6 +1046,83 @@ export default function Dashboard() {
         )}
       </section>
       </>)}
+
+      {activeTab === "contentManager" && (
+      <section className="panel content-manager-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">EDITORIAL AGENT · POPBEEZ</p>
+            <h2>Smart Content Manager</h2>
+            <p className="muted small-note">AI merencanakan kurasi, urutan Slide 1–4, SEO, dan arahan penulis; RSS, gambar, serta deduplikasi teknis tetap ditangani kode deterministik. Jika AI gagal, kurator fallback tetap menjaga jadwal publikasi.</p>
+          </div>
+          <span className={`system-pill ${contentManagerDraft?.enabled ? "ready" : "pending"}`}>{contentManagerDraft?.enabled ? "AGENT AKTIF" : "AGENT NONAKTIF"}</span>
+        </div>
+
+        <div className="queue-counts manager-metrics">
+          <span>{data?.contentManager?.eligibleQueueCount ?? 0} kandidat bergambar layak</span>
+          <span>{data?.contentManager?.performance.totalClicks7d ?? 0} klik shortlink · 7 hari</span>
+          <span>{data?.contentManager?.performance.publishedPosts7d ?? 0} post terbit · 7 hari</span>
+          <span>rata-rata orisinalitas {data?.contentManager?.performance.averageOriginality7d ?? 0}/100</span>
+        </div>
+
+        <div className="manager-columns">
+          <form className="manager-config" onSubmit={(event) => void saveContentManagerSettings(event)}>
+            <div className="form-title"><strong>Strategi &amp; arahan redaksi</strong><span>Disimpan di memori bersama Neon dan digunakan konsisten oleh semua provider AI.</span></div>
+            {contentManagerDraft ? <>
+              <label className="manager-toggle"><input type="checkbox" checked={contentManagerDraft.enabled} onChange={(event) => setContentManagerDraft((current) => current ? { ...current, enabled: event.target.checked } : current)} /><span><b>Aktifkan AI Content Manager</b><small>Matikan untuk memakai kurator deterministik saja.</small></span></label>
+              <label className="manager-toggle"><input type="checkbox" checked={contentManagerDraft.autoArchiveDuplicates} onChange={(event) => setContentManagerDraft((current) => current ? { ...current, autoArchiveDuplicates: event.target.checked } : current)} /><span><b>Arsipkan duplikat lintas sumber otomatis</b><small>Artikel prioritas manual tidak akan diarsipkan otomatis.</small></span></label>
+              <label className="full-field">Arahan khusus Pemimpin Redaksi
+                <textarea rows={4} maxLength={600} value={contentManagerDraft.customDirective} onChange={(event) => setContentManagerDraft((current) => current ? { ...current, customDirective: event.target.value } : current)} placeholder="Contoh: utamakan kabar comeback dan jadwal rilis; hindari spekulasi kencan yang belum dikonfirmasi." />
+              </label>
+              <fieldset className="manager-fieldset"><legend>Pilar fokus (opsional)</legend><div className="manager-pillars">{Object.values(PILLARS).map((pillar) => <label key={pillar.id}><input type="checkbox" checked={contentManagerDraft.focusPillars.includes(pillar.id)} onChange={() => setContentManagerDraft((current) => current ? { ...current, focusPillars: current.focusPillars.includes(pillar.id) ? current.focusPillars.filter((id) => id !== pillar.id) : [...current.focusPillars, pillar.id] } : current)} /><span>{pillar.label}</span></label>)}</div></fieldset>
+              <label className="full-field">Topik atau kata kunci yang dihindari (pisahkan koma)
+                <input value={contentManagerDraft.avoidKeywords.join(", ")} maxLength={480} onChange={(event) => setContentManagerDraft((current) => current ? { ...current, avoidKeywords: event.target.value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 12) } : current)} placeholder="rumor tanpa konfirmasi, spoiler" />
+              </label>
+              <label className="full-field">Nada redaksi pilihan
+                <select value={contentManagerDraft.preferredVoice} onChange={(event) => setContentManagerDraft((current) => current ? { ...current, preferredVoice: event.target.value as ContentManagerSettings["preferredVoice"] } : current)}>
+                  <option value="auto">Otomatis sesuai slot WITA</option>
+                  <option value="kritis">Kritis</option>
+                  <option value="santai">Santai</option>
+                  <option value="industri">Industri</option>
+                  <option value="penonton">Penonton</option>
+                </select>
+              </label>
+              <button type="submit" className="primary-button" disabled={busy}>{busy ? "Menyimpan…" : "Simpan strategi di Neon"}</button>
+            </> : <p className="muted">Pengaturan Content Manager sedang dimuat.</p>}
+          </form>
+
+          <div className="manager-analytics">
+            <div className="form-title"><strong>Performa konten 7 hari</strong><span>Short link menjadi sinyal minat Beezers untuk kurasi berikutnya.</span></div>
+            {(data?.contentManager?.performance.topPillars.length ?? 0) > 0 ? <div className="manager-pillar-stats">{data?.contentManager?.performance.topPillars.map((pillar) => <div className="manager-pillar-row" key={pillar.pillar}><span>{PILLARS[pillar.pillar as keyof typeof PILLARS]?.label ?? pillar.pillar}</span><b>{pillar.clicks} klik</b><small>{pillar.posts} post</small></div>)}</div> : <p className="empty-state compact-empty">Belum ada sinyal klik atau post yang cukup untuk membandingkan pilar.</p>}
+            {(data?.contentManager?.performance.topPerformers.length ?? 0) > 0 && <div className="manager-performers"><strong>Post dengan klik terbanyak</strong>{data?.contentManager?.performance.topPerformers.slice(0, 3).map((post) => <div key={`${post.title}-${post.clicks}`}><b>{post.clicks} klik</b><span>{post.title}</span></div>)}</div>}
+            <div className="manager-simulate">
+              <strong>Simulasi rapat redaksi langsung</strong>
+              <p className="muted small-note">Menjalankan kurator dengan strategi tersimpan pada antrean Hiburan saat ini, menyimpan jejak keputusan, tetapi tidak mengubah status artikel dan tidak memublikasikan. Simpan perubahan strategi terlebih dahulu.</p>
+              <button type="button" className="secondary-button" onClick={() => void simulateContentManager()} disabled={busy || (data?.contentManager?.eligibleQueueCount ?? 0) < 4}>{busy ? "Memproses…" : "Simulasikan kurasi sekarang"}</button>
+              {(data?.contentManager?.eligibleQueueCount ?? 0) < 4 && <small className="muted">Perlu minimal 4 kandidat Hiburan bergambar layak untuk simulasi.</small>}
+            </div>
+          </div>
+        </div>
+
+        {contentManagerSimulation?.ok && contentManagerSimulation.decision && <section className="manager-preview">
+          <div className="panel-heading"><div><p className="eyebrow">HASIL SIMULASI · {contentManagerSimulation.provider ?? "Fallback deterministik"}{contentManagerSimulation.model ? ` · ${contentManagerSimulation.model}` : ""}</p><h3>{contentManagerSimulation.decision.roundupTheme}</h3></div><span className="format-tag carousel">{contentManagerSimulation.elapsedMs ?? 0} ms</span></div>
+          <div className="manager-slide-list">{contentManagerSimulation.selectedArticles?.map((article) => <article key={article.id}><b>Slide {article.slide} · {article.pillar}</b><strong>{article.title}</strong><small>{article.sourceName} · {article.category}</small></article>)}</div>
+          <div className="manager-decision-copy"><p><b>Nada:</b> {contentManagerSimulation.decision.recommendedVoice} · <b>SEO:</b> {contentManagerSimulation.decision.seoKeywords.join(" · ")}</p><p><b>Writer brief:</b> {contentManagerSimulation.decision.writerBrief}</p><p><b>Alasan editorial:</b> {contentManagerSimulation.decision.editorialReasoning}</p></div>
+          {(contentManagerSimulation.duplicateArticles?.length ?? 0) > 0 && <p className="muted small-note"><b>Kandidat duplikat terdeteksi (tidak diubah simulasi):</b> {contentManagerSimulation.duplicateArticles?.map((article) => `${article.title} — ${article.sourceName}`).join(" · ")}</p>}
+        </section>}
+
+        <div className="manager-history">
+          <div className="form-title"><strong>Memori keputusan agent</strong><span>Terbaru dulu; keputusan disimpan maksimal 14 hari.</span></div>
+          {(data?.contentManager?.recentDecisions.length ?? 0) > 0 ? <div className="manager-decision-list">{data?.contentManager?.recentDecisions.map((decision) => <article key={decision.id}>
+            <div className="manager-decision-header"><b>{decision.trigger === "simulation" ? "Simulasi" : "Publikasi"} · {decision.mode === "ai" ? "AI" : "Fallback deterministik"}</b><time>{formatDate(decision.createdAt)}</time></div>
+            <strong>{decision.roundupTheme || "Edisi PopBeez"}</strong>
+            <p>{decision.editorialReasoning}</p>
+            <small>{decision.provider ?? "tanpa provider"}{decision.model ? ` · ${decision.model}` : ""} · {decision.selectedIds.length} terpilih · {decision.duplicateIds.length} duplikat · {decision.recommendedVoice ?? "nada otomatis"}</small>
+          </article>)}</div> : <p className="empty-state compact-empty">Belum ada keputusan tersimpan. Jalankan simulasi untuk menguji agent, atau tunggu edisi berikutnya.</p>}
+        </div>
+        <p className="muted small-note">Jika tabel belum tersedia, sistem mencoba membuatnya otomatis. Migrasi terkontrol: <code>drizzle/0017_content_manager.sql</code>. Kunci AI tidak disimpan di sini; router menggunakan Groq → Gemini → Gemini cadangan → OpenRouter Free.</p>
+      </section>
+      )}
 
       {activeTab === "diagnostics" && (
       <section className="panel readiness-panel">
@@ -1121,7 +1307,8 @@ export default function Dashboard() {
         <div className="panel-heading"><div><p className="eyebrow">PANDUAN SETUP API</p><h2>Hubungkan AI dan Buffer</h2></div><a className="feed-url" href="https://vercel.com/dashboard" target="_blank" rel="noreferrer">Buka Vercel ↗</a></div>
         <div className="setup-grid">
           <article className="setup-card"><span className={checks.groq ? "check-dot good" : "check-dot"} /><div><strong>Groq AI (utama)</strong><p>Model aktif: <code>{data?.aiModels.groq || "llama-3.3-70b-versatile"}</code>. Jika model tak tersedia atau key tak berizin, aplikasi beralih ke Gemini.</p></div><b>{checks.groq ? "Key tersedia" : "Opsional"}</b></article>
-          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI (cadangan)</strong><p>Model aktif: <code>{data?.aiModels.gemini || "gemini-3.8-flash"}</code>. Key cadangan dicoba jika Gemini utama gagal.</p></div><b>{checks.gemini ? "Key tersedia" : "Opsional"}</b></article>
+          <article className="setup-card"><span className={checks.gemini ? "check-dot good" : "check-dot"} /><div><strong>Gemini AI (cadangan)</strong><p>Model aktif: <code>{data?.aiModels.gemini || "otomatis"}</code>. Key cadangan dicoba jika Gemini utama gagal.</p></div><b>{checks.gemini ? "Key tersedia" : "Opsional"}</b></article>
+          <article className="setup-card"><span className={checks.openRouter ? "check-dot good" : "check-dot"} /><div><strong>OpenRouter Free (cadangan terakhir)</strong><p>Atur <code>OPENROUTER_API_KEY</code> opsional di Vercel. Model disaring agar hanya memakai <code>:free</code> / <code>openrouter/free</code>; pilihan saat ini: <code>{data?.aiModels.openRouter || "otomatis"}</code>.</p></div><b>{checks.openRouter ? "Key tersedia" : "Opsional"}</b></article>
           <article className="setup-card"><span className={checks.bufferApi ? "check-dot good" : "check-dot"} /><div><strong>Buffer API</strong><p>Tambahkan <code>BUFFER_API_KEY</code> dari pengaturan/developer portal Buffer ke Vercel. Aplikasi mengirim post ke antrean Buffer; Buffer yang menerbitkannya pada jadwal channel.</p><a className="feed-url" href="https://developers.buffer.com/" target="_blank" rel="noreferrer">Dokumentasi API Buffer ↗</a></div><b>{checks.bufferApi ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.bufferNews ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Berita</strong><p>Atur <code>BUFFER_NEWS_CHANNEL_ID</code> ke ID channel Facebook Page berita di Buffer.</p></div><b>{checks.bufferNews ? "Tersedia" : "Belum diatur"}</b></article>
           <article className="setup-card"><span className={checks.bufferEntertainment ? "check-dot good" : "check-dot"} /><div><strong>Channel Buffer — Hiburan</strong><p>Atur <code>BUFFER_ENTERTAINMENT_CHANNEL_ID</code> ke ID channel Facebook Page hiburan di Buffer.</p></div><b>{checks.bufferEntertainment ? "Tersedia" : "Belum diatur"}</b></article>
@@ -1130,7 +1317,7 @@ export default function Dashboard() {
           <article className="setup-card"><span className="check-dot good" /><div><strong>Landing page — feed otomatis</strong><p>Landing page cukup memanggil <code>GET /api/public/posts?page=entertainment&amp;limit=12</code> (bisa dari mana saja, CORS terbuka). Setiap post yang sudah terbit di Facebook/Instagram langsung muncul di JSON itu. Tidak ada cron atau deploy ulang yang dibutuhkan; cukup satu <code>fetch</code> + <code>setInterval</code> 60 detik di landing page.</p><a className="feed-url" href="/api/public/posts?limit=3" target="_blank" rel="noreferrer">Lihat contoh feed ↗</a></div><b>Aktif</b></article>
           <article className="setup-card"><span className={checks.blobStorage ? "check-dot good" : "check-dot"} /><div><strong>Vercel Blob — gambar artikel</strong><p>Atur <code>BLOB_READ_WRITE_TOKEN</code> agar foto RSS disimpan sebagai URL publik tahan lama. Tanpa token, aplikasi tetap mencoba foto sumber langsung.</p></div><b>{checks.blobStorage ? "Tersedia" : "Belum diatur"}</b></article>
         </div>
-        {(checks.groq || checks.gemini) && <div className="diagnostic-actions">
+        {(checks.groq || checks.gemini || checks.openRouter) && <div className="diagnostic-actions">
           <button type="button" className="secondary-button" disabled={busy} onClick={() => void testAiConnection()}>{busy ? "Memeriksa…" : "Tes koneksi AI (tanpa menerbitkan)"}</button>
           <p className="muted small-note">Tes ini mengirim prompt teknis singkat ke provider aktif dan memakai sedikit kuota API. Tes tidak menyimpan hasil dan tidak mengirim apa pun ke Buffer/Facebook.</p>
         </div>}

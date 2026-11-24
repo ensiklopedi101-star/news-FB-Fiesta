@@ -13,6 +13,7 @@ import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
 import { isInstagramPublishingEnabled } from "@/lib/instagram";
 import { getDiagnosticsSnapshot } from "@/lib/automation-log";
+import { getContentManagerOverview } from "@/lib/content-manager";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -213,8 +214,9 @@ export async function GET(request: NextRequest) {
       database: true,
       schema: true,
       feeds: enabledSourceCount.value > 0,
-      gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
-      groq: Boolean(process.env.GROQ_API_KEY),
+      gemini: Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GEMINI_API_KEY_FALLBACK?.trim()),
+      groq: Boolean(process.env.GROQ_API_KEY?.trim()),
+      openRouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
       bufferApi,
       bufferNews: bufferChannels.news,
       bufferEntertainment: bufferChannels.entertainment,
@@ -226,19 +228,28 @@ export async function GET(request: NextRequest) {
       blobStorage: Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim()),
     };
 
-    const diagnostics = await getDiagnosticsSnapshot(20).catch(() => null);
+    const [diagnostics, contentManager] = await Promise.all([
+      getDiagnosticsSnapshot(20).catch(() => null),
+      getContentManagerOverview(12).catch(() => null),
+    ]);
+    const integrationStatus = {
+      ...integrations,
+      contentManagerSchema: contentManager?.schemaReady ?? false,
+    };
 
     return NextResponse.json({
       ok: true,
-      version: "2.0.0",
+      version: "3.0.0",
       checkedAt: new Date().toISOString(),
       diagnostics,
-      integrations,
+      contentManager,
+      integrations: integrationStatus,
       aiModels: {
-        groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "otomatis (router v2 · maks 850 OTPM)",
-        gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "otomatis (Gemini 3.x / 2.5 Flash-Lite)",
+        groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "otomatis (router v3 · batas OTPM aman)",
+        gemini: process.env.GEMINI_MODEL?.trim().slice(0, 100) || "otomatis (model Gemini tersedia)",
+        openRouter: process.env.OPENROUTER_MODEL?.trim().slice(0, 100) || "otomatis (model gratis :free)",
       },
-      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
+      readyToPublish: integrations.feeds && (integrations.gemini || integrations.groq || integrations.openRouter) && integrations.appUrl && integrations.cronSecret && (newsReady || entertainmentReady) && hasConfiguredActiveFeed,
       originality,
       reels: reelsSummary,
       schedule: publishPolicy(),

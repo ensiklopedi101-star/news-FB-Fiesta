@@ -6,6 +6,9 @@ import {
   parseGroqOtpmSafeTokens,
   rankGeminiModels,
   rankGroqModels,
+  rankOpenRouterFreeModels,
+  OPENROUTER_DEFAULT_ROUNDUP_MAX_TOKENS,
+  OPENROUTER_DEFAULT_SINGLE_MAX_TOKENS,
   validateAndRepairDraft,
 } from "../src/lib/ai-draft";
 
@@ -34,6 +37,35 @@ test("rankGeminiModels prioritizes Gemini 3.x flash-lite/flash ahead of legacy 2
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
   ]);
+});
+
+test("OpenRouter defaults stay bounded and model discovery only permits free models", () => {
+  assert.equal(OPENROUTER_DEFAULT_ROUNDUP_MAX_TOKENS, 1_100);
+  assert.equal(OPENROUTER_DEFAULT_SINGLE_MAX_TOKENS, 850);
+  const available = [
+    "openai/gpt-4o",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-3-27b-it:free",
+    "deepseek/deepseek-r1:free",
+    "qwen/qwen-2.5-coder-32b-instruct:free",
+    "openrouter/free",
+  ];
+  const ranked = rankOpenRouterFreeModels(available, "openai/gpt-4o");
+  assert.deepEqual(ranked, [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-3-27b-it:free",
+    "openrouter/free",
+    "deepseek/deepseek-r1:free",
+  ]);
+  assert.equal(ranked.some((model) => !model.endsWith(":free") && model !== "openrouter/free"), false);
+});
+
+test("rankGeminiModels refuses non-Flash/paid preferences so the free-tier router cannot be forced to a Pro model", () => {
+  const ranked = rankGeminiModels(
+    ["models/gemini-3-pro", "models/gemini-3.1-flash-lite"],
+    "gemini-3-pro",
+  );
+  assert.deepEqual(ranked, ["gemini-3.1-flash-lite"]);
 });
 
 test("rankGroqModels does not misclassify 27b as 7b and excludes guard/whisper models", () => {
