@@ -58,8 +58,80 @@ function blankReviewItem(): ReviewDraftItem {
   return { title: "", rating: "", genre: "", reason: "", suitableFor: "", imageUrl: "" };
 }
 
+type SystemDiagnostics = {
+  checkedAt: string;
+  health: {
+    level: "healthy" | "warning" | "critical";
+    hoursSinceLastPublish: number | null;
+    minutesSinceLastCron: number | null;
+    minutesSinceLastHarvest: number | null;
+    issues: Array<{ code: string; severity: "warning" | "critical"; title: string; detail: string }>;
+  };
+  heartbeats: {
+    lastCronAt: string | null;
+    lastCronOutcome: string | null;
+    lastCronSummary: string | null;
+    lastHarvestAt: string | null;
+    lastHarvestOutcome: string | null;
+    lastHarvestSummary: string | null;
+    lastFeedFetchedAt: string | null;
+    lastPublishedAt: string | null;
+    lastPublishedTitle: string | null;
+  };
+  queue: {
+    queuedTotal: number;
+    queuedEntertainment: number;
+    imageEligibleEntertainment: number;
+    queuedNews: number;
+    processingCount: number;
+    expiredLast24h: number;
+    failedLast24h: number;
+    publisherLockedUntil: string | null;
+  };
+  cronSetup: {
+    appUrl: string | null;
+    appUrlHost: string | null;
+    shortlinkOnlyHost: string | null;
+    harvestEndpoint: string;
+    cronEndpoint: string;
+  };
+  failingFeeds: Array<{
+    id: string;
+    name: string;
+    pageKey: "news" | "entertainment";
+    feedUrl: string;
+    lastFetchedAt: string | null;
+    lastError: string;
+  }>;
+  failedArticles: Array<{
+    id: string;
+    title: string;
+    sourceName: string;
+    pageKey: "news" | "entertainment";
+    errorMessage: string;
+    attempts: number;
+    updatedAt: string;
+  }>;
+  subsystemErrors: Array<{
+    subsystem: "quiz" | "reels" | "instagram-comment";
+    title: string;
+    errorMessage: string;
+    occurredAt: string | null;
+  }>;
+  recentEvents: Array<{
+    id: string;
+    source: string;
+    trigger: string;
+    outcome: string;
+    summary: string;
+    detail: Record<string, unknown> | null;
+    createdAt: string;
+  }>;
+};
+
 type DashboardData = {
   checkedAt: string;
+  diagnostics?: SystemDiagnostics | null;
   readyToPublish: boolean;
   integrations: Record<string, boolean>;
   aiModels: { groq: string; gemini: string };
@@ -151,10 +223,11 @@ function bufferMappingLabel(mapping: BufferChannelMapping) {
   }
 }
 
-type DashboardTab = "overview" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
+type DashboardTab = "overview" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
 
 const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
   { key: "overview", label: "Ringkasan" },
+  { key: "diagnostics", label: "Diagnostik & Error" },
   { key: "queue", label: "Antrean" },
   { key: "published", label: "Sudah terbit" },
   { key: "feeds", label: "Feed RSS" },
@@ -170,6 +243,7 @@ const TAB_STORAGE_KEY = "popbeez-dashboard-tab";
 /** One line under the tab bar so each tab explains itself without scrolling. */
 const TAB_HINTS: Record<DashboardTab, string> = {
   overview: "Statistik, kesiapan layanan, kuota harian, dan jadwal slot tayang.",
+  diagnostics: "Pantau error sistem, detak cron & panen RSS otomatis, kegagalan feed/AI/publikasi, dan ekspor laporan diagnostik.",
   queue: "Artikel yang masih menunggu dikirim. Maksimal 4 post/hari (pagi · siang · sore · malam) dengan pilar yang bergantian.",
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
@@ -196,6 +270,8 @@ export default function Dashboard() {
   const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([]);
   const [bufferMappings, setBufferMappings] = useState<ApiResult["mappings"]>(undefined);
   const [aiDiagnostic, setAiDiagnostic] = useState<AiDiagnostic | null>(null);
+  const [systemDiagnostics, setSystemDiagnostics] = useState<SystemDiagnostics | null>(null);
+  const [diagCopied, setDiagCopied] = useState(false);
   const [imageDrafts, setImageDrafts] = useState<Record<string, string>>({});
   const [reelPromptArticleId, setReelPromptArticleId] = useState("");
   const [reelPromptCopied, setReelPromptCopied] = useState(false);
@@ -538,7 +614,7 @@ export default function Dashboard() {
     setBusy(true);
     setMessage("");
     try {
-      const result = await api("/api/harvest", { method: "POST" });
+      const result = await api("/api/harvest?manual=1", { method: "POST" });
       const cap = result.limited ? " Batas panen 50 artikel tercapai." : "";
       setMessage(`Panen selesai: ${result.scanned ?? 0} item diperiksa, ${result.added ?? 0} artikel baru masuk antrean, ${result.enriched ?? 0} diperkaya dari halaman sumber; foto terdeteksi ${result.imageCandidates ?? 0}, tersimpan ke Blob ${result.imageBlobStored ?? 0}.${cap}`);
       await refresh();
@@ -546,6 +622,67 @@ export default function Dashboard() {
       setMessage(error instanceof Error ? error.message : "Panen RSS gagal.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runSystemCheck(options?: { runHarvest?: boolean; probeAi?: boolean }) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/admin/diagnostics/system", {
+        method: options?.runHarvest || options?.probeAi ? "POST" : "GET",
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          ...(options?.runHarvest || options?.probeAi ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(options?.runHarvest || options?.probeAi ? { body: JSON.stringify(options) } : {}),
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        ok?: boolean;
+        error?: string;
+        diagnostics?: SystemDiagnostics;
+        harvestResult?: { added?: number; scanned?: number; feedsFailed?: number; feedsTotal?: number; error?: string } | null;
+        aiResult?: AiDiagnostic | null;
+      };
+      if (!response.ok || !payload.ok || !payload.diagnostics) {
+        throw new Error(payload.error || `Diagnostik gagal (HTTP ${response.status}).`);
+      }
+      setSystemDiagnostics(payload.diagnostics);
+      if (payload.aiResult) setAiDiagnostic(payload.aiResult);
+      await refresh();
+      const notes: string[] = [`Diagnostik diperbarui (${payload.diagnostics.health.issues.length} temuan)`];
+      if (payload.harvestResult) {
+        notes.push(
+          payload.harvestResult.error
+            ? `Panen gagal: ${payload.harvestResult.error}`
+            : `Panen RSS: +${payload.harvestResult.added ?? 0} baru dari ${payload.harvestResult.scanned ?? 0} item`,
+        );
+      }
+      if (payload.aiResult) {
+        notes.push(
+          payload.aiResult.ok
+            ? `AI aktif (${payload.aiResult.provider} · ${payload.aiResult.model})`
+            : `AI gagal (${payload.aiResult.error ?? "error"})`,
+        );
+      }
+      setMessage(`${notes.join(" · ")}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal menjalankan diagnostik sistem.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyDiagnosticsReport() {
+    const activeDiag = systemDiagnostics ?? data?.diagnostics ?? null;
+    if (!activeDiag) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(activeDiag, null, 2));
+      setDiagCopied(true);
+      window.setTimeout(() => setDiagCopied(false), 2_500);
+    } catch {
+      setMessage("Gagal menyalin laporan ke clipboard.");
     }
   }
 
@@ -666,17 +803,19 @@ export default function Dashboard() {
     (article.status === "published" || article.status === "ready"),
   );
   const selectedReelPromptArticle = reelPromptArticles.find((article) => article.id === reelPromptArticleId) ?? reelPromptArticles[0];
+  const activeDiagnostics = systemDiagnostics ?? data?.diagnostics ?? null;
+  const diagIssueCount = activeDiagnostics?.health.issues.length ?? 0;
 
   return (
     <main className="dashboard-shell">
       <header className="dashboard-header">
         <div className="brand-mark">N</div>
         <div className="header-title"><strong>News FB Fiesta</strong><span>Panel redaksi otomatis</span></div>
-        <div className="header-right"><span className={canPublish ? "system-pill ready" : "system-pill pending"}>{canPublish ? "SIAP PUBLIKASI" : "SETUP BELUM LENGKAP"}</span><button className="quiet-button" onClick={() => { setAuthenticated(false); setData(null); setSecret(""); }}>Keluar</button></div>
+        <div className="header-right"><span className={canPublish ? "system-pill ready" : "system-pill pending"}>{canPublish ? "SIAP PUBLIKASI" : "SETUP BELUM LENGKAP"}</span><button className="quiet-button" onClick={() => { setAuthenticated(false); setData(null); setSystemDiagnostics(null); setSecret(""); }}>Keluar</button></div>
       </header>
 
       <section className="dashboard-intro">
-        <div><p className="eyebrow">RINGKASAN SISTEM</p><h1>Dashboard redaksi</h1><p>Pilih tab di bawah: antrean, feed RSS, konten manual, kuis, Reels, dan setup API dipisah supaya tidak perlu scroll panjang.</p></div>
+        <div><p className="eyebrow">RINGKASAN SISTEM</p><h1>Dashboard redaksi</h1><p>Pilih tab di bawah: diagnostik error, antrean, feed RSS, konten manual, kuis, Reels, dan setup API dipisah supaya tidak perlu scroll panjang.</p></div>
         <div className="updated-at">Diperbarui {formatDate(data?.checkedAt ?? null)}</div>
       </section>
 
@@ -684,11 +823,12 @@ export default function Dashboard() {
 
       <nav className="dashboard-tabs" role="tablist" aria-label="Bagian dashboard">
         {DASHBOARD_TABS.map((tab) => {
-          const badge = tab.key === "queue" ? sections.queue.length
+          const badge = tab.key === "diagnostics" ? diagIssueCount
+            : tab.key === "queue" ? sections.queue.length
             : tab.key === "published" ? sections.done.length
             : tab.key === "feeds" ? (data?.feeds.length ?? 0)
             : null;
-          const alert = tab.key === "published" && failedCount > 0;
+          const alert = (tab.key === "published" && failedCount > 0) || (tab.key === "diagnostics" && diagIssueCount > 0);
           return (
             <button
               key={tab.key}
@@ -708,6 +848,20 @@ export default function Dashboard() {
       <p className="tab-hint">{TAB_HINTS[activeTab]}</p>
 
       {activeTab === "overview" && (<>
+      {activeDiagnostics && activeDiagnostics.health.issues.length > 0 && (
+        <div className={`diagnostic-result ${activeDiagnostics.health.level === "healthy" ? "success" : "failure"}`} style={{ marginBottom: 14 }}>
+          <strong>
+            {activeDiagnostics.health.level === "critical"
+              ? `Perhatian Otomasi (${activeDiagnostics.health.issues.length} temuan kritis/peringatan)`
+              : `Catatan Otomasi (${activeDiagnostics.health.issues.length} peringatan)`}
+          </strong>
+          <span>{activeDiagnostics.health.issues[0]?.title}: {activeDiagnostics.health.issues[0]?.detail}</span>
+          <div className="diagnostic-actions">
+            <button type="button" className="secondary-button" onClick={() => setActiveTab("diagnostics")}>Buka Diagnostik &amp; Error →</button>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => void runSystemCheck({ runHarvest: true, probeAi: false })}>{busy ? "Memproses…" : "Panen RSS sekarang"}</button>
+          </div>
+        </div>
+      )}
       <section className="stat-grid" aria-label="Statistik artikel">
         <article className="stat-card"><span>Total artikel tersimpan</span><strong>{data?.stats.articles ?? 0}</strong><small>Semua kategori</small></article>
         <article className="stat-card"><span>Antre sekarang</span><strong>{data?.stats.queued ?? 0}</strong><small>Belum dikirim ke Buffer/Facebook</small></article>
@@ -722,7 +876,7 @@ export default function Dashboard() {
       <section className="panel readiness-panel">
         <div className="panel-heading"><div><p className="eyebrow">PEMERIKSAAN LAYANAN</p><h2>Apa yang sudah siap?</h2></div><span className="muted">Refresh otomatis tiap menit</span></div>
         <div className="check-grid">{Object.entries(integrationLabels).map(([key, label]) => <div className="check-item" key={key}><span className={checks[key] ? "check-dot good" : "check-dot"} />{label}<strong>{checks[key] ? "Siap" : "Belum"}</strong></div>)}</div>
-        <p className="muted small-note">Panen terjadwal tiap 24 jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita). Publisher otomatis: maks. <b>{data?.schedule.maxPerDay ?? 4} post/hari</b> (pagi · siang · sore · malam), {data?.schedule.maxPerHour ?? 1} post/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 210} menit. Ini ritme editorial yang sedang diuji, bukan jaminan distribusi Meta. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
+        <p className="muted small-note">Panen terjadwal tiap {data?.schedule.harvestEveryHours ?? 4} jam (maks. {data?.schedule.maxArticlesPerHarvest ?? 50} berita, dan otomatis dipicu oleh <code>/api/cron</code> bila RSS kedaluwarsa). Publisher otomatis: maks. <b>{data?.schedule.maxPerDay ?? 4} post/hari</b> (pagi · siang · sore · malam), {data?.schedule.maxPerHour ?? 1} post/jam, jeda minimum {data?.schedule.minimumGapMinutes ?? 210} menit. Ini ritme editorial yang sedang diuji, bukan jaminan distribusi Meta. Review manual tidak dibatasi. Jumlah kiriman Buffer hari ini: {data?.stats.bufferQueuedToday ?? 0}.</p>
         <div className="slot-row">
           <div className="slot-head">
             <strong>{publishSchedule?.enabled ? (publishSchedule.active ? `Jendela aktif: slot ${publishSchedule.activeSlot} WITA` : "Di luar jadwal tayang") : "Jadwal slot dimatikan"}</strong>
@@ -757,6 +911,179 @@ export default function Dashboard() {
         )}
       </section>
       </>)}
+
+      {activeTab === "diagnostics" && (
+      <section className="panel readiness-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">PEMANTAU OTOMASI &amp; ERROR</p>
+            <h2>Diagnostik Sistem, Cron &amp; RSS</h2>
+            <p className="muted small-note">
+              Halaman ini membaca langsung status database Neon, detak pemicu cron otomatis, error pengambilan RSS, kegagalan AI/orisinalitas, serta error Graph API tanpa perlu membuka SQL editor.
+            </p>
+          </div>
+          <span className={activeDiagnostics?.health.level === "healthy" ? "system-pill ready" : "system-pill pending"}>
+            {activeDiagnostics?.health.level === "critical" ? "PERLU TINDAKAN" : activeDiagnostics?.health.level === "warning" ? "ADA PERINGATAN" : "SEHAT"}
+          </span>
+        </div>
+
+        <div className="diagnostic-actions" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void runSystemCheck()}>
+            {busy ? "Memeriksa…" : "Muat ulang diagnostik"}
+          </button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void runSystemCheck({ runHarvest: true, probeAi: true })}>
+            {busy ? "Menjalankan…" : "Panen RSS + Uji AI sekarang"}
+          </button>
+          <button type="button" className="secondary-button" disabled={busy || !canPublish} onClick={() => void publishOne()}>
+            Terbitkan 1 post manual
+          </button>
+          <button type="button" className="quiet-button" disabled={!activeDiagnostics} onClick={() => void copyDiagnosticsReport()}>
+            {diagCopied ? "Laporan tersalin ✓" : "Salin laporan JSON"}
+          </button>
+        </div>
+
+        <section className="stat-grid" aria-label="Detak otomasi">
+          <article className="stat-card">
+            <span>Detak /api/cron terakhir</span>
+            <strong>{activeDiagnostics?.health.minutesSinceLastCron != null ? `${activeDiagnostics.health.minutesSinceLastCron} mnt lalu` : "Belum tercatat"}</strong>
+            <small>{formatDate(activeDiagnostics?.heartbeats.lastCronAt ?? null)} · {activeDiagnostics?.heartbeats.lastCronOutcome ?? "—"}</small>
+          </article>
+          <article className="stat-card">
+            <span>Panen RSS terakhir</span>
+            <strong>{activeDiagnostics?.health.minutesSinceLastHarvest != null ? `${activeDiagnostics.health.minutesSinceLastHarvest} mnt lalu` : "Belum pernah"}</strong>
+            <small>{formatDate(activeDiagnostics?.heartbeats.lastFeedFetchedAt ?? activeDiagnostics?.heartbeats.lastHarvestAt ?? null)}</small>
+          </article>
+          <article className="stat-card">
+            <span>Post terakhir terbit</span>
+            <strong className={(activeDiagnostics?.health.hoursSinceLastPublish ?? 0) >= 14 ? "number-alert" : ""}>
+              {activeDiagnostics?.health.hoursSinceLastPublish != null ? `${activeDiagnostics.health.hoursSinceLastPublish} jam lalu` : "Belum ada"}
+            </strong>
+            <small>{formatDate(activeDiagnostics?.heartbeats.lastPublishedAt ?? null)}</small>
+          </article>
+          <article className="stat-card">
+            <span>Kandidat Carousel Hiburan</span>
+            <strong className={(activeDiagnostics?.queue.imageEligibleEntertainment ?? 0) < 4 ? "number-alert" : ""}>
+              {activeDiagnostics?.queue.imageEligibleEntertainment ?? 0}/4 layak
+            </strong>
+            <small>{activeDiagnostics?.queue.queuedEntertainment ?? 0} di antrean · {activeDiagnostics?.queue.expiredLast24h ?? 0} kedaluwarsa (24j)</small>
+          </article>
+        </section>
+
+        <div className="setup-grid" style={{ marginTop: 14 }}>
+          {(activeDiagnostics?.health.issues ?? []).length === 0 ? (
+            <article className="setup-card">
+              <span className="check-dot good" />
+              <div>
+                <strong>Tidak ada error atau hambatan aktif</strong>
+                <p>Detak cron, pengambilan feed RSS, dan antrean berjalan normal.</p>
+              </div>
+              <b>Normal</b>
+            </article>
+          ) : (
+            (activeDiagnostics?.health.issues ?? []).map((issue, idx) => (
+              <article className="setup-card" key={`${issue.code}-${idx}`}>
+                <span className="check-dot" />
+                <div>
+                  <strong>{issue.title}</strong>
+                  <p>{issue.detail}</p>
+                </div>
+                <b className="number-alert">{issue.severity === "critical" ? "Kritis" : "Peringatan"}</b>
+              </article>
+            ))
+          )}
+        </div>
+
+        {activeDiagnostics && (
+          <div className="diagnostic-result" style={{ marginTop: 14 }}>
+            <strong>Checklist Jadwal Eksternal (cron-job.org)</strong>
+            <span>
+              1) Publisher otomatis (tiap 15 menit, metode <b>GET</b> atau <b>POST</b>, batas waktu <b>30 detik</b>): <code>{activeDiagnostics.cronSetup.cronEndpoint}</code>
+            </span>
+            <span>
+              2) Panen RSS (tiap 2–4 jam, metode <b>GET</b> atau <b>POST</b>, batas waktu <b>30 detik</b>): <code>{activeDiagnostics.cronSetup.harvestEndpoint}</code>
+            </span>
+            <small>
+              Header wajib pada kedua job: <code>Authorization: Bearer &lt;CRON_SECRET&gt;</code>.{" "}
+              {activeDiagnostics.cronSetup.shortlinkOnlyHost
+                ? `Jangan gunakan domain shortlink (${activeDiagnostics.cronSetup.shortlinkOnlyHost}) untuk cron karena semua jalur selain /s/* dikembalikan 404.`
+                : ""}
+            </small>
+          </div>
+        )}
+
+        {(activeDiagnostics?.failingFeeds.length ?? 0) > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <p className="eyebrow">ERROR FEED RSS ({activeDiagnostics?.failingFeeds.length})</p>
+            <div className="feed-list">
+              {activeDiagnostics?.failingFeeds.map((feed) => (
+                <article className="feed-row" key={feed.id}>
+                  <div className="feed-row-main">
+                    <strong>{feed.name} <span className={`tag ${feed.pageKey}`}>{pageLabel(feed.pageKey)}</span></strong>
+                    <small className="muted">Diperiksa: {formatDate(feed.lastFetchedAt)} · {feed.feedUrl}</small>
+                    <p className="article-error" style={{ margin: "4px 0 0" }}>{feed.lastError}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(activeDiagnostics?.failedArticles.length ?? 0) > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <p className="eyebrow">ARTIKEL GAGAL DIPROSES ({activeDiagnostics?.failedArticles.length})</p>
+            <div className="feed-list">
+              {activeDiagnostics?.failedArticles.map((item) => (
+                <article className="feed-row" key={item.id}>
+                  <div className="feed-row-main">
+                    <strong>{item.title}</strong>
+                    <small className="muted">{item.sourceName} · Percobaan {item.attempts}x · {formatDate(item.updatedAt)}</small>
+                    <p className="article-error" style={{ margin: "4px 0 0" }}>{item.errorMessage}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(activeDiagnostics?.subsystemErrors.length ?? 0) > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <p className="eyebrow">CATATAN SUBSISTEM (INSTAGRAM / KOMENTAR / KUIS / REELS)</p>
+            <div className="feed-list">
+              {activeDiagnostics?.subsystemErrors.map((err, index) => (
+                <article className="feed-row" key={`${err.subsystem}-${index}`}>
+                  <div className="feed-row-main">
+                    <strong>[{err.subsystem.toUpperCase()}] {err.title}</strong>
+                    <small className="muted">{formatDate(err.occurredAt)}</small>
+                    <p className="article-error" style={{ margin: "4px 0 0" }}>{err.errorMessage}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 18 }}>
+          <p className="eyebrow">RIWAYAT EKSEKUSI OTOMATIS TERBARU ({activeDiagnostics?.recentEvents.length ?? 0})</p>
+          {(activeDiagnostics?.recentEvents.length ?? 0) === 0 ? (
+            <p className="muted small-note">Belum ada riwayat terekam. Begitu <code>/api/cron</code> atau <code>/api/harvest</code> terpanggil, setiap eksekusi akan muncul di sini.</p>
+          ) : (
+            <div className="feed-list">
+              {activeDiagnostics?.recentEvents.map((event) => (
+                <article className="feed-row" key={event.id}>
+                  <div className="feed-row-main">
+                    <strong>
+                      <code>{event.source}</code> · <span className={event.outcome === "error" ? "number-alert" : ""}>{event.outcome}</span>{" "}
+                      <small className="muted">({event.trigger === "manual" ? "manual" : "terjadwal"} · {formatDate(event.createdAt)})</small>
+                    </strong>
+                    <small>{event.summary}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+      )}
 
       {activeTab === "setup" && (
       <section className="panel readiness-panel setup-panel">

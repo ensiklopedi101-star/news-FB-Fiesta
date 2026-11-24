@@ -12,6 +12,7 @@ import { EDITORIAL_VOICES } from "@/lib/editorial-voices";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
 import { isInstagramPublishingEnabled } from "@/lib/instagram";
+import { getDiagnosticsSnapshot } from "@/lib/automation-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -225,9 +226,12 @@ export async function GET(request: NextRequest) {
       blobStorage: Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim()),
     };
 
+    const diagnostics = await getDiagnosticsSnapshot(20).catch(() => null);
+
     return NextResponse.json({
       ok: true,
       checkedAt: new Date().toISOString(),
+      diagnostics,
       integrations,
       aiModels: {
         groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "llama-3.3-70b-versatile",

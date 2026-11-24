@@ -143,8 +143,26 @@ export const reels = pgTable(
   ],
 );
 
+export const automationLogs = pgTable(
+  "automation_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    source: text("source").notNull(),
+    trigger: text("trigger").notNull().default("scheduled"),
+    outcome: text("outcome").notNull(),
+    summary: text("summary").notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("automation_logs_created_idx").on(table.createdAt),
+    index("automation_logs_source_created_idx").on(table.source, table.createdAt),
+  ],
+);
+
 export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
 export type QuizEdition = typeof quizEditions.$inferSelect;
 export type Reel = typeof reels.$inferSelect;
+export type AutomationLog = typeof automationLogs.$inferSelect;

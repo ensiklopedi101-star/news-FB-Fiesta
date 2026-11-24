@@ -55,7 +55,7 @@ async function claimNextArticles(): Promise<Article[]> {
     .set({ status: "expired", errorMessage: expiredMessage, updatedAt: now })
     .where(and(eq(articles.status, "queued"), isExpiredByAge));
   const configuredPages = (["news", "entertainment"] as const)
-    .filter((pageKey) => getBufferConfigurationGaps([pageKey]).length === 0);
+    .filter((pageKey) => publishingConfigurationGaps(pageKey).length === 0);
   if (!configuredPages.length) return [];
   const configuredPageFilter = or(...configuredPages.map((pageKey) => eq(articles.pageKey, pageKey)));
   if (!configuredPageFilter) return [];
@@ -315,7 +315,9 @@ async function recordOriginality(
   }
 }
 
-export async function runNewsPipeline(): Promise<RunResult> {
+export async function runNewsPipeline(options?: {
+  deferBackgroundTask?: (task: () => Promise<void>) => void;
+}): Promise<RunResult> {
   const db = getDb();
   const pause = await getPublishingPause();
   if (pause) return { result: "rate-limited", detail: `${pause.detail} Berikutnya bisa mencoba setelah ${pause.nextAllowedAt}.` };
@@ -508,24 +510,35 @@ export async function runNewsPipeline(): Promise<RunResult> {
       }
 
       // Mirror to Instagram. A failure here is reported but never rolls back the
-      // Facebook post, exactly like the source comment.
+      // Facebook post, exactly like the source comment. On scheduled cron calls,
+      // Instagram container polling can be deferred via Next.js `after()` so
+      // external schedulers with 30s timeouts receive 200 OK immediately.
       let instagramNote = "";
       if (isInstagramPublishingEnabled()) {
-        try {
-          const instagram = await publishInstagramPost({ imageUrls, caption });
-          await db.update(articles)
-            .set({ instagramMediaId: instagram.mediaId, updatedAt: new Date() })
-            .where(eq(articles.id, article.id))
-            .catch(() => undefined);
-          logStage(`instagram-published media=${instagram.mediaId}`);
-        } catch (instagramError) {
-          const instagramMessage = instagramError instanceof Error ? instagramError.message : "Instagram gagal.";
-          instagramNote = ` Instagram belum terkirim: ${instagramMessage.slice(0, 200)}`;
-          await db.update(articles)
-            .set({ errorMessage: `Posting Facebook berhasil; Instagram gagal: ${instagramMessage}`.slice(0, 1_000), updatedAt: new Date() })
-            .where(eq(articles.id, article.id));
-          console.error(`[pipeline] instagram gagal untuk ${article.id}:`, instagramMessage);
-          logStage("instagram-failed");
+        const runInstagramMirror = async () => {
+          try {
+            const instagram = await publishInstagramPost({ imageUrls, caption });
+            await db.update(articles)
+              .set({ instagramMediaId: instagram.mediaId, updatedAt: new Date() })
+              .where(eq(articles.id, article.id))
+              .catch(() => undefined);
+            logStage(`instagram-published media=${instagram.mediaId}`);
+          } catch (instagramError) {
+            const instagramMessage = instagramError instanceof Error ? instagramError.message : "Instagram gagal.";
+            instagramNote = ` Instagram belum terkirim: ${instagramMessage.slice(0, 200)}`;
+            await db.update(articles)
+              .set({ errorMessage: `Posting Facebook berhasil; Instagram gagal: ${instagramMessage}`.slice(0, 1_000), updatedAt: new Date() })
+              .where(eq(articles.id, article.id));
+            console.error(`[pipeline] instagram gagal untuk ${article.id}:`, instagramMessage);
+            logStage("instagram-failed");
+          }
+        };
+
+        if (options?.deferBackgroundTask) {
+          options.deferBackgroundTask(runInstagramMirror);
+          instagramNote = " Cermin Instagram diproses di latar belakang.";
+        } else {
+          await runInstagramMirror();
         }
       }
 
