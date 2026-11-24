@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
 import { PILLARS, classifyPillar } from "@/lib/pillars";
+import type { FacebookInsightsSummary } from "@/lib/facebook-insights-core";
 
 type Feed = {
   id: string;
@@ -147,6 +148,7 @@ type ContentManagerOverview = {
     averageOriginality7d: number;
     topPillars: Array<{ pillar: string; clicks: number; posts: number }>;
     topPerformers: Array<{ title: string; pillar: string | null; clicks: number }>;
+    facebookInsights: FacebookInsightsSummary;
   };
   eligibleQueueCount: number;
   recentDecisions: Array<{
@@ -165,6 +167,18 @@ type ContentManagerOverview = {
     editorialReasoning: string;
     createdAt: string;
   }>;
+};
+
+type FacebookInsightsSyncResult = {
+  status: string;
+  configured: boolean;
+  eligiblePosts: number;
+  attemptedPosts: number;
+  syncedPosts: number;
+  partialPosts: number;
+  failedPosts: number;
+  lastSyncedAt: string | null;
+  error?: string;
 };
 
 type ContentManagerSimulation = {
@@ -306,7 +320,7 @@ const TAB_STORAGE_KEY = "popbeez-dashboard-tab";
 /** One line under the tab bar so each tab explains itself without scrolling. */
 const TAB_HINTS: Record<DashboardTab, string> = {
   overview: "Statistik, kesiapan layanan, kuota harian, dan jadwal slot tayang.",
-  contentManager: "Atur strategi PopBeez, lihat performa klik, simulasi kurasi editorial, dan jejak keputusan agent.",
+  contentManager: "Atur strategi PopBeez, pantau Facebook Insights dan klik shortlink secara terpisah, simulasi kurasi editorial, dan jejak keputusan agent.",
   diagnostics: "Pantau error sistem, detak cron & panen RSS otomatis, kegagalan feed/AI/publikasi, dan ekspor laporan diagnostik.",
   queue: "Artikel yang masih menunggu dikirim. Maksimal 4 post/hari (pagi · siang · sore · malam) dengan pilar yang bergantian.",
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
@@ -325,6 +339,7 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [contentManagerDraft, setContentManagerDraft] = useState<ContentManagerSettings | null>(null);
   const [contentManagerSimulation, setContentManagerSimulation] = useState<ContentManagerSimulation | null>(null);
+  const [facebookInsightsSync, setFacebookInsightsSync] = useState<FacebookInsightsSyncResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [name, setName] = useState("");
@@ -695,6 +710,29 @@ export default function Dashboard() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Gagal menyimpan pengaturan Content Manager.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncFacebookInsights(force = true) {
+    setBusy(true);
+    setFacebookInsightsSync(null);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/facebook-insights", {
+        method: "POST",
+        body: JSON.stringify({ force }),
+      }) as FacebookInsightsSyncResult;
+      setFacebookInsightsSync(result);
+      await refresh();
+      setMessage(result.status === "synced"
+        ? `Facebook Insights tersinkron: ${result.syncedPosts} post berhasil${result.failedPosts ? `, ${result.failedPosts} gagal` : ""}.`
+        : result.status === "unconfigured"
+          ? result.error ?? "Kredensial Insights belum diatur di server."
+          : result.error ?? `Sinkronisasi Insights: ${result.status}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Sinkronisasi Facebook Insights gagal.");
     } finally {
       setBusy(false);
     }
@@ -1092,8 +1130,26 @@ export default function Dashboard() {
           </form>
 
           <div className="manager-analytics">
-            <div className="form-title"><strong>Performa konten 7 hari</strong><span>Short link menjadi sinyal minat Beezers untuk kurasi berikutnya.</span></div>
-            {(data?.contentManager?.performance.topPillars.length ?? 0) > 0 ? <div className="manager-pillar-stats">{data?.contentManager?.performance.topPillars.map((pillar) => <div className="manager-pillar-row" key={pillar.pillar}><span>{PILLARS[pillar.pillar as keyof typeof PILLARS]?.label ?? pillar.pillar}</span><b>{pillar.clicks} klik</b><small>{pillar.posts} post</small></div>)}</div> : <p className="empty-state compact-empty">Belum ada sinyal klik atau post yang cukup untuk membandingkan pilar.</p>}
+            <div className="form-title"><strong>Performa Facebook · 30 hari</strong><span>Meta Page/Post Insights memandu kurasi; klik shortlink adalah sinyal terpisah untuk minat ke sumber.</span></div>
+            {data?.contentManager?.performance.facebookInsights.postsAnalyzed ? <>
+              <div className="queue-counts manager-metrics">
+                <span>{data.contentManager.performance.facebookInsights.postsAnalyzed} post dianalisis</span>
+                <span>{data.contentManager.performance.facebookInsights.totalMediaViews.toLocaleString("id-ID")} media views</span>
+                <span>{data.contentManager.performance.facebookInsights.totalUniqueViewers.toLocaleString("id-ID")} unique viewers</span>
+                <span>{data.contentManager.performance.facebookInsights.totalClicks.toLocaleString("id-ID")} klik post Facebook</span>
+                <span>{data.contentManager.performance.facebookInsights.totalInteractions.toLocaleString("id-ID")} interaksi · {data.contentManager.performance.facebookInsights.interactionSamples} sampel lengkap</span>
+                <span>{data.contentManager.performance.facebookInsights.averageInteractionRate.toFixed(1)}% interaksi/unique viewer</span>
+              </div>
+              <div className="manager-pillar-stats">{data.contentManager.performance.facebookInsights.topPillars.filter((pillar) => pillar.posts >= 3).length ? data.contentManager.performance.facebookInsights.topPillars.filter((pillar) => pillar.posts >= 3).map((pillar) => <div className="manager-pillar-row" key={pillar.pillar}><span>{PILLARS[pillar.pillar as keyof typeof PILLARS]?.label ?? pillar.pillar}</span><b>{pillar.interactionRate.toFixed(1)}% interaksi/viewer</b><small>{pillar.posts} post lengkap</small></div>) : <p className="empty-state compact-empty">Belum ada pilar dengan minimal tiga sampel interaksi lengkap.</p>}</div>
+              {data.contentManager.performance.facebookInsights.topPerformers.length > 0 && <div className="manager-performers"><strong>Post dengan interaksi terbanyak</strong>{data.contentManager.performance.facebookInsights.topPerformers.slice(0, 3).map((post) => <div key={post.facebookPostId}><b>{post.interactions.toLocaleString("id-ID")} interaksi · {post.interactionRate.toFixed(1)}%</b><span>{post.title}</span></div>)}</div>}
+              {data.contentManager.performance.facebookInsights.topSlots.length > 0 && <div className="manager-performers"><strong>Slot tayang WITA (observasi; jadwal tidak diubah)</strong>{data.contentManager.performance.facebookInsights.topSlots.map((slot) => <div key={slot.slotLabel}><b>{slot.interactionRate.toFixed(1)}% · n={slot.posts}</b><span>{slot.slotLabel}{data?.contentManager?.performance.facebookInsights.recommendedSlot === slot.slotLabel ? " · sinyal teratas (≥3 post)" : ""}</span></div>)}</div>}
+              <small className="muted">Meta menyediakan angka lifetime per post, sedangkan pemilihan post dibatasi ke 30 hari terakhir. Carousel diukur sebagai satu post, bukan analitik per-slide. Snapshot terakhir: {data.contentManager.performance.facebookInsights.lastSyncedAt ? formatDate(data.contentManager.performance.facebookInsights.lastSyncedAt) : "belum ada"}.</small>
+            </> : <p className="empty-state compact-empty">{data?.contentManager?.performance.facebookInsights.configured ? "Insights aktif tetapi belum ada snapshot. Sinkronkan post Facebook terbaru untuk mulai melihat performa nyata." : "Insight Facebook belum terhubung. Pasang kredensial server-side; kurasi tetap berjalan dengan sinyal yang tersedia."}</p>}
+            {data?.contentManager?.performance.facebookInsights.lastError && <p className="error-text">{data.contentManager.performance.facebookInsights.lastError}</p>}
+            <button type="button" className="secondary-button" onClick={() => void syncFacebookInsights(true)} disabled={busy || !data?.contentManager?.performance.facebookInsights.configured || Boolean(data?.publishSchedule.enabled && data.publishSchedule.active)}>{busy ? "Memproses…" : data?.publishSchedule.enabled && data.publishSchedule.active ? "Sinkronisasi ditahan saat slot publikasi" : "Sinkronkan Insights sekarang"}</button>
+            {facebookInsightsSync && <small className="muted">{facebookInsightsSync.attemptedPosts} dicoba · {facebookInsightsSync.syncedPosts} berhasil · {facebookInsightsSync.partialPosts} parsial · {facebookInsightsSync.failedPosts} gagal.</small>}
+            <div className="form-title"><strong>Klik shortlink · 7 hari</strong><span>Klik ke sumber, terpisah dari media views dan interaksi Facebook.</span></div>
+            {(data?.contentManager?.performance.topPillars.length ?? 0) > 0 ? <div className="manager-pillar-stats">{data?.contentManager?.performance.topPillars.map((pillar) => <div className="manager-pillar-row" key={pillar.pillar}><span>{PILLARS[pillar.pillar as keyof typeof PILLARS]?.label ?? pillar.pillar}</span><b>{pillar.clicks} klik</b><small>{pillar.posts} post</small></div>)}</div> : <p className="empty-state compact-empty">Belum ada klik shortlink untuk membandingkan pilar.</p>}
             {(data?.contentManager?.performance.topPerformers.length ?? 0) > 0 && <div className="manager-performers"><strong>Post dengan klik terbanyak</strong>{data?.contentManager?.performance.topPerformers.slice(0, 3).map((post) => <div key={`${post.title}-${post.clicks}`}><b>{post.clicks} klik</b><span>{post.title}</span></div>)}</div>}
             <div className="manager-simulate">
               <strong>Simulasi rapat redaksi langsung</strong>

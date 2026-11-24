@@ -171,6 +171,39 @@ export const contentManagerConfig = pgTable("content_manager_config", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const facebookPostInsights = pgTable(
+  "facebook_post_insights",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    pageId: text("page_id").notNull(),
+    facebookPostId: text("facebook_post_id").notNull(),
+    mediaViews: integer("media_views").notNull().default(0),
+    uniqueViewers: integer("unique_viewers").notNull().default(0),
+    clicks: integer("clicks").notNull().default(0),
+    reactions: integer("reactions").notNull().default(0),
+    comments: integer("comments").notNull().default(0),
+    shares: integer("shares").notNull().default(0),
+    videoViews: integer("video_views").notNull().default(0),
+    interactionsAvailable: boolean("interactions_available").notNull().default(false),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("facebook_post_insights_page_post_unique").on(table.pageId, table.facebookPostId),
+    index("facebook_post_insights_synced_idx").on(table.syncedAt),
+  ],
+);
+
+export const facebookInsightsSyncState = pgTable("facebook_insights_sync_state", {
+  id: integer("id").primaryKey().default(1),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull().default(sql`'epoch'::timestamptz`),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  postsSynced: integer("posts_synced").notNull().default(0),
+  postsFailed: integer("posts_failed").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const contentManagerDecisions = pgTable(
   "content_manager_decisions",
   {
@@ -202,3 +235,5 @@ export type Reel = typeof reels.$inferSelect;
 export type AutomationLog = typeof automationLogs.$inferSelect;
 export type ContentManagerConfigRow = typeof contentManagerConfig.$inferSelect;
 export type ContentManagerDecisionRow = typeof contentManagerDecisions.$inferSelect;
+export type FacebookPostInsightRow = typeof facebookPostInsights.$inferSelect;
+export type FacebookInsightsSyncStateRow = typeof facebookInsightsSyncState.$inferSelect;

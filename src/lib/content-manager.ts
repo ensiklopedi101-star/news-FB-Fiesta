@@ -1,11 +1,13 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articles, contentManagerConfig, contentManagerDecisions, shortLinks } from "@/lib/schema";
+import { articles, contentManagerConfig, contentManagerDecisions, facebookInsightsSyncState, facebookPostInsights, shortLinks } from "@/lib/schema";
 import { classifyPillar, PILLARS, type Pillar } from "@/lib/pillars";
 import { EDITORIAL_VOICES, type EditorialVoiceId } from "@/lib/editorial-voices";
 import { POPBEEZ_ROUNDUP_MIN, selectedRoundupImage } from "@/lib/roundup";
-import { slotStateAt } from "@/lib/publish-slots";
+import { formatMinutes, loadSlotConfig, slotStateAt, witaMinutes } from "@/lib/publish-slots";
+import { buildFacebookInsightsSummary, type FacebookInsightsPostInput, type FacebookInsightsSummary } from "@/lib/facebook-insights-core";
+import { ensureFacebookInsightsTables, getFacebookInsightsReadiness } from "@/lib/facebook-insights";
 import { hasAnyAiProviderConfigured, runStructuredAiTask, type AiProviderAttempt } from "@/lib/ai";
 import {
   buildContentManagerPrompt,
@@ -180,6 +182,107 @@ export async function updateContentManagerSettings(patch: Partial<{
   return next;
 }
 
+function nearestConfiguredWitaSlot(publishedAt: Date | null): string | null {
+  if (!publishedAt) return null;
+  const config = loadSlotConfig();
+  if (config.disabled || config.slots.length === 0) return null;
+  const publishedMinute = witaMinutes(publishedAt);
+  let nearest: { minutes: number; distance: number } | null = null;
+  for (const minutes of config.slots) {
+    const rawDistance = Math.abs(publishedMinute - minutes);
+    const distance = Math.min(rawDistance, 1_440 - rawDistance);
+    if (!nearest || distance < nearest.distance) nearest = { minutes, distance };
+  }
+  return nearest && nearest.distance <= Math.max(60, config.graceMinutes)
+    ? formatMinutes(nearest.minutes)
+    : null;
+}
+
+async function getFacebookInsightsPerformance(since30d: Date): Promise<FacebookInsightsSummary> {
+  const readiness = getFacebookInsightsReadiness();
+  const summarizeEmpty = (lastError?: string | null, lastSyncedAt?: string | null) =>
+    buildFacebookInsightsSummary([], {
+      configured: readiness.configured,
+      lastError: lastError ?? null,
+      lastSyncedAt: lastSyncedAt ?? null,
+    });
+  try {
+    if (!await ensureFacebookInsightsTables()) {
+      return summarizeEmpty("Tabel insight Facebook belum siap; jalankan migrasi 0018_facebook_insights.sql.");
+    }
+    const pageId = process.env.FB_ENTERTAINMENT_PAGE_ID?.trim();
+    if (!pageId) return summarizeEmpty();
+    const db = getDb();
+    const articleRows = await db.select({
+      id: articles.id,
+      title: articles.title,
+      category: articles.category,
+      pillar: articles.pillar,
+      caption: articles.caption,
+      facebookPostId: articles.facebookPostId,
+      publishedAt: articles.publishedAt,
+    }).from(articles)
+      .where(and(
+        eq(articles.status, "published"),
+        eq(articles.pageKey, "entertainment"),
+        gte(articles.publishedAt, since30d),
+        isNotNull(articles.facebookPostId),
+      ))
+      .orderBy(desc(articles.publishedAt))
+      .limit(240);
+    const rowsByPost = new Map<string, typeof articleRows>();
+    for (const row of articleRows) {
+      const postId = row.facebookPostId?.trim();
+      if (!postId || postId.startsWith("buffer:") || postId.includes(":pending:") || postId.startsWith("facebook:")) continue;
+      const group = rowsByPost.get(postId) ?? [];
+      group.push(row);
+      rowsByPost.set(postId, group);
+    }
+    const postIds = [...rowsByPost.keys()];
+    const [insightRows, syncRows] = await Promise.all([
+      postIds.length > 0
+        ? db.select().from(facebookPostInsights)
+            .where(and(eq(facebookPostInsights.pageId, pageId), inArray(facebookPostInsights.facebookPostId, postIds)))
+        : Promise.resolve([]),
+      db.select().from(facebookInsightsSyncState).where(eq(facebookInsightsSyncState.id, 1)).limit(1),
+    ]);
+    const metricsByPost = new Map(insightRows.map((row) => [row.facebookPostId, row]));
+    const posts: FacebookInsightsPostInput[] = [];
+    for (const [facebookPostId, group] of rowsByPost) {
+      const metrics = metricsByPost.get(facebookPostId);
+      if (!metrics) continue;
+      const primary = group.find((row) => Boolean(row.caption?.trim())) ?? group[0]!;
+      const pillar = primary.pillar && Object.hasOwn(PILLARS, primary.pillar)
+        ? primary.pillar as Pillar
+        : classifyPillar({ title: primary.title, category: primary.category });
+      posts.push({
+        facebookPostId,
+        title: primary.title,
+        pillar,
+        slotLabel: nearestConfiguredWitaSlot(primary.publishedAt),
+        publishedAt: primary.publishedAt?.toISOString() ?? null,
+        mediaViews: metrics.mediaViews,
+        uniqueViewers: metrics.uniqueViewers,
+        clicks: metrics.clicks,
+        reactions: metrics.reactions,
+        comments: metrics.comments,
+        shares: metrics.shares,
+        videoViews: metrics.videoViews,
+        interactionsAvailable: metrics.interactionsAvailable,
+        syncedAt: metrics.syncedAt.toISOString(),
+      });
+    }
+    const [syncState] = syncRows;
+    return buildFacebookInsightsSummary(posts, {
+      configured: readiness.configured,
+      lastSyncedAt: syncState?.lastSuccessAt?.toISOString() ?? null,
+      lastError: syncState?.lastError ?? null,
+    });
+  } catch (error) {
+    return summarizeEmpty(error instanceof Error ? error.message.slice(0, 240) : "Gagal membaca insight Facebook.");
+  }
+}
+
 export async function getContentManagerPerformance(): Promise<ContentManagerPerformanceSummary> {
   const empty: ContentManagerPerformanceSummary = {
     totalClicks7d: 0,
@@ -187,10 +290,12 @@ export async function getContentManagerPerformance(): Promise<ContentManagerPerf
     averageOriginality7d: 0,
     topPillars: [],
     topPerformers: [],
+    facebookInsights: buildFacebookInsightsSummary([], { configured: getFacebookInsightsReadiness().configured }),
   };
   try {
     const db = getDb();
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     type PerformanceArticleRow = {
       id: string;
       title: string;
@@ -261,6 +366,7 @@ export async function getContentManagerPerformance(): Promise<ContentManagerPerf
         .map(([pillar, stat]) => ({ pillar, clicks: stat.clicks, posts: stat.posts }))
         .sort((left, right) => (right.clicks - left.clicks) || (right.posts - left.posts)),
       topPerformers: performers.filter((item) => item.clicks > 0).sort((left, right) => right.clicks - left.clicks).slice(0, 5),
+      facebookInsights: await getFacebookInsightsPerformance(since30d),
     };
   } catch {
     return empty;

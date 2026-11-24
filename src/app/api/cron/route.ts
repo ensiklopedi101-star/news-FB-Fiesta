@@ -7,11 +7,40 @@ import { runNewsPipeline } from "@/lib/pipeline";
 import { slotStateAt } from "@/lib/publish-slots";
 import { maybeAutoHarvestBeforePublish } from "@/lib/harvest";
 import { recordAutomationEvent } from "@/lib/automation-log";
+import { getFacebookInsightsReadiness, syncFacebookPostInsights } from "@/lib/facebook-insights";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const CRON_LOCK_MS = 3 * 60 * 1000;
+
+function scheduleFacebookInsightsSync(): void {
+  after(async () => {
+    try {
+      const result = await syncFacebookPostInsights();
+      if (result.status !== "synced" && result.status !== "failed") return;
+      const hasPartialData = result.partialPosts > 0 || result.failedPosts > 0;
+      await recordAutomationEvent({
+        source: "facebook-insights",
+        trigger: "scheduled",
+        outcome: result.status === "failed" || hasPartialData ? "error" : "ok",
+        summary: result.status === "synced"
+          ? `Insights Facebook: ${result.syncedPosts} post tersinkron, ${result.partialPosts} parsial, ${result.failedPosts} gagal.`
+          : `Sinkronisasi Facebook Insights gagal: ${result.error ?? "tanpa rincian"}`,
+        detail: result,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sinkronisasi Facebook Insights gagal.";
+      await recordAutomationEvent({
+        source: "facebook-insights",
+        trigger: "scheduled",
+        outcome: "error",
+        summary: `Sinkronisasi Facebook Insights gagal: ${message}`,
+        detail: { error: message },
+      });
+    }
+  });
+}
 
 async function handleCron(request: NextRequest) {
   if (!isAuthorized(request)) {
@@ -23,6 +52,12 @@ async function handleCron(request: NextRequest) {
   const forced = request.nextUrl.searchParams.get("force") === "1";
   const trigger = forced ? "manual" : "scheduled";
   const schedule = slotStateAt(new Date());
+
+  // Schedule read-only Insights pulls after the response and only outside a
+  // configured publishing slot, so they never contend with the live publisher.
+  if (!forced && schedule.enabled && !schedule.active && getFacebookInsightsReadiness().configured) {
+    scheduleFacebookInsightsSync();
+  }
 
   if (!forced && schedule.enabled && !schedule.active) {
     let autoHarvestSummary: Record<string, unknown> | null = null;
