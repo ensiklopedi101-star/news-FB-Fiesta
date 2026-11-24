@@ -1,20 +1,54 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articles } from "@/lib/schema";
-import { fetchRecentStories } from "@/lib/feeds";
+import { articles, rssSources } from "@/lib/schema";
+import { fetchRecentStoriesWithMeta } from "@/lib/feeds";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 import { storeArticleImageInBlob } from "@/lib/blob-image";
 import { isVercelBlobImageUrl } from "@/lib/og-image";
 import { isKnownAggregatorBrandImage } from "@/lib/safe-url";
 import { choosePostFormat } from "@/lib/queue-policy";
+import { selectedRoundupImage } from "@/lib/roundup";
+import { usesDirectFacebookPublishing } from "@/lib/publisher";
+import { getBufferConfigurationGaps } from "@/lib/buffer";
+import { shouldAutoHarvestBeforePublish } from "@/lib/automation-health";
 
 const MAX_ARTICLES_PER_HARVEST = PUBLISH_POLICY.maxArticlesPerHarvest;
 
-export async function harvestLatestStories() {
-  const stories = await fetchRecentStories();
+export type HarvestSummary = {
+  scanned: number;
+  added: number;
+  enriched: number;
+  imageCandidates: number;
+  imageBlobStored: number;
+  limited: boolean;
+  feedsTotal: number;
+  feedsFailed: number;
+  feedErrors: Array<{ sourceName: string; message: string }>;
+  elapsedMs: number;
+};
+
+export async function harvestLatestStories(options?: { budgetMs?: number }): Promise<HarvestSummary> {
+  const startedAt = Date.now();
+  const budgetMs = options?.budgetMs ?? 22_000;
+  const blobDeadline = startedAt + Math.max(8_000, budgetMs - 2_000);
+  const fetched = await fetchRecentStoriesWithMeta({ budgetMs: Math.max(6_000, budgetMs - 6_000) });
+  const stories = fetched.stories;
   const candidates = stories.slice(0, MAX_ARTICLES_PER_HARVEST);
-  if (candidates.length === 0) return { scanned: stories.length, added: 0, enriched: 0, imageCandidates: 0, imageBlobStored: 0, limited: false };
+  if (candidates.length === 0) {
+    return {
+      scanned: stories.length,
+      added: 0,
+      enriched: 0,
+      imageCandidates: 0,
+      imageBlobStored: 0,
+      limited: false,
+      feedsTotal: fetched.feedsTotal,
+      feedsFailed: fetched.feedsFailed,
+      feedErrors: fetched.feedErrors,
+      elapsedMs: Date.now() - startedAt,
+    };
+  }
 
   const db = getDb();
   const inserted = await db.insert(articles).values(candidates.map((story) => ({
@@ -78,9 +112,11 @@ export async function harvestLatestStories() {
   } else {
     const targets = [...imageTargets.values()];
     for (let offset = 0; offset < targets.length; offset += 5) {
+      if (Date.now() >= blobDeadline) break;
       await Promise.all(targets.slice(offset, offset + 5).map(async ({ id, story, imageUrls }) => {
+        if (Date.now() >= blobDeadline) return;
         const storedImages = await Promise.all(imageUrls.map(async (url, index) => {
-          if (isVercelBlobImageUrl(url)) return { url, uploaded: false };
+          if (isVercelBlobImageUrl(url) || Date.now() >= blobDeadline) return { url, uploaded: false };
           const blobUrl = await storeArticleImageInBlob(`${id}-${index + 1}`, url, story.sourceUrl);
           return { url: blobUrl ?? url, uploaded: Boolean(blobUrl) };
         }));
@@ -105,5 +141,46 @@ export async function harvestLatestStories() {
     imageCandidates: imageTargets.size,
     imageBlobStored,
     limited: stories.length > MAX_ARTICLES_PER_HARVEST,
+    feedsTotal: fetched.feedsTotal,
+    feedsFailed: fetched.feedsFailed,
+    feedErrors: fetched.feedErrors,
+    elapsedMs: Date.now() - startedAt,
   };
+}
+
+export async function maybeAutoHarvestBeforePublish(): Promise<{
+  triggered: boolean;
+  reason: string | null;
+  summary: HarvestSummary | null;
+}> {
+  const db = getDb();
+  const [activeFeeds, queuedEntertainment] = await Promise.all([
+    db.select({ lastFetchedAt: rssSources.lastFetchedAt }).from(rssSources).where(eq(rssSources.active, true)),
+    db.select({
+      imageUrl: articles.imageUrl,
+      imageUrls: articles.imageUrls,
+      manualImageUrls: articles.manualImageUrls,
+    }).from(articles).where(and(eq(articles.status, "queued"), eq(articles.pageKey, "entertainment"))),
+  ]);
+
+  const lastFeedFetchedAt = activeFeeds.reduce<Date | null>((latest, feed) => {
+    if (!feed.lastFetchedAt) return latest;
+    return !latest || feed.lastFetchedAt > latest ? feed.lastFetchedAt : latest;
+  }, null);
+  const imageEligibleEntertainment = queuedEntertainment.filter((row) => Boolean(selectedRoundupImage(row))).length;
+  const entertainmentConfigured = usesDirectFacebookPublishing("entertainment")
+    || getBufferConfigurationGaps(["entertainment"]).length === 0;
+  const decision = shouldAutoHarvestBeforePublish({
+    activeFeedCount: activeFeeds.length,
+    lastFeedFetchedAt,
+    imageEligibleEntertainment,
+    entertainmentConfigured,
+  });
+
+  if (!decision.shouldHarvest) {
+    return { triggered: false, reason: null, summary: null };
+  }
+
+  const summary = await harvestLatestStories({ budgetMs: 14_000 });
+  return { triggered: true, reason: decision.reason, summary };
 }
