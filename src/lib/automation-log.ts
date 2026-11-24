@@ -344,8 +344,10 @@ export async function getDiagnosticsSnapshot(eventLimit = 25): Promise<Diagnosti
     ? appUrl
     : "https://portal-beez.vercel.app";
 
+  // Read-only Insights failures are shown in the event history but must not make
+  // publishing/RSS health look broken; the dashboard exposes their own status.
   const recentAutomationErrors = recentEventsRaw.filter(
-    (event) => event.outcome === "error" && event.createdAt >= since24h,
+    (event) => event.outcome === "error" && event.createdAt >= since24h && event.source !== "facebook-insights",
   ).length;
 
   const health = assessAutomationHealth({

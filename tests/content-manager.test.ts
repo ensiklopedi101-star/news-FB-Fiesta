@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { summarizeFacebookInsights } from "../src/lib/facebook-insights-core";
 import {
   buildContentManagerPrompt,
   buildDeterministicPlan,
@@ -162,7 +163,7 @@ test("model-agnostic prompt includes PopBeez constitution, live directives, metr
   });
   assert.match(built.prompt, /KONSTITUSI CONTENT MANAGER POPBEEZ/);
   assert.match(built.prompt, /Utamakan pengumuman resmi/);
-  assert.match(built.prompt, /720 dari 10 post/);
+  assert.match(built.prompt, /720 klik dari 10 post/);
   assert.match(built.prompt, /data sumber tidak tepercaya/);
   assert.match(built.prompt, /MEMORI KEPUTUSAN EDITORIAL DI NEON/);
   assert.match(built.prompt, /Sorotan drama malam/);
@@ -292,4 +293,81 @@ test("response validator rejects unusable model response so provider failover ca
     fallbackPlan: fallback,
     settings: DEFAULT_CONTENT_MANAGER_SETTINGS,
   }), /hanya memilih/);
+});
+
+test("Facebook Insights adds a sample-qualified pillar signal to deterministic curation", () => {
+  const insightPosts = [
+    ...["m1", "m2", "m3"].map((facebookPostId) => ({
+      facebookPostId,
+      title: "Kabar manga",
+      pillar: "manga" as const,
+      slotLabel: "20:30",
+      publishedAt: null,
+      syncedAt: "2026-11-10T00:00:00.000Z",
+      mediaViews: 120,
+      uniqueViewers: 100,
+      clicks: 0,
+      reactions: 8,
+      comments: 1,
+      shares: 1,
+      videoViews: 0,
+      interactionsAvailable: true,
+    })),
+    ...["a1", "a2"].map((facebookPostId) => ({
+      facebookPostId,
+      title: "Kabar analisis",
+      pillar: "analysis" as const,
+      slotLabel: "12:00",
+      publishedAt: null,
+      syncedAt: "2026-11-10T00:00:00.000Z",
+      mediaViews: 105,
+      uniqueViewers: 100,
+      clicks: 0,
+      reactions: 1,
+      comments: 0,
+      shares: 0,
+      videoViews: 0,
+      interactionsAvailable: true,
+    })),
+  ];
+  const facebookInsights = summarizeFacebookInsights(insightPosts, { configured: true });
+  const candidates: ContentManagerCandidate[] = [
+    ["cand-breaking", "breaking"],
+    ["cand-analysis", "analysis"],
+    ["cand-community", "community"],
+    ["cand-list", "list"],
+    ["cand-manga", "manga"],
+    ["cand-relatable", "relatable"],
+  ].map(([id, pillar]) => ({
+    id: id!,
+    title: `${pillar} event headline ${id}`,
+    sourceName: "Source",
+    category: "Hiburan",
+    pillar: pillar as ContentManagerCandidate["pillar"],
+    snippet: "Fakta ringkas.",
+    isManualPriority: false,
+    attempts: 0,
+    publishedMinutesAgo: 10,
+    imageCount: 1,
+  }));
+  const basePerformance: ContentManagerPerformanceSummary = {
+    totalClicks7d: 0,
+    publishedPosts7d: 0,
+    averageOriginality7d: 0,
+    topPillars: [],
+    topPerformers: [],
+  };
+  const withoutInsights = buildDeterministicPlan({ candidates, performance: basePerformance });
+  const withInsights = buildDeterministicPlan({
+    candidates,
+    performance: { ...basePerformance, facebookInsights },
+  });
+
+  assert.ok(withoutInsights);
+  assert.ok(withInsights);
+  assert.equal(facebookInsights.postsAnalyzed, 5);
+  assert.equal(facebookInsights.topPillars[0]?.pillar, "manga");
+  assert.equal(facebookInsights.topPillars[0]?.posts, 3);
+  assert.ok(!withoutInsights.selectedIds.includes("cand-manga"));
+  assert.ok(withInsights.selectedIds.includes("cand-manga"));
 });

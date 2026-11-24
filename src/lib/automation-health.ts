@@ -2,7 +2,7 @@ import { MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { POPBEEZ_ROUNDUP_MIN } from "@/lib/roundup";
 import { PUBLISH_POLICY } from "@/lib/schedule";
 
-export type AutomationSource = "cron" | "harvest" | "cron-auto-harvest" | "quiz" | "reels" | "blob-cleanup" | "diagnostic";
+export type AutomationSource = "cron" | "harvest" | "cron-auto-harvest" | "facebook-insights" | "quiz" | "reels" | "blob-cleanup" | "diagnostic";
 export type AutomationTrigger = "scheduled" | "manual";
 export type AutomationOutcome = "ok" | "idle" | "outside-slot" | "rate-limited" | "busy" | "error";
 

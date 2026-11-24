@@ -2,6 +2,7 @@ import { extractJsonText, clampAtBoundary } from "@/lib/ai-draft";
 import { EDITORIAL_VOICES, pickEditorialVoice, type EditorialVoiceId } from "@/lib/editorial-voices";
 import { PILLARS, type Pillar } from "@/lib/pillars";
 import { POPBEEZ_ROUNDUP_MIN } from "@/lib/roundup";
+import type { FacebookInsightsSummary } from "@/lib/facebook-insights-core";
 
 export type ContentManagerCandidate = {
   id: string;
@@ -22,6 +23,7 @@ export type ContentManagerPerformanceSummary = {
   averageOriginality7d: number;
   topPillars: Array<{ pillar: Pillar; clicks: number; posts: number }>;
   topPerformers: Array<{ title: string; pillar: string | null; clicks: number }>;
+  facebookInsights?: FacebookInsightsSummary;
 };
 
 export type ContentManagerSettings = {
@@ -64,7 +66,7 @@ Tugasmu menjalankan 6 fungsi manajemen konten secara disiplin pada daftar kandid
 2. KALENDER & KOORDINASI TIM: Sesuaikan mood dengan SLOT WITA saat ini, urutkan 4 berita terpilih supaya indeks ke-1 (selectedCodes[0] = Slide 1 Cover) adalah berita paling kuat/memancing klik jujur (nama besar, pengumuman resmi besar, atau rekor nyata), dan pilih nada penulis (recommendedVoice: "kritis" | "santai" | "industri" | "penonton").
 3. KURASI CMS & DEDUPLIKASI: Pilih tepat 4 kode kandidat berbeda ke "selectedCodes". Jika ada kandidat lain yang membahas kejadian/rilisan yang SAMA PERSIS dengan salah satu berita terpilih (beda portal sumber tapi satu peristiwa), masukkan kodenya ke "duplicateCodes" agar diarsipkan otomatis. Kandidat bertanda [PRIORITAS] WAJIB masuk "selectedCodes" dan DILARANG masuk "duplicateCodes".
 4. SOCIAL SEO & STANDAR KUALITAS: Tentukan 3–5 "seoKeywords" berupa nama artis/grup/judul drama/anime/topik pencarian nyata yang ada di ke-4 berita terpilih, lalu tulis "writerBrief" singkat (1–2 kalimat untuk mengarahkan sudut caption dan mood naskah Reel, tanpa menambah fakta di luar sumber).
-5. EVALUASI PERFORMA: Manfaatkan ringkasan klik & performa pilar 7 hari terakhir untuk memprioritaskan jenis cerita yang terbukti disukai Beezers.
+5. EVALUASI PERFORMA: Gunakan Facebook Page/Post Insights 30 hari (media views, unique viewers, reaksi, komentar, dan bagikan) sebagai sinyal utama performa di Facebook. Klik Facebook dan klik shortlink adalah metrik terpisah. Prioritaskan pilar/slot hanya jika sampel interaksi lengkap memadai (minimal 3 post); data carousel berlaku untuk satu post dan mewakili hook/Slide 1, bukan performa tiap slide.
 6. KONSISTENSI MEREK POPBEEZ & HIVECOMP: Eja PopBeez (B kapital), sapa pembaca sebagai Beezers, gunakan Bahasa Indonesia natural dan anti-clickbait. Identitas HIVECOMP hanya mengikuti kredit/template visual resmi; jangan mengarang logo, sponsor, afiliasi, atau klaim brand.
 KOORDINASI WRITER/REEL: writerBrief harus mengarahkan sudut caption sekaligus mood naskah narasi Reel, selaras dengan recommendedVoice dan fakta sumber.`;
 
@@ -222,6 +224,15 @@ export function buildDeterministicPlan(input: {
   for (const [idx, row] of (input.performance?.topPillars ?? []).entries()) {
     if (row.clicks > 0) topPillarBonus.set(row.pillar, Math.max(2, 8 - idx * 2));
   }
+  const facebookPillarBonus = new Map<Pillar, number>();
+  const facebookInsights = input.performance?.facebookInsights;
+  if (facebookInsights && facebookInsights.interactionSamples >= 5) {
+    for (const row of facebookInsights.topPillars) {
+      if (row.posts < 3) continue;
+      const lift = row.interactionRate - facebookInsights.averageInteractionRate;
+      if (lift > 0) facebookPillarBonus.set(row.pillar, Math.min(12, Math.round(lift * 2)));
+    }
+  }
   const recentTitles = (input.recentPublishedTitles ?? []).slice(0, 8);
 
   const scored = input.candidates.map((candidate) => {
@@ -230,6 +241,7 @@ export function buildDeterministicPlan(input: {
     if (candidate.isManualPriority) score += 1_000;
     if (focusSet.has(candidate.pillar)) score += 16;
     score += topPillarBonus.get(candidate.pillar) ?? 0;
+    score += facebookPillarBonus.get(candidate.pillar) ?? 0;
     score += Math.min(8, candidate.imageCount * 2);
     score -= candidate.attempts * 15;
     // Prefer fresher stories (within the 7h window).
@@ -348,17 +360,32 @@ export function buildContentManagerPrompt(input: {
 
   const slotInfo = describeSlotContext(input.activeSlot);
   const perf = input.performance;
-  const perfBlock = perf
-    ? `Total klik shortlink 7 hari: ${perf.totalClicks7d} dari ${perf.publishedPosts7d} post (rata-rata skor orisinalitas ${perf.averageOriginality7d}/100).${
+  const facebookPerf = perf?.facebookInsights;
+  const shortlinkBlock = perf
+    ? `Shortlink 7 hari (klik keluar ke sumber): ${perf.totalClicks7d} klik dari ${perf.publishedPosts7d} post; rata-rata orisinalitas ${perf.averageOriginality7d}/100.${
       perf.topPillars.length > 0
-        ? ` Pilar paling diminati: ${perf.topPillars.slice(0, 3).map((p) => `${PILLARS[p.pillar].label} (${p.clicks} klik/${p.posts} post)`).join(", ")}.`
+        ? ` Pilar dengan klik shortlink tertinggi: ${perf.topPillars.slice(0, 3).map((p) => `${PILLARS[p.pillar].label} (${p.clicks} klik/${p.posts} post)`).join(", ")}.`
         : ""
     }${
       perf.topPerformers.length > 0
-        ? ` Post terpopuler: ${perf.topPerformers.slice(0, 2).map((t) => `"${t.title.slice(0, 55)}" (${t.clicks} klik)`).join("; ")}.`
+        ? ` Post dengan klik shortlink terbanyak: ${perf.topPerformers.slice(0, 2).map((t) => `\"${t.title.slice(0, 55)}\" (${t.clicks} klik)`).join("; ")}.`
         : ""
     }`
-    : "Belum ada data klik 7 hari terakhir.";
+    : "Belum ada data klik shortlink 7 hari terakhir.";
+  const facebookBlock = facebookPerf?.postsAnalyzed
+    ? `Facebook Insights untuk ${facebookPerf.postsAnalyzed} post yang terbit 30 hari terakhir (angka post bersifat lifetime saat sinkron): ${facebookPerf.totalMediaViews} media views, ${facebookPerf.totalUniqueViewers} unique viewers, ${facebookPerf.totalInteractions} interaksi terukur pada ${facebookPerf.interactionSamples} post dengan data reaksi+komentar+bagikan lengkap; rasio interaksi per unique viewer ${facebookPerf.averageInteractionRate.toFixed(1)}%. Klik Facebook (${facebookPerf.totalClicks}) bukan klik shortlink.${
+      facebookPerf.topPillars.some((p) => p.posts >= 3)
+        ? ` Pilar/hook Slide 1 dengan rasio interaksi tertinggi (n≥3): ${facebookPerf.topPillars.filter((p) => p.posts >= 3).slice(0, 3).map((p) => `${PILLARS[p.pillar].label} ${p.interactionRate.toFixed(1)}% (n=${p.posts})`).join(", ")}.`
+        : " Sampel tiap pilar belum cukup untuk membandingkan interaksi."
+    }${
+      facebookPerf.topSlots.some((slot) => slot.posts >= 3)
+        ? ` Observasi slot WITA dengan minimal 3 sampel (tidak mengubah jadwal): ${facebookPerf.topSlots.filter((slot) => slot.posts >= 3).slice(0, 4).map((slot) => `${slot.slotLabel} ${slot.interactionRate.toFixed(1)}% (n=${slot.posts})`).join(", ")}.${facebookPerf.recommendedSlot ? ` Sinyal slot teratas: ${facebookPerf.recommendedSlot}.` : ""}`
+        : " Belum ada sampel minimal 3 post per slot; jangan menyimpulkan waktu unggah dari satu-dua post."
+    } Metrik carousel berlaku untuk keseluruhan post dan diatribusikan ke hook/Slide 1; jangan menganggapnya sebagai performa per-slide.`
+    : facebookPerf?.configured
+      ? "Facebook Insights aktif tetapi belum ada snapshot post yang berhasil disinkronkan; jangan mengarang performa Facebook."
+      : "Facebook Insights belum terhubung; gunakan klik shortlink hanya sebagai sinyal minat keluar, bukan views/interaksi Facebook.";
+  const perfBlock = `${facebookBlock}\n${shortlinkBlock}`;
 
   const recentBlock = input.recentPublishedTitles.length > 0
     ? input.recentPublishedTitles.slice(0, 6).map((t, i) => `${i + 1}. ${t}`).join("\n")

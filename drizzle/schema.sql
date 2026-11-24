@@ -135,3 +135,66 @@ ALTER TABLE "reels" ADD COLUMN IF NOT EXISTS "instagram_media_id" text;
 
 -- Content pillars so the publisher keeps the daily mix varied.
 ALTER TABLE "articles" ADD COLUMN IF NOT EXISTS "pillar" text;
+
+-- Shared Content Manager configuration and editorial memory.
+CREATE TABLE IF NOT EXISTS "content_manager_config" (
+  "id" integer PRIMARY KEY DEFAULT 1 NOT NULL,
+  "enabled" boolean DEFAULT true NOT NULL,
+  "auto_archive_duplicates" boolean DEFAULT true NOT NULL,
+  "custom_directive" text DEFAULT '' NOT NULL,
+  "focus_pillars" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "avoid_keywords" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "preferred_voice" text DEFAULT 'auto' NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "content_manager_decisions" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "mode" text NOT NULL,
+  "trigger" text DEFAULT 'publish' NOT NULL,
+  "provider" text,
+  "model" text,
+  "slot_label" text,
+  "selected_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "duplicate_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "recommended_voice" text,
+  "seo_keywords" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "roundup_theme" text,
+  "writer_brief" text,
+  "editorial_reasoning" text NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "content_manager_decisions_created_idx"
+  ON "content_manager_decisions" ("created_at" DESC);
+
+-- Facebook post-level insights snapshots (Meta Graph API v25+ metric vocabulary).
+CREATE TABLE IF NOT EXISTS "facebook_post_insights" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "page_id" text NOT NULL,
+  "facebook_post_id" text NOT NULL,
+  "media_views" integer DEFAULT 0 NOT NULL,
+  "unique_viewers" integer DEFAULT 0 NOT NULL,
+  "clicks" integer DEFAULT 0 NOT NULL,
+  "reactions" integer DEFAULT 0 NOT NULL,
+  "comments" integer DEFAULT 0 NOT NULL,
+  "shares" integer DEFAULT 0 NOT NULL,
+  "video_views" integer DEFAULT 0 NOT NULL,
+  "interactions_available" boolean DEFAULT false NOT NULL,
+  "synced_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "facebook_post_insights_page_post_unique"
+  ON "facebook_post_insights" ("page_id", "facebook_post_id");
+CREATE INDEX IF NOT EXISTS "facebook_post_insights_synced_idx"
+  ON "facebook_post_insights" ("synced_at");
+
+CREATE TABLE IF NOT EXISTS "facebook_insights_sync_state" (
+  "id" integer PRIMARY KEY DEFAULT 1 NOT NULL,
+  "locked_until" timestamp with time zone DEFAULT 'epoch' NOT NULL,
+  "last_attempt_at" timestamp with time zone,
+  "last_success_at" timestamp with time zone,
+  "last_error" text,
+  "posts_synced" integer DEFAULT 0 NOT NULL,
+  "posts_failed" integer DEFAULT 0 NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
