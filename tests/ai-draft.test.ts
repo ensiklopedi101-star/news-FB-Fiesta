@@ -120,7 +120,10 @@ test("validateAndRepairDraft accepts lean roundup JSON without paragraphs/slideP
   assert.equal(result.caption.includes("*"), false);
   assert.equal(result.roundupTitles?.length, 4);
   assert.equal(result.roundupSummaries?.length, 4);
-  assert.ok((result.roundupSummaries?.[3]?.length ?? 0) <= 240);
+  assert.ok((result.roundupSummaries?.[3]?.length ?? 0) <= 360);
+  assert.ok((result.roundupSummaries?.[3]?.length ?? 0) > 240, "ringkasan informatif yang valid tidak lagi dipotong pada batas lama 240 karakter");
+  assert.ok(result.caption.includes(result.take), "sudut editorial roundup ikut muncul di caption, bukan hanya disimpan untuk Reel");
+  assert.doesNotMatch(result.caption, /Beezers, ada 4 kabar panas/);
   assert.ok(result.question.length <= 120);
   assert.ok(result.question.endsWith("?"));
   assert.ok(result.narration.length >= 70);

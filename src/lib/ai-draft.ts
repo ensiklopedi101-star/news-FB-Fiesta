@@ -263,18 +263,22 @@ export function validateAndRepairDraft(
       }
     }
 
-    const roundupSummaries = rawRoundupSummaries.map((item) => clampAtBoundary(item, 240, "…"));
-    if (roundupSummaries.some((summary) => summary.length < 15)) {
-      throw new Error("Validasi draf AI gagal: salah satu roundupSummaries terlalu pendek.");
+    const roundupSummaries = rawRoundupSummaries.map((item) => clampAtBoundary(item.replace(/https?:\/\/\S+/g, ""), 360, "…"));
+    if (roundupSummaries.some((summary) => summary.length < 45)) {
+      throw new Error("Validasi draf AI gagal: salah satu roundupSummaries terlalu pendek untuk memberi konteks.");
     }
 
     let question = rawQuestion || `Dari ${expected} kabar ini, mana yang paling bikin kamu antusias?`;
     question = clampAtBoundary(question, 118, "?");
     if (!question.endsWith("?")) question = `${question.replace(/[.!…]+$/g, "").trim()}?`;
 
-    const rawTake = typeof data.take === "string" ? stripMarkdownBold(data.take) : "";
-    const fallbackTake = `Menurut PopBeez sih, deretan kabar mulai dari ${roundupTitles[0]} sampai ${roundupTitles[expected - 1]} ini menarik diikuti karena arah rilisan hiburannya makin beragam.`;
-    const spokenTake = normalizeBrand(rawTake.length >= 40 ? rawTake : fallbackTake);
+    const rawTake = typeof data.take === "string"
+      ? stripMarkdownBold(data.take.replace(/https?:\/\/\S+/g, ""))
+      : "";
+    if (rawTake.length < 55) {
+      throw new Error("Validasi draf AI gagal: pengantar editorial roundup kurang memberi sudut pandang.");
+    }
+    const spokenTake = normalizeBrand(clampAtBoundary(rawTake, 220));
 
     const rawNarration = typeof data.narration === "string"
       ? stripMarkdownBold(data.narration.replace(/https?:\/\/\S+/g, ""))
@@ -300,6 +304,7 @@ export function validateAndRepairDraft(
       title,
       titles: roundupTitles,
       summaries: roundupSummaries,
+      take: spokenTake,
       question,
       hashtags,
     });

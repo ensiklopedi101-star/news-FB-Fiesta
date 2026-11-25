@@ -14,18 +14,19 @@ test("roundup caption titles and summaries remain paired in the supplied article
     ["Ringkasan satu", "Ringkasan dua", "Ringkasan tiga", "Ringkasan empat"],
   );
   assert.deepEqual(formatted, [
-    `1️⃣ ${toFacebookBold("Judul pertama")}\nRingkasan satu`,
-    `2️⃣ ${toFacebookBold("Judul kedua")}\nRingkasan dua`,
-    `3️⃣ ${toFacebookBold("Judul ketiga")}\nRingkasan tiga`,
-    `4️⃣ ${toFacebookBold("Judul keempat")}\nRingkasan empat`,
+    `1. ${toFacebookBold("Judul pertama")}\nRingkasan satu`,
+    `2. ${toFacebookBold("Judul kedua")}\nRingkasan dua`,
+    `3. ${toFacebookBold("Judul ketiga")}\nRingkasan tiga`,
+    `4. ${toFacebookBold("Judul keempat")}\nRingkasan empat`,
   ]);
+  assert.equal(formatted.some((entry) => /[1-4]️⃣/.test(entry)), false, "nomor caption memakai teks biasa agar warna mengikuti tema Facebook");
   assert.equal(formatted.some((entry) => entry.includes("*")), false);
   assert.throws(() => formatRoundupStories(["Judul"], []), /tepat empat/);
 });
 
 test("roundup caption memakai judul bahasa Indonesia tebal Unicode tanpa asterik Markdown", () => {
   const caption = composeRoundupCaption({
-    title: "🔥 **POPBEEZ ROUNDUP: Sakamoto Days Tamat hingga P1Harmony Puncaki Billboard**",
+    title: "🔥 **POPBEEZ ROUNDUP: Sakamoto Days Tamat hingga P1Harmony Puncaki Billboard &amp; Chart**",
     titles: [
       "Manga Sakamoto Days Resmi Tamat Lewat Chapter Penutup",
       "Album Baru P1Harmony Langsung Melesat ke Puncak Billboard",
@@ -33,12 +34,16 @@ test("roundup caption memakai judul bahasa Indonesia tebal Unicode tanpa asterik
       "Jujutsu Kaisen Tembus Daftar Bestseller New York Times",
     ],
     summaries: ["Manga ini tamat di chapter 284.", "Album BLOW UP debut di puncak chart.", "Drama tvN ini kembali memuncaki daftar.", "Volume perdana masuk daftar terlaris."],
+    take: "Dari kabar penutup manga sampai capaian chart, detail yang paling menarik justru menunjukkan seberapa beragam hal yang sedang diikuti Beezers.",
     question: "Dari 4 kabar ini, mana yang paling bikin kamu antusias?",
     hashtags: ["#PopBeezRoundup", "#SakamotoDays", "#P1Harmony", "#100DaysOfDeception", "#JujutsuKaisen", "#MangaNews"],
   });
   assert.equal(caption.includes("*"), false);
-  assert.ok(caption.includes(`2️⃣ ${toFacebookBold("Album Baru P1Harmony Langsung Melesat ke Puncak Billboard")}`));
-  assert.ok(caption.normalize("NFKC").includes("2️⃣ Album Baru P1Harmony Langsung Melesat ke Puncak Billboard"));
+  assert.ok(caption.includes(`2. ${toFacebookBold("Album Baru P1Harmony Langsung Melesat ke Puncak Billboard")}`));
+  assert.ok(caption.normalize("NFKC").includes("2. Album Baru P1Harmony Langsung Melesat ke Puncak Billboard"));
+  assert.ok(caption.normalize("NFKC").includes("Billboard & Chart"));
+  assert.doesNotMatch(caption, /&amp;/i);
+  assert.ok(caption.includes("Dari kabar penutup manga sampai capaian chart"));
   assert.doesNotMatch(caption.normalize("NFKC"), /Sweep Top Spots|Ends in Weekly Shonen Jump/);
 });
 
@@ -76,13 +81,15 @@ test("roundup memakai template tetap dengan judul, pasangan berurutan, CTA, dan 
   const caption = composeRoundupCaption({
     title: "🔥 POPBEEZ ROUNDUP: Rekor Global Disney+ Hingga Duel Masters Lanjut!",
     titles: ["Berita satu", "Berita dua", "Berita tiga", "Berita empat"],
-    summaries: ["Ringkasan satu.", "Ringkasan dua.", "Ringkasan tiga.", "Ringkasan empat."],
+    summaries: ["Ringkasan satu yang menjelaskan peristiwa dengan detail terverifikasi.", "Ringkasan dua yang menambahkan konteks penting bagi pembaca.", "Ringkasan tiga yang tetap ringan dan jelas.", "Ringkasan empat yang tidak mengulang judul."],
+    take: "Empat kabar ini datang dari sisi hiburan yang berbeda, jadi lihat detail tiap pengumuman sebelum menyimpulkan arah trennya.",
     question: "Dari 4 kabar ini, mana yang paling bikin kamu antusias?",
     hashtags: ["#PopBeezRoundup", "#Topik1", "#Topik2", "#Topik3", "#Topik4", "#Update"],
   });
   assert.ok(caption.normalize("NFKC").startsWith("🔥 POPBEEZ ROUNDUP: Rekor Global Disney+ Hingga Duel Masters Lanjut!"));
-  assert.match(caption, /Beezers, ada 4 kabar panas/);
-  assert.ok(caption.indexOf("Ringkasan satu.") < caption.indexOf(`2️⃣ ${toFacebookBold("Berita dua")}`));
+  assert.ok(caption.includes("Empat kabar ini datang dari sisi hiburan yang berbeda"));
+  assert.doesNotMatch(caption, /Beezers, ada 4 kabar panas/);
+  assert.ok(caption.indexOf("Ringkasan satu") < caption.indexOf(`2. ${toFacebookBold("Berita dua")}`));
   assert.ok(caption.includes("💬 Beezers, dari 4 kabar ini, mana yang paling bikin kamu antusias?"));
   assert.ok(caption.endsWith("#PopBeezRoundup #Topik1 #Topik2 #Topik3 #Topik4 #Update"));
   assert.equal(caption.includes("*"), false);

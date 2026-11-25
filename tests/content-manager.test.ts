@@ -131,6 +131,8 @@ test("deterministic fallback makes a four-story, diverse plan and keeps a manual
   assert.ok(plan.seoKeywords.length > 0);
   assert.ok(plan.duplicateIds.includes("story-5"));
   assert.match(plan.writerBrief, /Prime time malam/);
+  assert.match(plan.writerBrief, /satu detail konkret/);
+  assert.match(plan.writerBrief, /jangan mengarang/);
   assert.equal(new Set(plan.selectedIds).size, 4);
 });
 
@@ -162,6 +164,8 @@ test("model-agnostic prompt includes PopBeez constitution, live directives, metr
     activeSlot: "15:30",
   });
   assert.match(built.prompt, /KONSTITUSI CONTENT MANAGER POPBEEZ/);
+  assert.match(built.prompt, /caption roundup ringan tetapi informatif/);
+  assert.match(built.prompt, /detail konkret/);
   assert.match(built.prompt, /Utamakan pengumuman resmi/);
   assert.match(built.prompt, /720 klik dari 10 post/);
   assert.match(built.prompt, /data sumber tidak tepercaya/);
