@@ -64,11 +64,11 @@ Kamu adalah Pemimpin Redaksi & Content Manager pintar PopBeez (media pop-culture
 Tugasmu menjalankan 6 fungsi manajemen konten secara disiplin pada daftar kandidat berita RSS:
 1. STRATEGI KONTEN: Patuhi ARAHAN REDAKSI aktif, hindari mengulang topik utama yang baru tayang pada RIWAYAT POST TERAKHIR, dan utamakan variasi pilar bila memungkinkan.
 2. KALENDER & KOORDINASI TIM: Sesuaikan mood dengan SLOT WITA saat ini, urutkan 4 berita terpilih supaya indeks ke-1 (selectedCodes[0] = Slide 1 Cover) adalah berita paling kuat/memancing klik jujur (nama besar, pengumuman resmi besar, atau rekor nyata), dan pilih nada penulis (recommendedVoice: "kritis" | "santai" | "industri" | "penonton").
-3. KURASI CMS & DEDUPLIKASI: Pilih tepat 4 kode kandidat berbeda ke "selectedCodes". Jika ada kandidat lain yang membahas kejadian/rilisan yang SAMA PERSIS dengan salah satu berita terpilih (beda portal sumber tapi satu peristiwa), masukkan kodenya ke "duplicateCodes" agar diarsipkan otomatis. Kandidat bertanda [PRIORITAS] WAJIB masuk "selectedCodes" dan DILARANG masuk "duplicateCodes".
-4. SOCIAL SEO & STANDAR KUALITAS: Tentukan 3–5 "seoKeywords" berupa nama artis/grup/judul drama/anime/topik pencarian nyata yang ada di ke-4 berita terpilih, lalu tulis "writerBrief" singkat (1–2 kalimat untuk mengarahkan sudut caption dan mood naskah Reel, tanpa menambah fakta di luar sumber).
+3. KURASI CMS & DEDUPLIKASI: Pilih tepat 4 kode kandidat berbeda ke "selectedCodes". Jika ada kandidat lain yang membahas kejadian/rilisan yang SAMA PERSIS dengan salah satu berita terpilih (beda portal sumber tapi satu peristiwa), masukkan kodenya ke "duplicateCodes" agar diarsipkan otomatis. Kandidat bertanda [PRIORITAS] WAJIB masuk "selectedCodes" dan DILARANG masuk "duplicateCodes". Jika beberapa kandidat sama-sama layak, utamakan berita yang punya detail sumber cukup untuk dijelaskan, bukan hanya judul yang sensasional.
+4. SOCIAL SEO & STANDAR INFORMASI: Tentukan 3–5 "seoKeywords" berupa nama artis/grup/judul drama/anime/topik nyata yang ada di ke-4 berita terpilih. Buat "writerBrief" (maks 350 karakter) agar caption roundup ringan tetapi informatif: tiap item menjelaskan peristiwa, satu detail konkret yang benar-benar ada di sumber, dan konteks/kenapa detail itu menarik. Arahkan penulis supaya tidak sekadar menumpuk judul, memakai filler, atau memaksakan klaim tren. Jika bahan tipis, lebih baik ringkas daripada mengarang.
 5. EVALUASI PERFORMA: Gunakan Facebook Page/Post Insights 30 hari (media views, unique viewers, reaksi, komentar, dan bagikan) sebagai sinyal utama performa di Facebook. Klik Facebook dan klik shortlink adalah metrik terpisah. Prioritaskan pilar/slot hanya jika sampel interaksi lengkap memadai (minimal 3 post); data carousel berlaku untuk satu post dan mewakili hook/Slide 1, bukan performa tiap slide.
-6. KONSISTENSI MEREK POPBEEZ & HIVECOMP: Eja PopBeez (B kapital), sapa pembaca sebagai Beezers, gunakan Bahasa Indonesia natural dan anti-clickbait. Identitas HIVECOMP hanya mengikuti kredit/template visual resmi; jangan mengarang logo, sponsor, afiliasi, atau klaim brand.
-KOORDINASI WRITER/REEL: writerBrief harus mengarahkan sudut caption sekaligus mood naskah narasi Reel, selaras dengan recommendedVoice dan fakta sumber.`;
+6. KONSISTENSI MEREK POPBEEZ & HIVECOMP: Eja PopBeez (B kapital), sapa pembaca sebagai Beezers, gunakan Bahasa Indonesia natural, ringan, informatif, dan anti-clickbait. Sumber serta tautannya dikelola terpisah oleh alur publikasi/komentar, bukan ditambahkan ke naskah caption AI. Identitas HIVECOMP hanya mengikuti kredit/template visual resmi; jangan mengarang logo, sponsor, afiliasi, atau klaim brand.
+KOORDINASI WRITER/REEL: writerBrief harus mengarahkan sudut caption dan mood naskah Reel, selaras dengan recommendedVoice dan fakta sumber. Caption harus terasa seperti penjelasan redaksi yang mengalir, bukan daftar berita; jangan menciptakan fakta atau hubungan antarberita yang tidak didukung.`
 
 const STOPWORDS = new Set([
   "the", "and", "for", "with", "from", "that", "this", "into", "after", "ahead", "over", "more",
@@ -318,7 +318,7 @@ export function buildDeterministicPlan(input: {
     recommendedVoice,
     seoKeywords,
     roundupTheme: clampAtBoundary(`Sorotan ${pillarLabels}`, 90),
-    writerBrief: clampAtBoundary(`${slotInfo.moodBrief} Mood narasi Reel mengikuti voice edisi dan hanya memakai fakta terverifikasi.${settings.customDirective.trim() ? ` Arahan tambahan: ${settings.customDirective.trim().slice(0, 140)}` : ""}`, 220),
+    writerBrief: clampAtBoundary(`Caption ringan-informatif: tiap berita berisi peristiwa, satu detail konkret, dan konteks. Hindari list/filler; jangan mengarang. ${slotInfo.moodBrief} Reel mengikuti voice.${settings.customDirective.trim() ? ` Arahan tambahan: ${settings.customDirective.trim().slice(0, 100)}` : ""}`, 350),
     editorialReasoning: clampAtBoundary(`Kurator deterministik memilih 4 berita terkuat untuk ${slotInfo.slotName} (variasi pilar: ${pillarLabels}${duplicateIds.length ? `; mendeteksi ${duplicateIds.length} kandidat topik kembar` : ""}).`, 240),
   };
 }
@@ -431,8 +431,8 @@ Kembalikan HANYA objek JSON valid dengan tepat 7 field berikut:
   "duplicateCodes": ["C..."],
   "recommendedVoice": "kritis" | "santai" | "industri" | "penonton",
   "seoKeywords": ["kata kunci 1", "kata kunci 2", "kata kunci 3"],
-  "roundupTheme": "Tema singkat penghubung 4 berita dalam Bahasa Indonesia (maks 90 karakter)",
-  "writerBrief": "Instruksi 1–2 kalimat Bahasa Indonesia untuk sudut caption & mood naskah Reel plus kata kunci SEO (maks 220 karakter, tanpa menambah fakta baru)",
+  "roundupTheme": "Tema roundup yang benar-benar didukung berita, atau tema netral jika tidak ada benang merah (maks 90 karakter)",
+  "writerBrief": "Brief 1–2 kalimat untuk caption ringan-informatif dan mood Reel: fakta inti + detail konkret + konteks, tanpa filler atau klaim/fakta baru (maks 350 karakter)",
   "editorialReasoning": "Penjelasan 1–2 kalimat Bahasa Indonesia mengapa 4 berita ini dipilih dan mengapa Slide 1 ditaruh paling depan (maks 240 karakter)"
 }`;
 
@@ -626,7 +626,7 @@ export function validateContentManagerResponse(
     : input.fallbackPlan.roundupTheme;
 
   const writerBrief = typeof parsed.writerBrief === "string" && parsed.writerBrief.trim()
-    ? clampAtBoundary(parsed.writerBrief.replace(/\*+/g, ""), 220)
+    ? clampAtBoundary(parsed.writerBrief.replace(/\*+/g, ""), 350)
     : input.fallbackPlan.writerBrief;
 
   const editorialReasoning = typeof parsed.editorialReasoning === "string" && parsed.editorialReasoning.trim()

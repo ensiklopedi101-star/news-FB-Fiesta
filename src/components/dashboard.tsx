@@ -1091,7 +1091,7 @@ export default function Dashboard() {
           <div>
             <p className="eyebrow">EDITORIAL AGENT · POPBEEZ</p>
             <h2>Smart Content Manager</h2>
-            <p className="muted small-note">AI merencanakan kurasi, urutan Slide 1–4, SEO, dan arahan penulis; RSS, gambar, serta deduplikasi teknis tetap ditangani kode deterministik. Jika AI gagal, kurator fallback tetap menjaga jadwal publikasi.</p>
+            <p className="muted small-note">AI merencanakan kurasi, urutan Slide 1–4, SEO, dan arahan penulis agar tiap kabar ringan dibaca tetapi tetap berisi fakta serta konteks—bukan sekadar daftar. RSS, gambar, dan deduplikasi teknis tetap deterministik; fallback tetap menjaga jadwal publikasi.</p>
           </div>
           <span className={`system-pill ${contentManagerDraft?.enabled ? "ready" : "pending"}`}>{contentManagerDraft?.enabled ? "AGENT AKTIF" : "AGENT NONAKTIF"}</span>
         </div>
