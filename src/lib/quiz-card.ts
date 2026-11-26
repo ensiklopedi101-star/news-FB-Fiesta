@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
+import type { QuizDifficulty } from "./quiz-customization";
 import { circularLogoBuffer } from "@/lib/logo-circle";
 import { ensureBundledFonts } from "./og-card";
 
@@ -23,6 +24,7 @@ export const QUIZ_BRAND_CELL_INDEX = QUIZ_POSTER_CELLS;
 export type QuizCardOptions = {
   /** Exactly `QUIZ_POSTER_CELLS` JPEG/PNG payloads, row by row. */
   tiles: Array<Uint8Array | Buffer>;
+  difficulties?: QuizDifficulty[];
   label?: string;
   sublabel?: string;
   brand?: string;
@@ -99,14 +101,20 @@ function buildBrandPanel(options: QuizCardOptions): Buffer {
 }
 
 /** Keep colour, clothes and scenery. A central crop is a clue, not a title-removal guarantee. */
-export async function renderPosterClue(tile: Uint8Array | Buffer): Promise<Buffer> {
+export async function renderPosterClue(tile: Uint8Array | Buffer, difficulty: QuizDifficulty = "medium"): Promise<Buffer> {
   const image = await sharp(Buffer.from(tile), { limitInputPixels: 40_000_000 }).rotate().png().toBuffer();
   const { width = 1, height = 1 } = await sharp(image).metadata();
-  return sharp(image)
+  const crop = await sharp(image)
     .extract({ left: Math.floor(width * 0.08), top: Math.floor(height * 0.10),
       width: Math.max(1, Math.floor(width * 0.84)), height: Math.max(1, Math.floor(height * 0.65)) })
     .resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { fit: "cover", position: "centre" })
-    .jpeg({ quality: 92 }).toBuffer();
+    .png().toBuffer();
+  if (difficulty === "easy") return sharp(crop).blur(2).jpeg({ quality: 92 }).toBuffer();
+  const pixels = difficulty === "hard" ? 18 : 36;
+  let small = sharp(crop).resize(pixels, Math.round(pixels * QUIZ_CELL_HEIGHT / QUIZ_CELL_WIDTH), { fit: "fill" });
+  if (difficulty === "hard") small = small.grayscale();
+  const mosaic = await small.png().toBuffer();
+  return sharp(mosaic).resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { kernel: "nearest", fit: "fill" }).jpeg({ quality: 92 }).toBuffer();
 }
 
 export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> {
@@ -119,7 +127,7 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
   const layers: Array<{ input: Buffer; left: number; top: number }> = [];
   for (const [index, tile] of tiles.entries()) {
     layers.push({
-      input: await renderPosterClue(tile),
+      input: await renderPosterClue(tile, options.difficulties?.[index] ?? "medium"),
       left: (index % QUIZ_COLUMNS) * QUIZ_CELL_WIDTH,
       top: Math.floor(index / QUIZ_COLUMNS) * QUIZ_CELL_HEIGHT,
     });

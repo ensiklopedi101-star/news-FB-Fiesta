@@ -411,3 +411,51 @@ API admin: `GET /api/admin/artist-content` untuk daftar; `POST` dengan `action`
 `save`, `ai`, `preview`, atau `approve`. Semuanya memerlukan bearer `CRON_SECRET`.
 `save`/`ai` menerima `content`; pembaruan/publikasi menerima `id` dan `revision`.
 Tidak ada post baru yang dibuat hanya dengan menyimpan draf atau meminta AI.
+
+## Tebak Drama: tingkat kesulitan dan penggantian per nomor
+
+Jalankan **`drizzle/0021_quiz_difficulty.sql`** setelah migrasi `0019` sebelum
+mendeploy pembaruan ini. Kuis baru memakai **Sedang · mosaik warna** pada kelima
+nomor secara default, bukan foto tajam atau siluet.
+
+Pada preview berstatus `draft`, editor menyediakan pengaturan per nomor:
+- **Mudah**: crop berwarna dengan blur ringan.
+- **Sedang**: crop berwarna dengan mosaik 36×24, diperbesar nearest-neighbour.
+- **Sulit**: crop hitam-putih dengan mosaik 18×12.
+
+Efek hanya mengenai foto; nomor soal, logo, dan panel brand tetap tajam. Tidak
+ada penghapusan fitur wajah, deteksi wajah, skor, atau kunci jawaban. Tingkat
+kesulitan bersifat editorial: periksa hasil pada ukuran layar ponsel karena
+poster/pemain yang terkenal mungkin tetap mudah dikenali. Cropping dan efek
+ini bukan jaminan penghapusan seluruh teks judul.
+
+**Mengganti satu poster:** gunakan pilihan poster pada nomor yang bersangkutan.
+Empat nomor lain, urutan, dan tingkat kesulitannya tidak diacak. Pilihan berasal
+dari review manual, mengikuti batas pemakaian poster yang sudah ada, bukan URL
+bebas dari browser. Jika hanya ada lima poster, tambahkan review untuk memperluas
+pilihan. Server memeriksa lima poster/judul yang berbeda dan memuat ulang sumber
+metadata dari pool tepercaya. Penggantian tidak mengubah caption umum kuis.
+
+Klik **Buat preview perubahan**, periksa gambar baru, baru kemudian **Setujui &
+terbitkan preview**. Selama pengaturan lokal belum dirender, persetujuan di UI
+nonaktif. Preview baru selalu memakai URL Blob unik; persetujuan serta penolakan
+harus menyertakan URL preview yang diperiksa. Pembaruan status bersyarat
+mencegah klik ganda dan menolak tab lama setelah preview diganti. Perubahan
+menghapus persetujuan sebelumnya dan tidak mempublikasikan apa pun.
+
+Jika render/unduhan gagal, pilihan tersimpan dan preview lama dipertahankan;
+pengaturan gagal tidak disimpan setengah jalan. Jika function terhenti dan edisi
+tertahan pada `editing`, periksa log serta status database sebelum pemulihan
+manual. Tidak ada pembukaan kunci atau publikasi ulang otomatis.
+
+Edisi lama tidak diubah gambarnya otomatis. Bila menyunting edisi lama yang belum
+memiliki metadata efek, editor memulai dari Sedang untuk kelima nomor; buat preview
+baru untuk menerapkan efek tersebut. File preview lama tetap mengikuti retensi
+Blob kuis yang sudah ada.
+
+Endpoint admin terproteksi: `GET /api/admin/quiz-edit?id=<editionId>` mengambil
+pilihan dan pengaturan, `POST /api/admin/quiz-edit` menerima
+`{ editionId, previewUrl, tiles: [{ imageUrl, difficulty }, ...] }` dengan tepat
+lima tile. `POST /api/quiz` untuk `approve`/`reject` kini juga wajib menerima
+`previewUrl`; pemanggil lama perlu diperbarui. Jadwal cron tidak berubah dan
+tetap hanya menyiapkan draf.

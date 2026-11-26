@@ -1,10 +1,11 @@
+import { quizDifficulties, isCurrentQuizDraft } from "@/lib/quiz-customization";
 import { Buffer } from "node:buffer";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { articles, quizEditions } from "@/lib/schema";
+import { quizEditions } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderQuizCard } from "@/lib/quiz-card";
 import {
@@ -21,11 +22,11 @@ import {
   quizPostersFromReviews,
   selectQuizPosters,
   shouldPostQuiz,
-  type QuizReview,
 } from "@/lib/quiz";
 import { publishFacebookPagePost } from "@/lib/facebook";
 import { isInstagramPublishingEnabled, publishInstagramPost } from "@/lib/instagram";
-import { MANUAL_REVIEW_SOURCE_NAMES, manualImageReferer, parseManualReview, type ManualReviewItem } from "@/lib/manual-review";
+import { manualImageReferer } from "@/lib/manual-review";
+import { loadQuizReviews } from "@/lib/quiz-reviews";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,15 +39,19 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await request.json().catch(() => ({}));
+  if (!body || typeof body !== "object") return NextResponse.json({ error: "Body tidak valid." }, { status: 400 });
+  if (body.action !== undefined && !["create", "reject", "approve"].includes(body.action)) return NextResponse.json({ error: "Action tidak valid." }, { status: 400 });
+  if (["reject", "approve"].includes(body.action) && typeof body.previewUrl !== "string") return NextResponse.json({ error: "Preview wajib diisi. Muat ulang dashboard." }, { status: 400 });
   if (body.action === "reject") {
     if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (typeof body.editionId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.editionId)) return NextResponse.json({ error: "ID tidak valid." }, { status: 400 });
     const rows = await getDb().update(quizEditions).set({ status: "rejected", updatedAt: new Date() })
-      .where(and(eq(quizEditions.id, body.editionId), eq(quizEditions.status, "draft"))).returning({ id: quizEditions.id });
+      .where(and(eq(quizEditions.id, body.editionId), eq(quizEditions.status, "draft"), eq(quizEditions.imageUrl, body.previewUrl))).returning({ id: quizEditions.id });
     return NextResponse.json({ ok: true, detail: rows.length ? "Preview ditolak. Silakan buat edisi baru." : "Edisi tidak dapat ditolak." });
   }
-  if (body.action === "approve") return approveEdition(request, body.editionId);
+  if (body.action === "approve") return approveEdition(request, body.editionId, body.previewUrl);
   return handle(request, true);
 }
 
@@ -68,7 +73,7 @@ async function handle(request: NextRequest, forced: boolean) {
 
   // Two dashboard clicks in a row must not create two editions.
   const [pending] = await db.select({ id: quizEditions.id }).from(quizEditions)
-    .where(inArray(quizEditions.status, ["draft", "publishing"])).limit(1);
+    .where(inArray(quizEditions.status, ["draft", "editing", "publishing"])).limit(1);
   if (pending) return NextResponse.json({ ok: true, result: "pending", detail: "Preview menunggu persetujuan atau publikasi sedang berjalan." });
   const newest = editions[0];
   if (newest && !newest.postedAt && Date.now() - newest.createdAt.getTime() < 120_000) {
@@ -86,7 +91,7 @@ async function handle(request: NextRequest, forced: boolean) {
   const posters = quizPostersFromReviews(reviews);
 
   // Each poster may appear in at most three quizzes; the edition history marks the used ones.
-  const usage = quizPosterUsage(editions.filter((edition) => edition.postedAt || ["draft", "publishing"].includes(edition.status)));
+  const usage = quizPosterUsage(editions.filter((edition) => edition.postedAt || ["draft", "editing", "publishing"].includes(edition.status)));
   const available = quizAvailablePosters(posters, { usage, maxUses: QUIZ_MAX_USES });
   if (available.length < QUIZ_TILES) {
     const exhausted = posters.length - available.length;
@@ -138,6 +143,7 @@ async function handle(request: NextRequest, forced: boolean) {
     reviewIds,
     posterSources: tiles.map(({ poster }) => ({ title: poster.title, imageUrl: poster.imageUrl, reviewId: poster.reviewId })),
     caption,
+    difficulties: quizDifficulties(null),
   }).returning({ id: quizEditions.id });
   if (!edition) return NextResponse.json({ error: "Gagal menyimpan edisi kuis." }, { status: 500 });
 
@@ -157,16 +163,16 @@ async function handle(request: NextRequest, forced: boolean) {
 }
 
 /** The only publishing path: explicit human approval, with an atomic claim. */
-async function approveEdition(request: NextRequest, id: unknown) {
+async function approveEdition(request: NextRequest, id: unknown, previewUrl: string) {
   if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "ID tidak valid." }, { status: 400 });
   const db = getDb();
   const [edition] = await db.select().from(quizEditions).where(eq(quizEditions.id, id));
-  if (!edition?.imageUrl || !edition.caption || edition.status !== "draft") {
+  if (!edition?.imageUrl || !edition.caption || !isCurrentQuizDraft(edition, previewUrl)) {
     return NextResponse.json({ error: "Preview tidak siap atau sudah diproses." }, { status: 409 });
   }
   const [claimed] = await db.update(quizEditions).set({ status: "publishing", approvedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(quizEditions.id, id), eq(quizEditions.status, "draft"))).returning({ id: quizEditions.id });
+    .where(and(eq(quizEditions.id, id), eq(quizEditions.status, "draft"), eq(quizEditions.imageUrl, previewUrl))).returning({ id: quizEditions.id });
   if (!claimed) return NextResponse.json({ error: "Edisi sedang diproses." }, { status: 409 });
   const blob = { url: edition.imageUrl };
   const caption = edition.caption;
@@ -215,28 +221,4 @@ async function approveEdition(request: NextRequest, id: unknown) {
     console.error(`[quiz] post failed edition=${edition.id}: ${message}`);
     return NextResponse.json({ ok: false, error: message, editionId: edition.id, imageUrl: blob.url }, { status: 502 });
   }
-}
-
-/** Newest manual reviews first; each review contributes up to five posters (pool for many editions). */
-async function loadQuizReviews(): Promise<QuizReview[]> {
-  const rows = await getDb().select({ id: articles.id, rawText: articles.rawText, createdAt: articles.createdAt })
-    .from(articles)
-    .where(and(
-      inArray(articles.sourceName, [...MANUAL_REVIEW_SOURCE_NAMES]),
-      inArray(articles.status, ["ready", "published"]),
-    ))
-    .orderBy(desc(articles.createdAt))
-    .limit(24);
-
-  const reviews: QuizReview[] = [];
-  for (const row of rows) {
-    const review = parseManualReview(row.rawText);
-    if (!review) continue;
-    reviews.push({
-      id: row.id,
-      createdAt: row.createdAt,
-      items: review.items.map((item: ManualReviewItem) => ({ title: item.title, imageUrl: item.imageUrl })),
-    });
-  }
-  return reviews;
 }

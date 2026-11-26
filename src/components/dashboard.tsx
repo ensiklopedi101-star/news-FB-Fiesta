@@ -1,5 +1,6 @@
 "use client";
 
+import { QuizEditor } from "@/components/quiz-editor";
 import { ArtistContentPanel } from "@/components/artist-content";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
@@ -632,7 +633,7 @@ export default function Dashboard() {
     setBusy(true);
     setMessage("");
     try {
-      const result = await api("/api/quiz", { method: "POST", body: JSON.stringify({ action, editionId: data?.quiz.editionId }) });
+      const result = await api("/api/quiz", { method: "POST", body: JSON.stringify({ action, editionId: data?.quiz.editionId, previewUrl: data?.quiz.lastImageUrl }) });
       setMessage(result.result === "posted"
         ? "Kuis terbit dengan 5 poster."
         : result.detail || "Kuis diproses.");
@@ -1453,7 +1454,7 @@ export default function Dashboard() {
 
       {activeTab === "quiz" && (
       <section className="panel quiz-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Cron menyiapkan preview {data?.quiz.schedule}; publikasi hanya setelah persetujuan admin bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis. Detail warna dipertahankan; tidak ada penilaian benar/salah.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Cron menyiapkan preview {data?.quiz.schedule}; publikasi hanya setelah persetujuan admin bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis. Bawaan mosaik warna sedang; tingkat kesulitan bisa diatur per nomor. Tidak ada penilaian benar/salah.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
         {data?.quiz.lastImageUrl ? <div className="quiz-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={data.quiz.lastImageUrl} alt="Edisi kuis terakhir" loading="lazy" />
@@ -1466,12 +1467,10 @@ export default function Dashboard() {
             {data.quiz.lastError && <p className="article-error">{data.quiz.lastError}</p>}
           </div>
         </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Butuh minimal lima poster dari review manual; satu review manual sudah berisi lima poster.</span></div>}
-        {!data?.quiz.schemaReady && <p className="muted small-note">Skema kuis belum siap. Jalankan <code>drizzle/0010_quiz_editions.sql</code> dan <code>drizzle/0019_quiz_preview.sql</code> di Neon untuk mengaktifkan kuis.</p>}
+        {!data?.quiz.schemaReady && <p className="muted small-note">Skema kuis belum siap. Jalankan <code>drizzle/0010_quiz_editions.sql</code> dan <code>drizzle/0019_quiz_preview.sql</code> serta <code>drizzle/0021_quiz_difficulty.sql</code> di Neon untuk mengaktifkan kuis.</p>}
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat preview kuis"}</button>
-        {data?.quiz.status === "draft" && <div className="actions">
-          <button type="button" disabled={busy} onClick={() => void createQuizEdition("approve")}>Setujui & terbitkan preview</button>
-          <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition("reject")}>Tolak preview</button>
-        </div>}
+        {data?.quiz.status === "draft" && data.quiz.editionId && data.quiz.lastImageUrl && <QuizEditor
+          key={data.quiz.lastImageUrl} editionId={data.quiz.editionId} previewUrl={data.quiz.lastImageUrl} secret={secret} onChanged={refresh} />}
         <p className="muted small-note">Tombol pembuatan hanya menyiapkan preview, tidak menerbitkan. Periksa keterbacaan petunjuk dan hak penggunaan sumber; potongan poster tidak menjamin judul tersembunyi. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
       </section>
       )}

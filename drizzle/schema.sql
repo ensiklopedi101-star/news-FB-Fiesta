@@ -222,3 +222,4 @@ CREATE TABLE IF NOT EXISTS artist_contents (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS artist_contents_created_idx ON artist_contents (created_at);
+ALTER TABLE quiz_editions ADD COLUMN IF NOT EXISTS difficulties jsonb NOT NULL DEFAULT '[]'::jsonb;
