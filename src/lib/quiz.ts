@@ -1,7 +1,7 @@
 import { witaDayNumber, witaMinutes, witaWeekday } from "./publish-slots";
 
 /**
- * "Tebak Drama" runs every two weeks: five posters taken from the manual reviews
+ * "Tebak Drama" previews are prepared every two weeks: five posters taken from the manual reviews
  * already published for PopBeez, because those posters are the dramas/films the
  * audience already recognises. There is no answer key by design.
  */
@@ -128,10 +128,9 @@ export function buildQuizCaption(): string {
   return [
     `${QUIZ_LABEL} 🕵️`,
     "",
-    "Tebak judul drama/film. Berapa yang berhasil kamu tebak?",
+    "Beezers, dari lima potongan poster ini, nomor berapa yang langsung kalian kenali? 👀",
     "",
-    "Ikuti PopBeez untuk Kuiz Berikutnya.",
-    "Follow juga Instagram @popbeez.hive biar gak ketinggalan kuisnya. 🐝",
+    "Apa ciri yang bikin kalian ingat dramanya—pemain, pakaian, atau suasananya?",
     "",
     "#TebakDramanya #Drakor #Kdrama #FilmKorea #PopBeez",
   ].join("\n");
@@ -141,7 +140,7 @@ export type QuizDueState = { due: boolean; reason: string };
 
 /**
  * True only inside the Sunday 19:15 WITA window and when the previous edition is
- * at least `intervalDays` WITA days old, so a daily cron posts every second Sunday.
+ * at least `intervalDays` WITA days old, so a daily cron prepares a preview every second Sunday.
  */
 export function shouldPostQuiz(
   now: Date,

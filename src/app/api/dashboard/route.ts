@@ -127,10 +127,14 @@ export async function GET(request: NextRequest) {
     ];
 
     // The quiz table arrives with drizzle/0010; the dashboard must keep working before that migration runs.
-    let lastQuiz: { postedAt: Date | null; imageUrl: string | null; facebookPostId: string | null; posterKeys: string[]; errorMessage: string | null } | null = null;
+    let lastQuiz: { id: string; status: string; caption: string | null; posterSources: Array<{ title: string; imageUrl: string; reviewId: string }>; postedAt: Date | null; imageUrl: string | null; facebookPostId: string | null; posterKeys: string[]; errorMessage: string | null } | null = null;
     let quizSchemaReady = true;
     try {
       const [row] = await db.select({
+        id: quizEditions.id,
+        status: quizEditions.status,
+        caption: quizEditions.caption,
+        posterSources: quizEditions.posterSources,
         postedAt: quizEditions.postedAt,
         imageUrl: quizEditions.imageUrl,
         facebookPostId: quizEditions.facebookPostId,
@@ -256,6 +260,10 @@ export async function GET(request: NextRequest) {
       pillars: { list: Object.values(PILLARS).map(({ id, label, summary, share }) => ({ id, label, summary, share })) },
       publishSchedule: slotStateAt(new Date()),
       quiz: {
+        editionId: lastQuiz?.id ?? null,
+        status: lastQuiz?.status ?? null,
+        caption: lastQuiz?.caption ?? null,
+        posterSources: lastQuiz?.posterSources ?? [],
         lastPostedAt: lastQuiz?.postedAt ?? null,
         lastImageUrl: lastQuiz?.imageUrl ?? null,
         lastPostId: lastQuiz?.facebookPostId ?? null,

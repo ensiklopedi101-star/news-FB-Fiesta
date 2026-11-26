@@ -103,6 +103,9 @@ export const quizEditions = pgTable(
   "quiz_editions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    status: text("status").notNull().default("draft"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    posterSources: jsonb("poster_sources").$type<Array<{ title: string; imageUrl: string; reviewId: string }>>().notNull().default(sql`'[]'::jsonb`),
     posterKeys: jsonb("poster_keys").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     reviewIds: jsonb("review_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     imageUrl: text("image_url"),

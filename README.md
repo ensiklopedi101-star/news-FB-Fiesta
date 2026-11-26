@@ -308,3 +308,45 @@ npm run build
 Artikel yang gagal tersimpan dengan status `failed`; setelah memperbaiki konfigurasi, masukkan ulang dengan endpoint retry. Setelah Buffer menerima post, artikel ditandai `ready` dengan referensi antrean Buffer supaya tidak dikirim ulang oleh siklus cron berikutnya. Dashboard membedakannya sebagai **Antrean Buffer**; status publikasi aktual dapat dilihat di Buffer.
 
 Ringkasan AI tidak menjamin kebenaran atau verifikasi fakta. Periksa kualitas feed dan hasil secara berkala. Gunakan hanya teks dan gambar yang penggunaannya diizinkan; **menaruh tautan sumber di komentar tidak otomatis menghapus kewajiban hak cipta atau kebijakan Meta**. Pertimbangkan review manual sebelum publikasi otomatis.
+
+## Pembaruan Tebak Drama: preview wajib sebelum publikasi
+
+Mekanisme siluet lama diganti **potongan poster berwarna**: warna, pakaian,
+pemain, dan suasana tetap menjadi petunjuk. Grid 2×3 (lima poster + brand) tetap
+dipakai; tidak ada skor, kunci jawaban, pilihan wajib, atau penilaian audiens.
+Cropping deterministik tidak memanggil AI dan **tidak menjamin seluruh tulisan
+judul hilang**. Admin wajib memeriksa petunjuk dan hak penggunaan materi sumber.
+
+**Sebelum deploy kode ini**, jalankan `drizzle/0019_quiz_preview.sql` pada database
+Neon yang sama dengan `DATABASE_URL` (setelah migrasi `0010`). Migrasi aman diulang;
+edisi lama tanpa publikasi diberi status `legacy`, bukan otomatis menjadi draf
+yang dapat disetujui. Skema instalasi baru juga ada di `drizzle/schema.sql`.
+
+Alur dashboard tab **Kuis**:
+1. **Buat preview kuis** (atau cron GET terjadwal) hanya merender dan menyimpan draf.
+2. Periksa gambar, caption, dan tautan sumber kelima poster.
+3. **Setujui & terbitkan preview** menerbitkan edisi yang diperiksa ke Facebook;
+   mirror Instagram tetap mengikuti konfigurasi lama.
+4. **Tolak preview** bila petunjuk membingungkan/terlalu mudah atau hak penggunaan
+   tidak jelas, kemudian buat edisi baru. Draf yang ditolak tidak menghabiskan
+   kuota pemakaian poster.
+
+API terproteksi `Authorization: Bearer <CRON_SECRET>`:
+- `GET /api/quiz` mengikuti jadwal lama, **tidak pernah mempublikasikan**.
+- `POST /api/quiz` dengan `{ "action": "create" }` membuat preview di luar jadwal.
+- `POST /api/quiz` dengan `{ "action": "approve", "editionId": "<id-draf>" }`
+  menyetujui sekaligus menerbitkan **draf tersimpan**, bukan regenerasi gambar.
+- `POST /api/quiz` dengan `{ "action": "reject", "editionId": "<id-draf>" }`
+  menolak draf.
+
+Klaim status `draft → publishing` dilakukan atomik untuk mencegah persetujuan
+ganda. Edisi `failed`, `legacy`, atau `publishing` tidak bisa disetujui ulang.
+Jika Facebook timeout atau status tertahan pada `publishing`, periksa halaman
+Facebook dan log sebelum tindakan manual; tidak ada retry otomatis yang berisiko
+duplikasi. Tidak ada fitur edit draf pada alur ini—perubahan berarti menolak dan
+membuat preview baru yang membutuhkan persetujuan baru. Jadwal cron kini adalah
+jadwal **pembuatan preview**, bukan janji waktu tayang.
+
+Pengujian lokal: `npm run typecheck`, `npm run lint`, `npm test`.
+Pengujian Facebook/Blob nyata memerlukan konfigurasi deployment dan persetujuan
+admin; tes lokal tidak menerbitkan konten ke akun mana pun.
