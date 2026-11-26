@@ -1,5 +1,6 @@
 "use client";
 
+import { ArtistContentPanel } from "@/components/artist-content";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
 import { PILLARS, classifyPillar } from "@/lib/pillars";
@@ -299,7 +300,7 @@ function bufferMappingLabel(mapping: BufferChannelMapping) {
   }
 }
 
-type DashboardTab = "overview" | "contentManager" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
+type DashboardTab = "overview" | "contentManager" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "artist" | "quiz" | "reels" | "originality" | "setup";
 
 const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
   { key: "overview", label: "Ringkasan" },
@@ -309,6 +310,7 @@ const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
   { key: "published", label: "Sudah terbit" },
   { key: "feeds", label: "Feed RSS" },
   { key: "manual", label: "Konten manual" },
+  { key: "artist", label: "Konten Artis" },
   { key: "quiz", label: "Kuis" },
   { key: "reels", label: "Reels" },
   { key: "originality", label: "Orisinalitas" },
@@ -326,6 +328,7 @@ const TAB_HINTS: Record<DashboardTab, string> = {
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
   manual: "Susun review mingguan enam slide sendiri.",
+  artist: "Draf Bio Artis dan Sorotan Artis dengan empat foto dan persetujuan manusia.",
   quiz: "Kuis Tebak Drama dari poster review manual.",
   reels: "Pilih artikel hiburan dan salin prompt untuk membuat video dengan AI lain; render otomatis tersedia jika encoder disetel.",
   originality: "Penjaga orisinalitas: skor, opini redaksi, dan post yang ditahan.",
@@ -1472,6 +1475,8 @@ export default function Dashboard() {
         <p className="muted small-note">Tombol pembuatan hanya menyiapkan preview, tidak menerbitkan. Periksa keterbacaan petunjuk dan hak penggunaan sumber; potongan poster tidak menjamin judul tersembunyi. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
       </section>
       )}
+
+      {activeTab === "artist" && <ArtistContentPanel secret={secret} />}
 
       {activeTab === "manual" && (
       <section className="panel manual-review-panel">

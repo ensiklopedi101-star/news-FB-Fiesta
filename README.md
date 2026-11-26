@@ -350,3 +350,64 @@ jadwal **pembuatan preview**, bukan janji waktu tayang.
 Pengujian lokal: `npm run typecheck`, `npm run lint`, `npm test`.
 Pengujian Facebook/Blob nyata memerlukan konfigurasi deployment dan persetujuan
 admin; tes lokal tidak menerbitkan konten ke akun mana pun.
+
+## Konten Artis: Bio Artis dan Sorotan Artis/Idol
+
+Tab **Konten Artis** menyediakan satu modul dengan dua segmen:
+- **Bio Artis** (`artist_bio`): perkenalan, awal karier, karya penting, dan konteks editorial.
+- **Sorotan Artis/Idol** (`artist_spotlight`): satu tema dengan empat foto dan konteks masing-masing.
+
+### Setup dan penggunaan
+
+1. Jalankan `drizzle/0020_artist_content.sql` di Neon sebelum deploy. SQL ini juga
+   disertakan dalam `drizzle/schema.sql` untuk instalasi baru. Tidak ada migrasi
+   database otomatis saat membuka dashboard.
+2. Pastikan `BLOB_READ_WRITE_TOKEN` dan konfigurasi Facebook langsung Hiburan
+   (`FB_ENTERTAINMENT_PAGE_ID`, `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN`) tersedia.
+   Modul ini **tidak memakai Buffer**. Instagram opsional memakai konfigurasi lama.
+3. Buka tab Konten Artis, pilih segmen, isi nama, tema, sudut editorial, pertanyaan,
+   dan **tepat empat slide**. Setiap slide wajib memiliki judul, fakta/konteks,
+   sumber fakta HTTPS, URL langsung foto, halaman sumber foto, dan kredit.
+   Konfirmasikan hak penggunaan foto. Kredit bukan pengganti izin.
+4. **Simpan draf**. Caption kosong disusun deterministik dari bahan editor, termasuk
+   sumber dan kredit. Caption bisa ditulis manual. Bantuan AI bersifat opsional,
+   memakai failover provider yang sudah ada, dan hanya menerima fakta serta sudut
+   editorial yang diisi—tidak melakukan riset/scraping fakta. Periksa klaim hasil AI,
+   simpan hasilnya, dan sesuaikan caption bila fakta berubah.
+5. **Buat preview revisi tersimpan**. Foto diunduh lewat pengambil gambar aman yang
+   sudah ada, lalu dirender menjadi empat JPEG 1080×1080 dengan identitas PopBeez
+   dan kredit foto. Bila satu foto gagal, tidak ada preview lengkap yang bisa
+   diterbitkan. Preview diunggah ke Blob publik; jangan memakai materi rahasia.
+6. Periksa empat slide serta caption tersimpan, kemudian **Setujui & terbitkan**.
+   Yang dipublikasikan adalah empat file preview yang sama dalam urutan tersimpan,
+   bukan render ulang. Publikasi manual dilakukan saat disetujui, bukan slot cron.
+
+### Pengamanan alur
+
+- Konten disimpan pada tabel `artist_contents`, terpisah dari antrean RSS supaya
+  draft tidak dipanen, dikurasi, atau diterbitkan otomatis.
+- Mengedit draf/preview dan menyimpannya menaikkan `revision`, menghapus preview,
+  serta membatalkan kesiapan publikasi. Perubahan yang belum disimpan mematikan
+  tombol preview/publikasi di UI.
+- Satu preview dibuat per revisi. Untuk membuat ulang, simpan revisi baru terlebih
+  dahulu; ini juga mencegah persetujuan berlomba dengan regenerasi preview.
+- Klaim `draft → rendering` dan `preview → publishing` menggunakan pembaruan
+  bersyarat status/revisi. Edisi published/failed tidak bisa disetujui ulang.
+- Kegagalan mirror Instagram tidak membatalkan status published di Facebook.
+  Caption panjang dapat ditolak Instagram meskipun Facebook berhasil; detail
+  dicatat di edisi. Tidak ada retry publikasi otomatis.
+- Jika rendering/publishing tertahan (misalnya function timeout) atau Facebook
+  mengembalikan hasil tidak pasti, periksa log, database, dan halaman Facebook
+  sebelum pemulihan manual. UI sengaja tidak membuka kunci otomatis.
+- File preview `artist/` belum masuk penghapusan Blob otomatis. Pantau kuota dan
+  bersihkan render yang tidak dipakai secara manual; jangan hapus preview aktif.
+
+`artist_contents` mencatat `segment`, `format=carousel_4`, revisi, waktu persetujuan,
+waktu tayang, ID Facebook/Instagram, serta error. **Perbandingan Insights lintas
+segmen belum ditambahkan** pada panel analitik lama; modul ini menyediakan rekaman
+publikasinya terlebih dahulu. Daftar dashboard menampilkan 50 edisi terbaru.
+
+API admin: `GET /api/admin/artist-content` untuk daftar; `POST` dengan `action`
+`save`, `ai`, `preview`, atau `approve`. Semuanya memerlukan bearer `CRON_SECRET`.
+`save`/`ai` menerima `content`; pembaruan/publikasi menerima `id` dan `revision`.
+Tidak ada post baru yang dibuat hanya dengan menyimpan draf atau meminta AI.
