@@ -51,22 +51,8 @@ Lalu di Vercel set `REELS_RENDER_URL=https://vps-kamu:8080`, `REELS_WORKER_TOKEN
 4. Jika tabel `articles` sudah ada dari skema versi sebelumnya, jalankan sekali file [`drizzle/0001_multi_page.sql`](./drizzle/0001_multi_page.sql) di Neon SQL Editor. Kolom baru `page_key` untuk artikel lama otomatis bernilai `news`.
 5. Jalankan file [`drizzle/0002_rss_sources.sql`](./drizzle/0002_rss_sources.sql) untuk membuat tabel feed RSS yang dikelola dari Dashboard. Jika database belum memiliki tabel `articles`, gunakan `drizzle/schema.sql` yang sudah mencakup kedua tabel.
 6. Jalankan [`drizzle/0003_scheduled_harvest.sql`](./drizzle/0003_scheduled_harvest.sql) untuk menambahkan filter kata kunci dan pengunci publisher.
-7. Jalankan [`drizzle/0004_fresh_queue.sql`](./drizzle/0004_fresh_queue.sql) untuk mencatat waktu terbit sumber, menandai berita kedaluwarsa, dan mengaktifkan status pengeluaran manual dari antrean.
-8. Jalankan [`drizzle/0005_carousel_experiment.sql`](./drizzle/0005_carousel_experiment.sql) untuk menyimpan varian format dan teks slide carousel.
-9. Jalankan [`drizzle/0006_article_image_gallery.sql`](./drizzle/0006_article_image_gallery.sql) untuk menyimpan hingga tiga foto artikel per berita; gambar utama yang sudah ada akan disalin sebagai fallback.
-10. Jalankan [`drizzle/0007_queue_priority.sql`](./drizzle/0007_queue_priority.sql) untuk menambahkan pengaturan prioritas antrean.
-11. Jalankan [`drizzle/0008_manual_images.sql`](./drizzle/0008_manual_images.sql) untuk mengaktifkan penggantian gambar manual pada artikel antrean.
-12. Jalankan [`drizzle/0009_short_links.sql`](./drizzle/0009_short_links.sql) untuk mengaktifkan short link domain sendiri (`/s/<slug>`) dan penghitungan klik.
-13. Jalankan [`drizzle/0010_quiz_editions.sql`](./drizzle/0010_quiz_editions.sql) untuk menyimpan edisi kuis Tebak Drama; kolom `poster_keys` dipakai menandai poster yang sudah dipakai beserta jumlah pemakaiannya (maksimal 3× per poster).
-14. Jalankan [`drizzle/0011_originality.sql`](./drizzle/0011_originality.sql) untuk menyimpan blok opini (`editorial_take`), skor orisinalitas, dan alasan penilaian tiap artikel. Tanpa file ini pipeline tetap jalan, tetapi skor tidak tersimpan dan panel **Penjaga orisinalitas** akan kosong.
-15. Jalankan [`drizzle/0012_reels_voices.sql`](./drizzle/0012_reels_voices.sql) untuk menyimpan sudut pandang redaksi (`editorial_voice`), naskah narasi (`narration_script`), dan tabel `reels` (status render, durasi, URL video, ID video Facebook). Tanpa file ini artikel tetap terbit; Reels dan panel Reels akan menampilkan peringatan.
-16. Jalankan [`drizzle/0013_instagram.sql`](./drizzle/0013_instagram.sql) untuk menyimpan ID media Instagram (`instagram_media_id`) setiap post yang berhasil dicerminkan ke @popbeez.hive. Tanpa kolom ini posting Instagram tetap jalan, tetapi tautan post IG tidak tercatat.
-17. Jalankan [`drizzle/0014_instagram_mirror.sql`](./drizzle/0014_instagram_mirror.sql) untuk menandai post lama yang boleh dicerminkan ulang ke Instagram tanpa memposting ulang ke Facebook.
-18. **Wajib sebelum deploy ritme baru**: jalankan [`drizzle/0015_content_pillars.sql`](./drizzle/0015_content_pillars.sql) untuk menambah kolom `articles.pillar`. Publisher menyimpan pilar pada baris yang sama dengan status `ready`; tanpa kolom ini update tersebut gagal dan artikel tidak akan pernah tayang. Kalau ragu, jalankan dulu file SQL-nya, baru merge/deploy.
-19. Opsional / otomatis sejak v2.0: [`drizzle/0016_automation_logs.sql`](./drizzle/0016_automation_logs.sql) menyimpan detak eksekusi `/api/cron`, `/api/harvest`, auto-harvest, serta riwayat error sistem (tabel ini juga dibuat otomatis saat runtime bila belum ada).
-20. Jalankan [`drizzle/0017_content_manager.sql`](./drizzle/0017_content_manager.sql) untuk menambahkan konfigurasi editorial dan shared memory keputusan Content Manager. Kedua tabel juga dicoba dibuat otomatis saat runtime; bila kredensial Neon hanya mengizinkan baca, sistem memakai konfigurasi default + kurator deterministik dan tetap menerbitkan.
-21. Jalankan [`drizzle/0018_facebook_insights.sql`](./drizzle/0018_facebook_insights.sql) untuk snapshot metrik Facebook di Neon; tabel juga dibuat otomatis saat runtime jika hak DDL mengizinkan.
-22. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
+7. Untuk database yang sudah ada, jalankan [`drizzle/0004_hivecomp_posts_index.sql`](./drizzle/0004_hivecomp_posts_index.sql) sekali saat deploy untuk indeks feed publik terbaru. Instalasi baru dengan `drizzle/schema.sql` sudah mencakupnya. Endpoint API tidak menjalankan migrasi.
+8. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -76,6 +62,7 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
+- `HIVECOMP_API_TOKEN`: secret terpisah untuk API read-only landing HiveComp, minimal 32 karakter acak. Hanya dipasang di server backend dan server landing; tidak memakai prefix `NEXT_PUBLIC_`. Lihat [panduan HiveComp](./docs/hivecomp-api.md).
 - `GROQ_API_KEY`: opsional, penyedia AI pertama yang dicoba.
 - `GROQ_MODEL`: opsional, preferensi model Groq. Aplikasi memeriksa katalog model akun secara otomatis, mengutamakan model ekonomis seperti `llama-3.1-8b-instant`, dan beralih jika model tidak tersedia.
 - `GEMINI_API_KEY`: key Gemini utama, dicoba jika Groq gagal.
@@ -230,6 +217,12 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `POST /api/admin/feeds/import-presets` — masukkan preset hiburan (wajib bearer secret).
 - `GET /api/admin/buffer/channels` — baca nama dan ID channel Buffer (wajib bearer secret; tidak membuat post).
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
+- `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
+- `GET /api/health` — pemeriksaan read-only koneksi/skema database dan status konfigurasi integrasi (boolean saja, bukan kredensial). Tidak memperbaiki atau menulis data; skema belum siap menghasilkan 503 JSON.
+- `GET /api/pages/{brand}/posts` — feed read-only HiveComp untuk `popbeez` (`entertainment`) atau `nusabeez` (`news`), wajib Bearer `HIVECOMP_API_TOKEN`. Maksimal 3 artikel dengan referensi Facebook dan waktu publikasi yang tersimpan, terbaru dahulu; antrean Buffer tidak dianggap terbit. `items` selalu array, cache sukses 5 menit. [Kontrak, env, curl, contoh error, keterbatasan data, dan panduan deploy](./docs/hivecomp-api.md).
+- `GET /api/cron` — proses satu artikel dan kirim ke antrean Buffer; mematuhi batas 2 pengiriman/jam dan jeda 15 menit. Wajib header `Authorization: Bearer <CRON_SECRET>`. Buffer mengatur waktu publikasi akhir.
+- `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
+- `POST /api/admin/retry-comment` — mengulang komentar sumber untuk postingan yang sudah terbit. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
 - `GET/POST /api/admin/diagnostics/system` — baca laporan kesehatan otomasi, detak cron/harvest, daftar feed/artikel gagal, serta jalankan opsional `{ "runHarvest": true, "probeAi": true }` dari satu endpoint (wajib bearer secret).
 - `GET/POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
