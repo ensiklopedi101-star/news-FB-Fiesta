@@ -56,9 +56,11 @@ test("caption Reel membawa pertanyaan, hashtag, dan sumber", () => {
     headline: "Rating Drama Ini Tembus Dua Digit",
     question: "Kamu berhenti di episode berapa?",
     sourceName: "Soompi",
+    sourceAttribution: "Sumber artikel: https://soompi.com/article/123",
   });
   assert.match(caption, /Rating Drama Ini/);
   assert.match(caption, /Kamu berhenti di episode berapa\?/);
   assert.match(caption, /#PopBeez/);
   assert.match(caption, /📰 Soompi/);
+  assert.match(caption, /Sumber artikel: https:\/\/soompi\.com\/article\/123/);
 });

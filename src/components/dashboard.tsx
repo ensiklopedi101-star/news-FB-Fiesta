@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
 import { PILLARS, classifyPillar } from "@/lib/pillars";
+import { contentFormatLabel, contentSegmentLabel } from "@/lib/content-taxonomy";
 import type { FacebookInsightsSummary } from "@/lib/facebook-insights-core";
 
 type Feed = {
@@ -52,11 +53,18 @@ type Article = {
   instagramMediaId?: string | null;
 };
 
-type ReviewDraftItem = { title: string; rating: string; genre: string; reason: string; suitableFor: string; imageUrl: string };
+type ReviewDraftItem = { title: string; rating: string; genre: string; reason: string; suitableFor: string; imageUrl: string; sourceUrl: string };
 type ReviewMediaType = "FILM" | "DRAMA" | "MUSIK";
+type ArtistBioDraftFact = { fact: string; sourceUrl: string; imageUrl: string };
+type EditorialPreview = { draftId: string; images: string[]; expiresAt: string; fingerprint: string; title: string };
+type QuizPreview = { draftId: string; imageUrl: string; previewImage: string; expiresAt: string; titles: string[] };
 
 function blankReviewItem(): ReviewDraftItem {
-  return { title: "", rating: "", genre: "", reason: "", suitableFor: "", imageUrl: "" };
+  return { title: "", rating: "", genre: "", reason: "", suitableFor: "", imageUrl: "", sourceUrl: "" };
+}
+
+function blankArtistBioFact(): ArtistBioDraftFact {
+  return { fact: "", sourceUrl: "", imageUrl: "" };
 }
 
 type SystemDiagnostics = {
@@ -209,6 +217,7 @@ type DashboardData = {
   integrations: Record<string, boolean>;
   aiModels: { groq: string; gemini: string; openRouter: string };
   contentManager: ContentManagerOverview | null;
+  popbeezEditorialSchemaReady: boolean;
   schedule: { maxPerDay: number; maxPerHour: number; minimumGapMinutes: number; harvestEveryHours: number; maxArticlesPerHarvest: number };
   pillars?: { list: Array<{ id: string; label: string; summary: string; share: string }> };
   publishSchedule: { enabled: boolean; active: boolean; graceMinutes: number; slots: string[]; activeSlot: string | null; nextSlot: string | null; minutesUntilNextSlot: number | null };
@@ -223,7 +232,7 @@ type DashboardData = {
     renderMode: string;
     voices: Array<{ id: string; label: string; summary: string }>;
   };
-  quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
+  quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; answerKey: Array<{ title: string; sourceUrl: string | null; reviewId: string }>; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
   articles: Article[];
@@ -233,7 +242,7 @@ type BufferChannel = { id: string; name: string; service: string; type: string; 
 type BufferChannelMapping = { status: "missing-channel-id" | "id-not-found" | "not-a-facebook-page" | "disconnected" | "ready"; channelName?: string };
 type AiAttempt = { provider: string; model: string; outcome: "ok" | "failed" | "skipped"; elapsedMs: number; error?: string };
 type AiDiagnostic = { ok: boolean; requestId?: string; provider?: string; model?: string; elapsedMs?: number; detail?: string; error?: string; attempts: AiAttempt[] };
-type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; videoUrl?: string | null; frames?: number; durationSeconds?: number; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping }; mirrored?: number; failed?: number; results?: Array<{ id: string; title: string; ok: boolean; mediaId?: string; detail?: string }> };
+type ApiResult = { ok?: boolean; error?: string; result?: string; nextSlot?: string | null; minutesUntilNextSlot?: number | null; titles?: string[]; editionId?: string; imageUrl?: string; previewImage?: string; previewImages?: string[]; draftId?: string; expiresAt?: string; outcomeUnknown?: boolean; detail?: string; title?: string; mediaFormat?: string; provider?: "buffer" | "facebook"; imageUrls?: string[]; videoUrl?: string | null; frames?: number; durationSeconds?: number; added?: number; skipped?: number; inactive?: number; scanned?: number; enriched?: number; imageCandidates?: number; imageBlobStored?: number; limited?: boolean; channels?: BufferChannel[]; mappings?: { news: BufferChannelMapping; entertainment: BufferChannelMapping }; mirrored?: number; failed?: number; results?: Array<{ id: string; title: string; ok: boolean; mediaId?: string; detail?: string }> };
 
 const integrationLabels: Record<string, string> = {
   database: "Neon database",
@@ -299,7 +308,7 @@ function bufferMappingLabel(mapping: BufferChannelMapping) {
   }
 }
 
-type DashboardTab = "overview" | "contentManager" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "quiz" | "reels" | "originality" | "setup";
+type DashboardTab = "overview" | "contentManager" | "diagnostics" | "queue" | "published" | "feeds" | "manual" | "artistBio" | "quiz" | "reels" | "originality" | "setup";
 
 const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
   { key: "overview", label: "Ringkasan" },
@@ -308,7 +317,8 @@ const DASHBOARD_TABS: Array<{ key: DashboardTab; label: string }> = [
   { key: "queue", label: "Antrean" },
   { key: "published", label: "Sudah terbit" },
   { key: "feeds", label: "Feed RSS" },
-  { key: "manual", label: "Konten manual" },
+  { key: "manual", label: "Rating Top 5" },
+  { key: "artistBio", label: "Artis Bio" },
   { key: "quiz", label: "Kuis" },
   { key: "reels", label: "Reels" },
   { key: "originality", label: "Orisinalitas" },
@@ -325,8 +335,9 @@ const TAB_HINTS: Record<DashboardTab, string> = {
   queue: "Artikel yang masih menunggu dikirim. Maksimal 4 post/hari (pagi · siang · sore · malam) dengan pilar yang bergantian.",
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
-  manual: "Susun review mingguan enam slide sendiri.",
-  quiz: "Kuis Tebak Drama dari poster review manual.",
+  manual: "Kurasi Rating Drama Top 5 dengan fakta, sumber, dan pratinjau carousel sebelum terbit.",
+  artistBio: "Susun draf Artis Bio dari empat foto dan empat fakta bersumber; cek carousel sebelum terbit.",
+  quiz: "Kuis Tebak Drama dari poster crop yang lebih mudah dikenali; kunci jawaban dan sumber disimpan untuk redaksi.",
   reels: "Pilih artikel hiburan dan salin prompt untuk membuat video dengan AI lain; render otomatis tersedia jika encoder disetel.",
   originality: "Penjaga orisinalitas: skor, opini redaksi, dan post yang ditahan.",
   setup: "Daftar environment variable, tes AI, dan tes Buffer.",
@@ -359,6 +370,11 @@ export default function Dashboard() {
   const [reviewHeadline, setReviewHeadline] = useState("");
   const [reviewMediaType, setReviewMediaType] = useState<ReviewMediaType>("DRAMA");
   const [reviewItems, setReviewItems] = useState<ReviewDraftItem[]>(() => Array.from({ length: 5 }, blankReviewItem));
+  const [reviewPreview, setReviewPreview] = useState<EditorialPreview | null>(null);
+  const [artistBioName, setArtistBioName] = useState("");
+  const [artistBioFacts, setArtistBioFacts] = useState<ArtistBioDraftFact[]>(() => Array.from({ length: 4 }, blankArtistBioFact));
+  const [artistBioPreview, setArtistBioPreview] = useState<EditorialPreview | null>(null);
+  const [quizPreview, setQuizPreview] = useState<QuizPreview | null>(null);
 
   const api = useCallback(async (url: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
@@ -485,30 +501,128 @@ export default function Dashboard() {
     }
   }
 
-  async function submitManualReview(event: FormEvent<HTMLFormElement>) {
+  async function previewManualReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!window.confirm("Review ini akan diterbitkan ke halaman PopBeez. Tautan mengikuti aturan komentar pertama. Pastikan rating dan semua informasi sudah benar. Lanjutkan?")) return;
+    const review = {
+      headline: reviewHeadline,
+      mediaType: reviewMediaType,
+      items: reviewItems.map((item) => ({ ...item, rating: Number(item.rating) })),
+    };
+    const fingerprint = JSON.stringify(review);
     setBusy(true);
     setMessage("");
     try {
       const result = await api("/api/admin/manual-review", {
         method: "POST",
-        body: JSON.stringify({
-          headline: reviewHeadline,
-          mediaType: reviewMediaType,
-          items: reviewItems.map((item) => ({ ...item, rating: Number(item.rating) })),
-        }),
+        body: JSON.stringify({ action: "preview", review }),
       });
-      setMessage(result.error
-        ? `Status publikasi belum pasti: ${result.error}`
-        : result.provider === "facebook"
-          ? `Review “${result.title ?? reviewHeadline}” langsung diterbitkan ke halaman Facebook PopBeez.`
+      if (!result.draftId || !result.previewImages?.length) throw new Error("Pratinjau carousel tidak lengkap.");
+      setReviewPreview({ draftId: result.draftId, images: result.previewImages, expiresAt: result.expiresAt ?? "", fingerprint, title: result.title ?? reviewHeadline });
+      setMessage("Pratinjau enam slide siap. Periksa urutan rating, foto, dan sumber sebelum menerbitkan.");
+    } catch (error) {
+      setReviewPreview(null);
+      setMessage(error instanceof Error ? error.message : "Gagal membuat pratinjau review.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishManualReview() {
+    if (!reviewPreview) return;
+    const currentReview = {
+      headline: reviewHeadline,
+      mediaType: reviewMediaType,
+      items: reviewItems.map((item) => ({ ...item, rating: Number(item.rating) })),
+    };
+    if (reviewPreview.fingerprint !== JSON.stringify(currentReview)) {
+      setMessage("Isi review berubah setelah pratinjau. Buat pratinjau baru sebelum menerbitkan.");
+      return;
+    }
+    if (!window.confirm("Terbitkan persis enam slide yang sedang dipratinjau ke PopBeez? Pastikan semua rating, fakta, dan sumber sudah benar.")) return;
+    setReviewPreview(null);
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/manual-review", {
+        method: "POST",
+        body: JSON.stringify({ action: "publish", draftId: reviewPreview.draftId }),
+      });
+      if (result.error) {
+        setMessage(result.outcomeUnknown
+          ? `Status publikasi belum pasti; jangan kirim ulang dulu: ${result.error}`
+          : result.error);
+      } else {
+        setMessage(result.provider === "facebook"
+          ? `Review “${result.title ?? reviewHeadline}” langsung diterbitkan ke halaman Facebook PopBeez; sumber dikirim sebagai komentar pertama.`
           : result.mediaFormat === "single"
-            ? "Review tersimpan, tetapi Buffer hanya menerima cover satu gambar. Periksa batas carousel channel Buffer."
-            : `Review “${result.title ?? reviewHeadline}” masuk ke antrean Buffer dalam format carousel enam slide.`);
+            ? "Review diterima Buffer, tetapi hanya cover yang masuk; tautan sumber ikut dicantumkan di caption antrean."
+            : `Review “${result.title ?? reviewHeadline}” masuk ke antrean Buffer sebagai carousel enam slide; tautan sumber ada di caption.`);
+        if (result.detail) setMessage((current) => `${current} Catatan: ${result.detail}`);
+      }
+      setReviewPreview(null);
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Gagal membuat review manual.");
+      setMessage(error instanceof Error ? error.message : "Gagal menerbitkan review manual.");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewArtistBio(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const bio = { name: artistBioName, facts: artistBioFacts };
+    const fingerprint = JSON.stringify(bio);
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/artist-bio", {
+        method: "POST",
+        body: JSON.stringify({ action: "preview", bio }),
+      });
+      if (!result.draftId || !result.previewImages?.length) throw new Error("Pratinjau Artis Bio tidak lengkap.");
+      setArtistBioPreview({ draftId: result.draftId, images: result.previewImages, expiresAt: result.expiresAt ?? "", fingerprint, title: result.title ?? `Kenalan dengan ${artistBioName}` });
+      setMessage("Pratinjau empat slide Artis Bio siap. Periksa setiap foto, fakta, dan sumber sebelum menerbitkan.");
+    } catch (error) {
+      setArtistBioPreview(null);
+      setMessage(error instanceof Error ? error.message : "Gagal membuat pratinjau Artis Bio.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishArtistBio() {
+    if (!artistBioPreview) return;
+    const currentBio = { name: artistBioName, facts: artistBioFacts };
+    if (artistBioPreview.fingerprint !== JSON.stringify(currentBio)) {
+      setMessage("Isi Artis Bio berubah setelah pratinjau. Buat pratinjau baru sebelum menerbitkan.");
+      return;
+    }
+    if (!window.confirm("Terbitkan persis empat slide Artis Bio yang sedang dipratinjau? Semua fakta harus sudah cocok dengan sumber.")) return;
+    setArtistBioPreview(null);
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/admin/artist-bio", {
+        method: "POST",
+        body: JSON.stringify({ action: "publish", draftId: artistBioPreview.draftId }),
+      });
+      if (result.error) {
+        setMessage(result.outcomeUnknown
+          ? `Status publikasi belum pasti; jangan kirim ulang dulu: ${result.error}`
+          : result.error);
+      } else {
+        setMessage(result.provider === "facebook"
+          ? `Artis Bio “${result.title ?? artistBioName}” diterbitkan; sumber fakta dikirim ke komentar pertama.`
+          : result.mediaFormat === "single"
+            ? "Artis Bio diterima Buffer, tetapi empat foto tidak masuk sebagai carousel; tautan sumber tetap ada di caption. Periksa dukungan carousel channel."
+            : `Artis Bio “${result.title ?? artistBioName}” masuk ke antrean Buffer sebagai carousel empat foto; tautan sumber ada di caption.`);
+        if (result.detail) setMessage((current) => `${current} Catatan: ${result.detail}`);
+      }
+      setArtistBioPreview(null);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gagal menerbitkan Artis Bio.");
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -624,18 +738,55 @@ export default function Dashboard() {
     }
   }
 
-  async function createQuizEdition() {
-    if (!window.confirm("Kuis Tebak Drama akan langsung diposting ke halaman Facebook PopBeez. Lanjutkan?")) return;
+  async function previewQuizEdition() {
     setBusy(true);
     setMessage("");
     try {
-      const result = await api("/api/quiz", { method: "POST" });
-      setMessage(result.result === "posted"
-        ? `Kuis terbit dengan ${result.titles?.length ?? 12} poster.`
-        : result.detail || "Kuis diproses.");
+      const result = await api("/api/quiz", {
+        method: "POST",
+        body: JSON.stringify({ action: "preview" }),
+      });
+      if (!result.draftId || !result.previewImage || !result.imageUrl) throw new Error("Pratinjau kuis tidak lengkap.");
+      setQuizPreview({
+        draftId: result.draftId,
+        imageUrl: result.imageUrl,
+        previewImage: result.previewImage,
+        expiresAt: result.expiresAt ?? "",
+        titles: result.titles ?? [],
+      });
+      setMessage("Pratinjau grid kuis siap. Kunci jawaban beserta sumber tersimpan privat dan tidak tampil pada gambar/caption.");
+    } catch (error) {
+      setQuizPreview(null);
+      setMessage(error instanceof Error ? error.message : "Gagal membuat pratinjau kuis.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishQuizEdition() {
+    if (!quizPreview) return;
+    if (!window.confirm("Terbitkan persis grid Tebak Drama yang sedang dipratinjau? Kunci jawaban tidak akan disertakan pada post publik.")) return;
+    setQuizPreview(null);
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api("/api/quiz", {
+        method: "POST",
+        body: JSON.stringify({ action: "publish", draftId: quizPreview.draftId }),
+      });
+      if (result.error) {
+        const baseMessage = result.outcomeUnknown
+          ? `Status publikasi kuis belum pasti; jangan kirim ulang dulu: ${result.error}`
+          : result.error;
+        setMessage(result.detail ? `${baseMessage} Catatan: ${result.detail}` : baseMessage);
+      } else {
+        const baseMessage = `Kuis diterbitkan dengan ${result.titles?.length ?? 5} petunjuk poster; kunci dan sumber tersimpan untuk redaksi.`;
+        setMessage(result.detail ? `${baseMessage} Catatan: ${result.detail}` : baseMessage);
+      }
+      setQuizPreview(null);
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Gagal membuat kuis.");
+      setMessage(error instanceof Error ? error.message : "Gagal menerbitkan kuis.");
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -975,7 +1126,20 @@ export default function Dashboard() {
     (article.status === "published" || article.status === "ready"),
   );
   const selectedReelPromptArticle = reelPromptArticles.find((article) => article.id === reelPromptArticleId) ?? reelPromptArticles[0];
+  const currentReviewDraft = {
+    headline: reviewHeadline,
+    mediaType: reviewMediaType,
+    items: reviewItems.map((item) => ({ ...item, rating: Number(item.rating) })),
+  };
+  const activeReviewPreview = reviewPreview?.fingerprint === JSON.stringify(currentReviewDraft) ? reviewPreview : null;
+  const currentArtistBioDraft = { name: artistBioName, facts: artistBioFacts };
+  const activeArtistBioPreview = artistBioPreview?.fingerprint === JSON.stringify(currentArtistBioDraft) ? artistBioPreview : null;
   const activeDiagnostics = systemDiagnostics ?? data?.diagnostics ?? null;
+  const facebookInsightData = data?.contentManager?.performance.facebookInsights;
+  const insightPillars = facebookInsightData?.topPillars.filter((row) => row.posts > 0) ?? [];
+  const insightSegments = facebookInsightData?.topSegments ?? [];
+  const insightFormats = facebookInsightData?.topFormats ?? [];
+  const insightSlots = facebookInsightData?.topSlots ?? [];
   const diagIssueCount = activeDiagnostics?.health.issues.length ?? 0;
 
   return (
@@ -1130,22 +1294,30 @@ export default function Dashboard() {
           </form>
 
           <div className="manager-analytics">
-            <div className="form-title"><strong>Performa Facebook · 30 hari</strong><span>Meta Page/Post Insights memandu kurasi; klik shortlink adalah sinyal terpisah untuk minat ke sumber.</span></div>
-            {data?.contentManager?.performance.facebookInsights.postsAnalyzed ? <>
+            <div className="form-title"><strong>Performa Facebook · 30 hari</strong><span>Segment, pilar, dan format adalah dimensi terpisah. Metrik hanya dijumlahkan bila Meta benar-benar mengembalikannya.</span></div>
+            {facebookInsightData?.postsAnalyzed ? <>
               <div className="queue-counts manager-metrics">
-                <span>{data.contentManager.performance.facebookInsights.postsAnalyzed} post dianalisis</span>
-                <span>{data.contentManager.performance.facebookInsights.totalMediaViews.toLocaleString("id-ID")} media views</span>
-                <span>{data.contentManager.performance.facebookInsights.totalUniqueViewers.toLocaleString("id-ID")} unique viewers</span>
-                <span>{data.contentManager.performance.facebookInsights.totalClicks.toLocaleString("id-ID")} klik post Facebook</span>
-                <span>{data.contentManager.performance.facebookInsights.totalInteractions.toLocaleString("id-ID")} interaksi · {data.contentManager.performance.facebookInsights.interactionSamples} sampel lengkap</span>
-                <span>{data.contentManager.performance.facebookInsights.averageInteractionRate.toFixed(1)}% interaksi/unique viewer</span>
+                <span>{facebookInsightData.postsAnalyzed} post dengan metrik tersedia</span>
+                <span>{facebookInsightData.totalMediaViews.toLocaleString("id-ID")} media views · n={facebookInsightData.mediaViewSamples}</span>
+                <span>{facebookInsightData.totalUniqueViewers.toLocaleString("id-ID")} unique viewers · n={facebookInsightData.uniqueViewerSamples}</span>
+                <span>{facebookInsightData.totalClicks.toLocaleString("id-ID")} klik Facebook · n={facebookInsightData.clickSamples}</span>
+                <span>{facebookInsightData.totalReactions.toLocaleString("id-ID")} reaksi · n={facebookInsightData.reactionSamples}</span>
+                <span>{facebookInsightData.totalComments.toLocaleString("id-ID")} komentar · n={facebookInsightData.commentSamples}</span>
+                <span>{facebookInsightData.totalShares.toLocaleString("id-ID")} bagikan · n={facebookInsightData.shareSamples}</span>
+                {facebookInsightData.videoViewSamples > 0 && <span>{facebookInsightData.totalVideoViews.toLocaleString("id-ID")} video views · n={facebookInsightData.videoViewSamples}</span>}
+                <span>{facebookInsightData.totalInteractions.toLocaleString("id-ID")} interaksi lengkap · n={facebookInsightData.interactionSamples}</span>
+                <span>{facebookInsightData.interactionRateSamples} post punya unique viewers untuk rasio</span>
+                <span>{facebookInsightData.averageInteractionRate === null ? "Rasio interaksi/viewer belum tersedia" : `${facebookInsightData.averageInteractionRate.toFixed(1)}% interaksi/unique viewer`}</span>
               </div>
-              <div className="manager-pillar-stats">{data.contentManager.performance.facebookInsights.topPillars.filter((pillar) => pillar.posts >= 3).length ? data.contentManager.performance.facebookInsights.topPillars.filter((pillar) => pillar.posts >= 3).map((pillar) => <div className="manager-pillar-row" key={pillar.pillar}><span>{PILLARS[pillar.pillar as keyof typeof PILLARS]?.label ?? pillar.pillar}</span><b>{pillar.interactionRate.toFixed(1)}% interaksi/viewer</b><small>{pillar.posts} post lengkap</small></div>) : <p className="empty-state compact-empty">Belum ada pilar dengan minimal tiga sampel interaksi lengkap.</p>}</div>
-              {data.contentManager.performance.facebookInsights.topPerformers.length > 0 && <div className="manager-performers"><strong>Post dengan interaksi terbanyak</strong>{data.contentManager.performance.facebookInsights.topPerformers.slice(0, 3).map((post) => <div key={post.facebookPostId}><b>{post.interactions.toLocaleString("id-ID")} interaksi · {post.interactionRate.toFixed(1)}%</b><span>{post.title}</span></div>)}</div>}
-              {data.contentManager.performance.facebookInsights.topSlots.length > 0 && <div className="manager-performers"><strong>Slot tayang WITA (observasi; jadwal tidak diubah)</strong>{data.contentManager.performance.facebookInsights.topSlots.map((slot) => <div key={slot.slotLabel}><b>{slot.interactionRate.toFixed(1)}% · n={slot.posts}</b><span>{slot.slotLabel}{data?.contentManager?.performance.facebookInsights.recommendedSlot === slot.slotLabel ? " · sinyal teratas (≥3 post)" : ""}</span></div>)}</div>}
-              <small className="muted">Meta menyediakan angka lifetime per post, sedangkan pemilihan post dibatasi ke 30 hari terakhir. Carousel diukur sebagai satu post, bukan analitik per-slide. Snapshot terakhir: {data.contentManager.performance.facebookInsights.lastSyncedAt ? formatDate(data.contentManager.performance.facebookInsights.lastSyncedAt) : "belum ada"}.</small>
-            </> : <p className="empty-state compact-empty">{data?.contentManager?.performance.facebookInsights.configured ? "Insights aktif tetapi belum ada snapshot. Sinkronkan post Facebook terbaru untuk mulai melihat performa nyata." : "Insight Facebook belum terhubung. Pasang kredensial server-side; kurasi tetap berjalan dengan sinyal yang tersedia."}</p>}
-            {data?.contentManager?.performance.facebookInsights.lastError && <p className="error-text">{data.contentManager.performance.facebookInsights.lastError}</p>}
+              <div className="form-title"><strong>Perbandingan editorial (sampel interaksi lengkap)</strong><span>Angka tiap baris menyebut jumlah post; ini observasi, bukan pendapatan atau bukti sebab-akibat.</span></div>
+              {insightSegments.length > 0 ? <div className="manager-pillar-stats">{insightSegments.map((row) => <div className="manager-pillar-row" key={row.segment}><span>{contentSegmentLabel(row.segment)}</span><b>{row.interactionRate === null ? "Rasio belum tersedia" : `${row.interactionRate.toFixed(1)}% interaksi/viewer`}</b><small>n={row.rateSamples} rasio · {row.posts} interaksi lengkap</small></div>)}</div> : <p className="empty-state compact-empty">Belum ada sampel interaksi lengkap per segmen.</p>}
+              {insightFormats.length > 0 && <div className="manager-pillar-stats">{insightFormats.map((row) => <div className="manager-pillar-row" key={row.contentFormat}><span>{contentFormatLabel(row.contentFormat)}</span><b>{row.interactionRate === null ? "Rasio belum tersedia" : `${row.interactionRate.toFixed(1)}% interaksi/viewer`}</b><small>n={row.rateSamples} rasio · {row.posts} interaksi lengkap</small></div>)}</div>}
+              {insightPillars.length > 0 && <div className="manager-pillar-stats">{insightPillars.map((row) => <div className="manager-pillar-row" key={row.pillar}><span>{PILLARS[row.pillar]?.label ?? row.pillar}</span><b>{row.interactionRate === null ? "Rasio belum tersedia" : `${row.interactionRate.toFixed(1)}% interaksi/viewer`}</b><small>n={row.rateSamples} rasio · {row.posts} interaksi lengkap</small></div>)}</div>}
+              {facebookInsightData.topPerformers.length > 0 && <div className="manager-performers"><strong>Post dengan interaksi terbanyak</strong>{facebookInsightData.topPerformers.slice(0, 3).map((post) => <div key={post.facebookPostId}><b>{post.interactions.toLocaleString("id-ID")} interaksi{post.interactionRate === null ? "" : ` · ${post.interactionRate.toFixed(1)}%`}</b><span>{post.title} · {contentSegmentLabel(post.segment)} · {contentFormatLabel(post.contentFormat)}</span></div>)}</div>}
+              {insightSlots.length > 0 && <div className="manager-performers"><strong>Slot tayang WITA (observasi; jadwal tidak diubah)</strong>{insightSlots.map((slot) => <div key={slot.slotLabel}><b>{slot.interactionRate === null ? "Rasio belum tersedia" : `${slot.interactionRate.toFixed(1)}%`} · n=${slot.rateSamples} rasio</b><span>{slot.slotLabel}{facebookInsightData.recommendedSlot === slot.slotLabel ? " · sinyal teratas (≥3 post ber-viewers)" : ""}</span></div>)}</div>}
+              <small className="muted">Metrik Meta bersifat lifetime per post; pilihan dibatasi 30 hari. Carousel dihitung satu post, bukan per slide. {facebookInsightData.monetization.note} Snapshot: {facebookInsightData.lastSyncedAt ? formatDate(facebookInsightData.lastSyncedAt) : "belum ada"}.</small>
+            </> : <><p className="empty-state compact-empty">{facebookInsightData?.configured ? "Insights aktif tetapi belum ada snapshot dengan metrik yang benar-benar tersedia. Sinkronkan post Facebook terbaru." : "Insight Facebook belum terhubung. Pasang kredensial server-side; kurasi tetap berjalan dengan sinyal yang tersedia."}</p><small className="muted">{facebookInsightData?.monetization.note ?? "Integrasi saat ini tidak membaca payout atau pendapatan; views dan interaksi bukan penghasilan."}</small></>}
+            {facebookInsightData?.lastError && <p className="error-text">{facebookInsightData.lastError}</p>}
             <button type="button" className="secondary-button" onClick={() => void syncFacebookInsights(true)} disabled={busy || !data?.contentManager?.performance.facebookInsights.configured || Boolean(data?.publishSchedule.enabled && data.publishSchedule.active)}>{busy ? "Memproses…" : data?.publishSchedule.enabled && data.publishSchedule.active ? "Sinkronisasi ditahan saat slot publikasi" : "Sinkronkan Insights sekarang"}</button>
             {facebookInsightsSync && <small className="muted">{facebookInsightsSync.attemptedPosts} dicoba · {facebookInsightsSync.syncedPosts} berhasil · {facebookInsightsSync.partialPosts} parsial · {facebookInsightsSync.failedPosts} gagal.</small>}
             <div className="form-title"><strong>Klik shortlink · 7 hari</strong><span>Klik ke sumber, terpisah dari media views dan interaksi Facebook.</span></div>
@@ -1450,47 +1622,97 @@ export default function Dashboard() {
 
       {activeTab === "quiz" && (
       <section className="panel quiz-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3 memakai crop artwork poster drama asli agar cast, palet, dan komposisinya mudah dikenali; pilihan film/musik tidak masuk kumpulan jawaban. Jadwal otomatis tetap {data?.quiz.schedule}, interval {data?.quiz.intervalDays ?? 14} hari. Setiap edisi menyimpan kunci jawaban dan tautan sumber secara privat.</p></div><span className="format-tag carousel">Segmen · Tebak Drama</span></div>
         {data?.quiz.lastImageUrl ? <div className="quiz-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={data.quiz.lastImageUrl} alt="Edisi kuis terakhir" loading="lazy" />
           <div className="quiz-preview-meta">
-            <strong>Edisi terakhir · {data.quiz.tiles} poster</strong>
+            <strong>Edisi terakhir · {data.quiz.tiles} petunjuk poster</strong>
             <span>{formatDate(data.quiz.lastPostedAt)}</span>
             {facebookPostUrl(data.quiz.lastPostId) && <a className="article-source" href={facebookPostUrl(data.quiz.lastPostId)!} target="_blank" rel="noreferrer">Buka post kuis ↗</a>}
             {data.quiz.lastError && <p className="article-error">{data.quiz.lastError}</p>}
+            {data.quiz.answerKey.length > 0 && <details className="quiz-answer-key"><summary>Kunci jawaban redaksi · {data.quiz.answerKey.length} judul</summary>
+              <ol>{data.quiz.answerKey.map((answer, index) => <li key={`${answer.reviewId}-${index}`}><strong>{answer.title}</strong>{answer.sourceUrl ? <> · <a className="article-source" href={answer.sourceUrl} target="_blank" rel="noreferrer">sumber ↗</a></> : <small className="muted"> · sumber tidak tersimpan pada edisi lama</small>}</li>)}</ol>
+            </details>}
           </div>
-        </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Butuh minimal lima poster dari review manual; satu review manual sudah berisi lima poster.</span></div>}
-        {!data?.quiz.schemaReady && <p className="muted small-note">Tabel <code>quiz_editions</code> belum ada. Jalankan <code>drizzle/0010_quiz_editions.sql</code> di Neon untuk mengaktifkan kuis.</p>}
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat & posting kuis sekarang"}</button>
-        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook PopBeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
+        </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Butuh lima poster yang belum habis pakai dari review manual khusus drama; satu Rating Drama Top 5 menyediakan lima kandidat.</span></div>}
+        {quizPreview && <div className="editorial-preview-card">
+          <div className="form-title"><strong>Pratinjau kuis sebelum terbit</strong><span>{quizPreview.expiresAt ? `Berlaku sampai ${formatDate(quizPreview.expiresAt)}` : "Draf siap"} · kunci jawaban disimpan privat</span></div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="quiz-grid-preview" src={quizPreview.previewImage} alt="Pratinjau grid Tebak Drama" />
+          <p className="muted small-note">Periksa keterbacaan nomor dan crop petunjuk. Nama jawaban tidak dicetak pada gambar maupun caption.</p>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void publishQuizEdition()}>Terbitkan pratinjau ini</button>
+        </div>}
+        {(!data?.quiz.schemaReady || !data.popbeezEditorialSchemaReady) && <p className="muted small-note">Skema kuis/atribusi belum siap. Jalankan migrasi <code>drizzle/0019_popbeez_segments_bio_drafts.sql</code> di Neon.</p>}
+        <button type="button" className="secondary-button" disabled={busy || !data?.quiz.schemaReady || !data?.popbeezEditorialSchemaReady} onClick={() => void previewQuizEdition()}>{busy ? "Menyiapkan…" : "Buat pratinjau kuis"}</button>
+        <p className="muted small-note">Tombol pratinjau tidak menerbitkan apa pun. Jadwal otomatis yang sudah ada tidak diubah; terbit manual hanya terjadi setelah tombol konfirmasi pada pratinjau.</p>
       </section>
       )}
 
       {activeTab === "manual" && (
       <section className="panel manual-review-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KONTEN MANUAL</p><h2>Buat review mingguan</h2><p className="muted small-note">Isi lima pilihan film, drama, atau musik. Rating tertinggi otomatis menjadi nomor 1. Hasilnya satu carousel terpadu: cover lalu lima kartu rekomendasi.</p></div><span className="format-tag carousel">PopBeez · 6 slide</span></div>
-        <form className="manual-review-form" onSubmit={submitManualReview}>
+        <div className="panel-heading"><div><p className="eyebrow">SEGMEN · {reviewMediaType === "DRAMA" ? "RATING DRAMA TOP 5" : reviewMediaType === "FILM" ? "RATING FILM TOP 5" : "RATING MUSIK TOP 5"}</p><h2>Buat carousel rekomendasi</h2><p className="muted small-note">Isi lima pilihan dengan rating dan sumber faktanya. Urutan tertinggi jadi nomor 1. Lihat keenam slide sebelum menekan tombol terbit.</p></div><span className="format-tag carousel">Pilar list · Carousel</span></div>
+        {!data?.popbeezEditorialSchemaReady && <p className="notice error-notice">Preview-then-publish belum siap. Jalankan migrasi <code>drizzle/0019_popbeez_segments_bio_drafts.sql</code> di Neon.</p>}
+        <form className="manual-review-form" onSubmit={(event) => void previewManualReview(event)}>
           <div className="form-grid review-heading-grid">
             <label className="full-field">Judul posting<input value={reviewHeadline} onChange={(event) => setReviewHeadline(event.target.value)} required minLength={5} maxLength={100} placeholder="Contoh: 5 Drama Rating Tertinggi Minggu Ini" /></label>
             <label>Jenis rekomendasi<select value={reviewMediaType} onChange={(event) => setReviewMediaType(event.target.value as ReviewMediaType)}><option value="FILM">Film</option><option value="DRAMA">Drama</option><option value="MUSIK">Musik</option></select></label>
           </div>
           <div className="manual-review-items">
             {reviewItems.map((item, index) => <fieldset className="manual-review-item" key={index}>
-              <legend>Judul kandidat {index + 1} <span>(urutan akhir ditentukan rating)</span></legend>
+              <legend>Pilihan {index + 1} <span>(urutan akhir ditentukan rating)</span></legend>
               <div className="form-grid">
-                <label className="full-field">Judul film / drama / musik<input value={item.title} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, title: event.target.value } : entry))} required maxLength={120} placeholder="Nama judul" /></label>
+                <label className="full-field">Judul film / drama<input value={item.title} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, title: event.target.value } : entry))} required maxLength={120} placeholder="Nama judul" /></label>
                 <label>Rating (0–10)<input type="number" value={item.rating} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, rating: event.target.value } : entry))} required min="0" max="10" step="0.1" placeholder="8.7" /></label>
                 <label>Genre<input value={item.genre} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, genre: event.target.value } : entry))} required maxLength={100} placeholder="Romansa, komedi" /></label>
-                <label className="full-field">Link gambar (HTTPS)<input type="url" value={item.imageUrl} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, imageUrl: event.target.value } : entry))} required placeholder="https://.../poster.jpg" /></label>
-                <label className="full-field">Kenapa wajib nonton? (opsional)<input value={item.reason} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, reason: event.target.value } : entry))} maxLength={240} placeholder="Satu kalimat tentang daya tariknya" /></label>
+                <label className="full-field">Link poster (HTTPS)<input type="url" value={item.imageUrl} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, imageUrl: event.target.value } : entry))} required placeholder="https://.../poster.jpg" /></label>
+                <label className="full-field">Sumber rating/fakta (HTTPS)<input type="url" value={item.sourceUrl} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, sourceUrl: event.target.value } : entry))} required placeholder="https://sumber-asli..." /></label>
+                <label className="full-field">Kenapa wajib nonton? (opsional)<input value={item.reason} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, reason: event.target.value } : entry))} maxLength={240} placeholder="Alasan berbasis informasi yang sudah dicek" /></label>
                 <label className="full-field">Cocok untuk siapa? (opsional)<input value={item.suitableFor} onChange={(event) => setReviewItems((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, suitableFor: event.target.value } : entry))} maxLength={160} placeholder="Penonton yang suka tontonan ringan" /></label>
               </div>
             </fieldset>)}
           </div>
-          <button type="submit" className="primary-button" disabled={busy}>{busy ? "Menyusun carousel…" : "Terbitkan review"}</button>
-          <p className="muted small-note">Pastikan kamu memiliki izin menggunakan tautan gambar. Caption review tidak memuat tautan; tautan follow ditaruh di komentar pertama. Rating dan urutan berasal dari data yang kamu isi. Jika review perlu diperbaiki setelah terbit, hapus dulu post lama di Facebook/Buffer, lalu terbitkan ulang sekali. Jangan menerbitkan dua kali tanpa menghapus yang lama supaya tidak ada duplikat.</p>
+          <button type="submit" className="secondary-button" disabled={busy || !data?.popbeezEditorialSchemaReady}>{busy ? "Menyusun pratinjau…" : "Pratinjau enam slide"}</button>
+          <p className="muted small-note">Saat Facebook menerbitkan langsung, sumber masuk komentar pertama; untuk antrean Buffer dan salinan Instagram, tautan sumber disertakan di caption. Pratinjau berlaku 24 jam dan hanya bisa dipakai sekali.</p>
         </form>
+        {activeReviewPreview && <div className="editorial-preview-card">
+          <div className="form-title"><strong>{activeReviewPreview.title} · pratinjau lengkap</strong><span>{activeReviewPreview.images.length} slide · berlaku sampai {formatDate(activeReviewPreview.expiresAt)}</span></div>
+          <div className="editorial-preview-grid six-slides">{activeReviewPreview.images.map((image, index) => <figure key={`${activeReviewPreview.draftId}-${index}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={image} alt={`Pratinjau Rating Top 5 slide ${index + 1}`} /><figcaption>Slide {index + 1}</figcaption>
+          </figure>)}</div>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void publishManualReview()}>Terbitkan versi yang dipratinjau</button>
+        </div>}
+      </section>
+      )}
+
+      {activeTab === "artistBio" && (
+      <section className="panel manual-review-panel artist-bio-panel">
+        <div className="panel-heading"><div><p className="eyebrow">SEGMEN · ARTIS BIO</p><h2>Kenalan lewat empat fakta</h2><p className="muted small-note">Satu foto, satu fakta, dan satu sumber untuk tiap slide. Tidak ada biodata otomatis yang dikarang; AI tidak menambahkan klaim. Facebook langsung mendapat sumber di komentar pertama; Buffer/Instagram mencantumkannya di caption.</p></div><span className="format-tag carousel">4 foto · Carousel</span></div>
+        {!data?.popbeezEditorialSchemaReady && <p className="notice error-notice">Preview-then-publish belum siap. Jalankan migrasi <code>drizzle/0019_popbeez_segments_bio_drafts.sql</code> di Neon.</p>}
+        <form className="manual-review-form" onSubmit={(event) => void previewArtistBio(event)}>
+          <label className="full-field">Nama artis<input value={artistBioName} onChange={(event) => setArtistBioName(event.target.value)} required minLength={2} maxLength={50} placeholder="Nama sesuai sumber" /></label>
+          <div className="manual-review-items artist-bio-facts">
+            {artistBioFacts.map((item, index) => <fieldset className="manual-review-item" key={index}>
+              <legend>Foto &amp; fakta {index + 1}</legend>
+              <div className="form-grid">
+                <label className="full-field">Fakta terverifikasi<input value={item.fact} onChange={(event) => setArtistBioFacts((current) => current.map((entry, factIndex) => factIndex === index ? { ...entry, fact: event.target.value } : entry))} required minLength={12} maxLength={140} placeholder="Satu fakta ringkas yang bisa dicek di tautan sumber" /></label>
+                <label className="full-field">Sumber fakta (HTTPS)<input type="url" value={item.sourceUrl} onChange={(event) => setArtistBioFacts((current) => current.map((entry, factIndex) => factIndex === index ? { ...entry, sourceUrl: event.target.value } : entry))} required placeholder="https://sumber-asli..." /></label>
+                <label className="full-field">Foto (HTTPS)<input type="url" value={item.imageUrl} onChange={(event) => setArtistBioFacts((current) => current.map((entry, factIndex) => factIndex === index ? { ...entry, imageUrl: event.target.value } : entry))} required placeholder="https://.../foto.jpg" /></label>
+              </div>
+            </fieldset>)}
+          </div>
+          <button type="submit" className="secondary-button" disabled={busy || !data?.popbeezEditorialSchemaReady}>{busy ? "Menyusun pratinjau…" : "Pratinjau carousel empat foto"}</button>
+          <p className="muted small-note">Fakta ditulis redaksi dari sumber yang disertakan. Jika AI dipakai di luar aplikasi untuk merapikan kalimat, verifikasi kembali tiap kata; aplikasi ini tidak membuat biodata dari nama artis.</p>
+        </form>
+        {activeArtistBioPreview && <div className="editorial-preview-card">
+          <div className="form-title"><strong>{activeArtistBioPreview.title} · pratinjau carousel</strong><span>{activeArtistBioPreview.images.length} foto · berlaku sampai {formatDate(activeArtistBioPreview.expiresAt)}</span></div>
+          <div className="editorial-preview-grid four-slides">{activeArtistBioPreview.images.map((image, index) => <figure key={`${activeArtistBioPreview.draftId}-${index}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={image} alt={`Pratinjau Artis Bio foto ${index + 1}`} /><figcaption>Fakta {index + 1}</figcaption>
+          </figure>)}</div>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void publishArtistBio()}>Terbitkan versi yang dipratinjau</button>
+        </div>}
       </section>
       )}
 

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildQuizCaption,
+  quizAnswerKey,
+  quizEditionNeedsOutcomeReview,
   posterTitleKey,
   quizAvailablePosters,
   quizIntervalDays,
@@ -15,7 +17,7 @@ import {
 } from "../src/lib/quiz";
 
 function review(id: string, createdAt: string, items: Array<[string, string]>) {
-  return { id, createdAt: new Date(createdAt), items: items.map(([title, imageUrl]) => ({ title, imageUrl })) };
+  return { id, createdAt: new Date(createdAt), items: items.map(([title, imageUrl]) => ({ title, imageUrl, sourceUrl: `https://source.example.test/${encodeURIComponent(title.toLowerCase())}` })) };
 }
 
 /** A flat list of posters titled A, B, C… all from the same review. */
@@ -25,6 +27,7 @@ function letterPosters(count: number): QuizPoster[] {
     reviewCreatedAt: new Date("2026-01-01T00:00:00Z"),
     title: String.fromCharCode(65 + index),
     imageUrl: `https://img.example/${String.fromCharCode(97 + index)}.jpg`,
+    sourceUrl: `https://source.example.test/${String.fromCharCode(97 + index)}`,
   }));
 }
 
@@ -40,6 +43,8 @@ test("posters come from the newest review first and are deduplicated by title", 
   assert.equal(posters[2]!.reviewId, "older");
   // The older Goblin poster is dropped because the newest review already covers that title.
   assert.equal(posters[0]!.imageUrl, "https://img.example/3b.jpg");
+  assert.equal(posters[0]!.sourceUrl, "https://source.example.test/goblin");
+  assert.deepEqual(quizAnswerKey(posters.slice(0, 1)), [{ title: "Goblin", sourceUrl: "https://source.example.test/goblin", reviewId: "newer" }]);
 });
 
 test("posters require an HTTPS url and a title", () => {
@@ -52,6 +57,13 @@ test("posters require an HTTPS url and a title", () => {
 test("poster title keys ignore punctuation and case", () => {
   assert.equal(posterTitleKey("Vincenzo!"), posterTitleKey("vincenzo"));
   assert.equal(posterTitleKey("Reply 1988"), "reply 1988");
+});
+
+test("a quiz edition with a post ID but no timestamp blocks automatic resubmission for review", () => {
+  assert.equal(quizEditionNeedsOutcomeReview({ postedAt: null, facebookPostId: null }), false);
+  assert.equal(quizEditionNeedsOutcomeReview({ postedAt: null, facebookPostId: "facebook:outcome-unknown:edition-1" }), true);
+  assert.equal(quizEditionNeedsOutcomeReview({ postedAt: null, facebookPostId: "123456789_987654321" }), true);
+  assert.equal(quizEditionNeedsOutcomeReview({ postedAt: new Date("2026-11-16T12:00:00Z"), facebookPostId: "123456789_987654321" }), false);
 });
 
 test("edition history marks how often each poster was already used", () => {
@@ -94,7 +106,7 @@ test("caption is link-free and follows the agreed three-line copy", () => {
   const caption = buildQuizCaption();
   assert.equal(QUIZ_TILES, 5);
   assert.ok(caption.startsWith("TEBAK DRAMA"));
-  assert.ok(caption.includes("Tebak judul drama/film. Berapa yang berhasil kamu tebak?"));
+  assert.ok(caption.includes("Tebak judul drama. Berapa yang berhasil kamu tebak?"));
   assert.ok(caption.includes("Ikuti PopBeez untuk Kuiz Berikutnya."));
   assert.ok(caption.includes("#TebakDramanya"));
   assert.ok(!/https?:\/\//i.test(caption));

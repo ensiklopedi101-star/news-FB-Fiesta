@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildManualReviewCaption, createManualReview, MANUAL_REVIEW_FOLLOW_COMMENT, manualImageReferer, parseManualReview } from "../src/lib/manual-review";
+import { buildManualReviewCaption, buildManualReviewSourceComment, createManualReview, MANUAL_REVIEW_FOLLOW_COMMENT, manualImageReferer, parseManualReview } from "../src/lib/manual-review";
 
 const sample = {
   headline: "5 Drama Rating Tertinggi Minggu Ini",
   mediaType: "DRAMA",
   items: [
-    { title: "Drama B", rating: 8.2, genre: "Komedi", imageUrl: "https://images.example.test/b.jpg" },
-    { title: "Drama D", rating: 9.1, genre: "Aksi", imageUrl: "https://images.example.test/d.jpg" },
-    { title: "Drama A", rating: 9.7, genre: "Romansa", imageUrl: "https://images.example.test/a.jpg" },
-    { title: "Drama C", rating: 8.8, genre: "Fantasi", imageUrl: "https://images.example.test/c.jpg" },
-    { title: "Drama E", rating: 8.5, genre: "Misteri", imageUrl: "https://images.example.test/e.jpg" },
+    { title: "Drama B", rating: 8.2, genre: "Komedi", imageUrl: "https://images.example.test/b.jpg", sourceUrl: "https://ratings.example.test/drama-b" },
+    { title: "Drama D", rating: 9.1, genre: "Aksi", imageUrl: "https://images.example.test/d.jpg", sourceUrl: "https://ratings.example.test/drama-d" },
+    { title: "Drama A", rating: 9.7, genre: "Romansa", imageUrl: "https://images.example.test/a.jpg", sourceUrl: "https://ratings.example.test/drama-a" },
+    { title: "Drama C", rating: 8.8, genre: "Fantasi", imageUrl: "https://images.example.test/c.jpg", sourceUrl: "https://ratings.example.test/drama-c" },
+    { title: "Drama E", rating: 8.5, genre: "Misteri", imageUrl: "https://images.example.test/e.jpg", sourceUrl: "https://ratings.example.test/drama-e" },
   ],
 };
 
@@ -18,6 +18,10 @@ test("sorts manual review entries by descending rating and persists the same ord
   const review = createManualReview(sample);
   assert.deepEqual(review.items.map((item) => item.title), ["Drama A", "Drama D", "Drama C", "Drama E", "Drama B"]);
   assert.deepEqual(parseManualReview(JSON.stringify(review))?.items.map((item) => item.title), review.items.map((item) => item.title));
+  assert.equal(review.items[0]?.sourceUrl, "https://ratings.example.test/drama-a");
+  const sourceComment = buildManualReviewSourceComment(review);
+  assert.match(sourceComment, /Sumber rating\/fakta:/);
+  assert.match(sourceComment, /1\. Drama A: https:\/\/ratings\.example\.test\/drama-a/);
 });
 
 test("manual review caption keeps numbered winners without external links", () => {
@@ -25,6 +29,9 @@ test("manual review caption keeps numbered winners without external links", () =
   assert.match(caption, /1️⃣ JUARA MINGGU INI: Drama A/);
   assert.match(caption, /5️⃣ Drama B/);
   assert.doesNotMatch(caption, /https?:\/\//);
+  const captionWithSources = buildManualReviewCaption(createManualReview(sample), { includeSources: true });
+  assert.match(captionWithSources, /Sumber rating\/fakta:/);
+  assert.match(captionWithSources, /https:\/\/ratings\.example\.test\/drama-a/);
   assert.match(MANUAL_REVIEW_FOLLOW_COMMENT, /https:\/\/www\.facebook\.com\/portalbeez/);
   assert.match(MANUAL_REVIEW_FOLLOW_COMMENT, /instagram\.com\/popbeez\.hive/);
 });

@@ -1,10 +1,14 @@
 import "server-only";
 import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articles, facebookInsightsSyncState, facebookPostInsights } from "@/lib/schema";
+import { articles, facebookInsightsSyncState, facebookPostInsights, quizEditions, reels } from "@/lib/schema";
+import { ratingSegmentForMediaType } from "@/lib/content-taxonomy";
 import {
+  availableFacebookPostMetrics,
+  normalizeAvailableMetrics,
   parseFacebookPostInsights,
   parseFacebookPostSocialStats,
+  type FacebookMetricName,
   type FacebookPostMetrics,
 } from "@/lib/facebook-insights-core";
 
@@ -70,10 +74,12 @@ export async function ensureFacebookInsightsTables(): Promise<boolean> {
           "comments" integer DEFAULT 0 NOT NULL,
           "shares" integer DEFAULT 0 NOT NULL,
           "video_views" integer DEFAULT 0 NOT NULL,
+          "available_metrics" jsonb DEFAULT '[]'::jsonb NOT NULL,
           "interactions_available" boolean DEFAULT false NOT NULL,
           "synced_at" timestamp with time zone DEFAULT now() NOT NULL
         )
       `);
+      await db.execute(sql`ALTER TABLE "facebook_post_insights" ADD COLUMN IF NOT EXISTS "available_metrics" jsonb DEFAULT '[]'::jsonb NOT NULL`);
       await db.execute(sql`
         CREATE UNIQUE INDEX IF NOT EXISTS "facebook_post_insights_page_post_unique"
         ON "facebook_post_insights" ("page_id", "facebook_post_id")
@@ -138,15 +144,6 @@ function graphError(payload: unknown): string | null {
   return error?.message || null;
 }
 
-function payloadHasMetric(payload: unknown, metricName: string): boolean {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
-  const data = (payload as { data?: unknown }).data;
-  return Array.isArray(data) && data.some((row) => Boolean(
-    row && typeof row === "object" && !Array.isArray(row)
-    && (row as { name?: unknown }).name === metricName,
-  ));
-}
-
 async function graphGet(url: string, token: string): Promise<unknown> {
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -165,7 +162,7 @@ async function fetchPostInsightsMetrics(
   postId: string,
   token: string,
   version: string,
-): Promise<{ metrics: FacebookPostMetrics; reactionsAvailable: boolean }> {
+): Promise<{ metrics: FacebookPostMetrics; availableMetrics: FacebookMetricName[] }> {
   let lastError = "Meta Graph API tidak mengembalikan metrik post.";
   for (const metrics of metricSets) {
     const query = new URLSearchParams({ metric: metrics.join(","), period: "lifetime" });
@@ -175,12 +172,13 @@ async function fetchPostInsightsMetrics(
       if (!Array.isArray(payload?.data) || payload.data.length === 0) {
         throw new Error("Meta mengembalikan dataset insight kosong; cek pages_read_engagement, read_insights, tugas Analyze, dan syarat Page minimal 100 suka.");
       }
-      if (!payloadHasMetric(payload, "post_total_media_view_unique")) {
-        throw new Error("Meta tidak mengembalikan metrik unique media viewers yang dibutuhkan untuk perbandingan post.");
+      const availableMetrics = availableFacebookPostMetrics(payload);
+      if (!availableMetrics.length) {
+        throw new Error("Meta tidak mengembalikan metrik yang dikenali untuk post ini.");
       }
       return {
         metrics: parseFacebookPostInsights(payload),
-        reactionsAvailable: payloadHasMetric(payload, "post_reactions_by_type_total"),
+        availableMetrics,
       };
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -195,7 +193,7 @@ async function fetchPostSocialStats(
   postId: string,
   token: string,
   version: string,
-): Promise<{ comments: number; shares: number }> {
+): Promise<{ comments: number | null; shares: number | null }> {
   const query = new URLSearchParams({ fields: "comments.limit(0).summary(true),shares" });
   const url = `https://graph.facebook.com/${version}/${encodeURIComponent(postId)}?${query.toString()}`;
   const stats = parseFacebookPostSocialStats(await graphGet(url, token));
@@ -205,26 +203,41 @@ async function fetchPostSocialStats(
 
 async function collectOnePost(postId: string, token: string, version: string): Promise<{
   metrics: FacebookPostMetrics;
+  availableMetrics: FacebookMetricName[];
   interactionsAvailable: boolean;
   partialError: string | null;
 }> {
   const insightResult = await fetchPostInsightsMetrics(postId, token, version);
+  let metrics = insightResult.metrics;
+  const availableMetrics = [...insightResult.availableMetrics];
+  let socialError: string | null = null;
   try {
     const socialStats = await fetchPostSocialStats(postId, token, version);
-    return {
-      metrics: { ...insightResult.metrics, ...socialStats },
-      interactionsAvailable: insightResult.reactionsAvailable,
-      partialError: insightResult.reactionsAvailable
-        ? null
-        : "Meta tidak mengembalikan metrik reaksi post.",
-    };
+    if (socialStats.comments !== null) {
+      metrics = { ...metrics, comments: socialStats.comments };
+      availableMetrics.push("comments");
+    }
+    if (socialStats.shares !== null) {
+      metrics = { ...metrics, shares: socialStats.shares };
+      availableMetrics.push("shares");
+    }
   } catch (error) {
-    return {
-      metrics: insightResult.metrics,
-      interactionsAvailable: false,
-      partialError: error instanceof Error ? error.message : "Data komentar/bagikan tidak tersedia.",
-    };
+    socialError = error instanceof Error ? error.message : "Data komentar/bagikan tidak tersedia.";
   }
+  const uniqueAvailable = normalizeAvailableMetrics(availableMetrics);
+  const hasCompleteInteractions = ["reactions", "comments", "shares"].every((field) => uniqueAvailable.includes(field as FacebookMetricName));
+  const missingParts = [
+    !uniqueAvailable.includes("reactions") ? "reaksi" : "",
+    !uniqueAvailable.includes("comments") ? "komentar" : "",
+    !uniqueAvailable.includes("shares") ? "bagikan" : "",
+  ].filter(Boolean);
+  const partialError = socialError || (missingParts.length ? `Meta tidak mengembalikan metrik ${missingParts.join(", ")}.` : null);
+  return {
+    metrics,
+    availableMetrics: uniqueAvailable,
+    interactionsAvailable: hasCompleteInteractions,
+    partialError,
+  };
 }
 
 async function mapWithConcurrency<T, R>(
@@ -251,23 +264,92 @@ function isUsableFacebookPostId(value: string | null): value is string {
   return Boolean(id && !id.startsWith("buffer:") && !id.includes(":pending:") && !id.startsWith("facebook:"));
 }
 
-async function loadRecentFacebookPosts() {
+type RecentFacebookPost = {
+  facebookPostId: string;
+  title: string;
+  segment: string | null;
+  contentFormat: string | null;
+  pillar: string | null;
+  publishedAt: Date | null;
+};
+
+async function loadRecentFacebookPosts(): Promise<RecentFacebookPost[]> {
   const since = new Date(Date.now() - INSIGHTS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const rows = await getDb()
-    .select({ facebookPostId: articles.facebookPostId, publishedAt: articles.publishedAt })
-    .from(articles)
-    .where(and(
-      eq(articles.status, "published"),
-      eq(articles.pageKey, "entertainment"),
-      gte(articles.publishedAt, since),
-      isNotNull(articles.facebookPostId),
-    ))
-    .orderBy(desc(articles.publishedAt))
-    .limit(240);
-  const unique = new Map<string, { facebookPostId: string; publishedAt: Date | null }>();
-  for (const row of rows) {
-    if (!isUsableFacebookPostId(row.facebookPostId)) continue;
-    if (!unique.has(row.facebookPostId)) unique.set(row.facebookPostId, { facebookPostId: row.facebookPostId, publishedAt: row.publishedAt });
+  const db = getDb();
+  const [articleRows, quizRows, reelRows] = await Promise.all([
+    db.select({
+      facebookPostId: articles.facebookPostId,
+      title: articles.title,
+      sourceName: articles.sourceName,
+      category: articles.category,
+      segment: articles.segment,
+      contentFormat: articles.contentFormat,
+      postFormat: articles.postFormat,
+      pillar: articles.pillar,
+      publishedAt: articles.publishedAt,
+    }).from(articles)
+      .where(and(
+        eq(articles.status, "published"),
+        eq(articles.pageKey, "entertainment"),
+        gte(articles.publishedAt, since),
+        isNotNull(articles.facebookPostId),
+      ))
+      .orderBy(desc(articles.publishedAt)).limit(240),
+    db.select({
+      facebookPostId: quizEditions.facebookPostId,
+      caption: quizEditions.caption,
+      segment: quizEditions.segment,
+      contentFormat: quizEditions.contentFormat,
+      pillar: quizEditions.pillar,
+      publishedAt: quizEditions.postedAt,
+    }).from(quizEditions)
+      .where(and(gte(quizEditions.postedAt, since), isNotNull(quizEditions.facebookPostId)))
+      .orderBy(desc(quizEditions.postedAt)).limit(240),
+    db.select({
+      facebookPostId: reels.facebookVideoId,
+      title: articles.title,
+      segment: reels.segment,
+      contentFormat: reels.contentFormat,
+      pillar: reels.pillar,
+      articlePillar: articles.pillar,
+      publishedAt: reels.updatedAt,
+    }).from(reels)
+      .innerJoin(articles, eq(reels.articleId, articles.id))
+      .where(and(eq(reels.status, "published"), gte(reels.updatedAt, since), isNotNull(reels.facebookVideoId)))
+      .orderBy(desc(reels.updatedAt)).limit(240),
+  ]);
+
+  const candidates: RecentFacebookPost[] = [
+    ...articleRows.map((row) => ({
+      facebookPostId: row.facebookPostId ?? "",
+      title: row.title,
+      segment: row.segment ?? (row.sourceName.toLocaleLowerCase("id-ID").includes("review manual") ? ratingSegmentForMediaType(row.category) : "roundup"),
+      contentFormat: row.contentFormat ?? (row.postFormat === "carousel" ? "carousel" : "single_image"),
+      pillar: row.pillar,
+      publishedAt: row.publishedAt,
+    })),
+    ...quizRows.map((row) => ({
+      facebookPostId: row.facebookPostId ?? "",
+      title: "Tebak Drama",
+      segment: row.segment,
+      contentFormat: row.contentFormat,
+      pillar: row.pillar,
+      publishedAt: row.publishedAt,
+    })),
+    ...reelRows.map((row) => ({
+      facebookPostId: row.facebookPostId ?? "",
+      title: row.title,
+      segment: row.segment,
+      contentFormat: row.contentFormat,
+      pillar: row.pillar ?? row.articlePillar,
+      publishedAt: row.publishedAt,
+    })),
+  ].filter((post) => isUsableFacebookPostId(post.facebookPostId));
+
+  candidates.sort((left, right) => (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0));
+  const unique = new Map<string, RecentFacebookPost>();
+  for (const post of candidates) {
+    if (!unique.has(post.facebookPostId)) unique.set(post.facebookPostId, post);
   }
   return [...unique.values()];
 }
@@ -459,6 +541,7 @@ export async function syncFacebookPostInsights(options?: {
           comments: collected.metrics.comments,
           shares: collected.metrics.shares,
           videoViews: collected.metrics.videoViews,
+          availableMetrics: collected.availableMetrics,
           interactionsAvailable: collected.interactionsAvailable,
           syncedAt: new Date(),
         }).onConflictDoUpdate({
@@ -471,6 +554,7 @@ export async function syncFacebookPostInsights(options?: {
             comments: collected.metrics.comments,
             shares: collected.metrics.shares,
             videoViews: collected.metrics.videoViews,
+            availableMetrics: collected.availableMetrics,
             interactionsAvailable: collected.interactionsAvailable,
             syncedAt: new Date(),
           },
@@ -486,7 +570,7 @@ export async function syncFacebookPostInsights(options?: {
     const firstPartialError = results.find((result) => result.ok && result.partialError)?.partialError ?? null;
     const current = new Date();
     const errorText = failed[0]?.error ?? (firstPartialError
-      ? `${partialPosts} post disinkronkan tanpa ringkasan komentar/bagikan: ${safeError(firstPartialError, token)}`
+      ? `${partialPosts} post memiliki metrik yang hanya tersedia sebagian: ${safeError(firstPartialError, token)}`
       : null);
     await releaseSyncLock({
       ...(syncedPosts > 0 ? { lastSuccessAt: current } : {}),

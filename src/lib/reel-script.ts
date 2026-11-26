@@ -97,7 +97,18 @@ export function totalSeconds(scenes: ReelScene[]): number {
 /** Reels caption: the same substance as the post, plus the source note and IG handle. */
 import { INSTAGRAM_HANDLE } from "@/lib/brand";
 
-export function buildReelCaption(input: { headline: string; question: string; sourceName: string; hashtags?: string[] }): string {
+export function buildReelCaption(input: { headline: string; question: string; sourceName: string; sourceAttribution?: string; hashtags?: string[] }): string {
   const hashtags = input.hashtags?.length ? input.hashtags.join(" ") : "#PopBeez #DramaKorea #FilmKorea";
-  return [input.headline.trim(), "", input.question.trim(), "", hashtags, `📰 ${input.sourceName}`, "", `📱 Follow Instagram ${INSTAGRAM_HANDLE} juga ya, Beezers!`].join("\n");
+  const sourceAttribution = input.sourceAttribution?.trim();
+  return [
+    input.headline.trim(),
+    "",
+    input.question.trim(),
+    "",
+    hashtags,
+    `📰 ${input.sourceName}`,
+    ...(sourceAttribution ? ["", sourceAttribution] : []),
+    "",
+    `📱 Follow Instagram ${INSTAGRAM_HANDLE} juga ya, Beezers!`,
+  ].join("\n");
 }

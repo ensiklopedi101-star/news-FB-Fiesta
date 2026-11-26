@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { OriginalityReport } from "@/lib/originality";
+import type { ContentFormat, ContentSegment } from "@/lib/content-taxonomy";
+import type { Pillar } from "@/lib/pillars";
 import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export const articleStatus = pgEnum("article_status", ["queued", "processing", "ready", "published", "failed", "expired", "removed"]);
@@ -57,8 +59,12 @@ export const articles = pgTable(
     facebookPostId: text("facebook_post_id"),
     /** Instagram media id when the post was mirrored to @popbeez.hive. */
     instagramMediaId: text("instagram_media_id"),
-    /** Content pillar (breaking/analysis/relatable/list/community/manga); see src/lib/pillars.ts. */
-    pillar: text("pillar"),
+    /** Content pillar (breaking/analysis/relatable/list/community/manga); separate from segment and format. */
+    pillar: text("pillar").$type<Pillar>(),
+    /** Recurring editorial show/series; e.g. roundup or rating_drama_top_5. */
+    segment: text("segment").$type<ContentSegment>(),
+    /** Normalized asset format; postFormat remains the carousel renderer's layout flag. */
+    contentFormat: text("content_format").$type<ContentFormat>().notNull().default("single_image"),
     errorMessage: text("error_message"),
     attempts: integer("attempts").notNull().default(0),
     sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
@@ -108,12 +114,37 @@ export const quizEditions = pgTable(
     imageUrl: text("image_url"),
     caption: text("caption"),
     facebookPostId: text("facebook_post_id"),
+    /** Private editorial answer key; never used as public quiz caption text. */
+    answerKey: jsonb("answer_key").$type<Array<{ title: string; sourceUrl: string | null; reviewId: string }>>().notNull().default(sql`'[]'::jsonb`),
+    segment: text("segment").$type<ContentSegment>().notNull().default("tebak_drama"),
+    contentFormat: text("content_format").$type<ContentFormat>().notNull().default("quiz_grid"),
+    pillar: text("pillar").$type<Pillar>().notNull().default("community"),
     errorMessage: text("error_message"),
     postedAt: timestamp("posted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("quiz_editions_created_idx").on(table.createdAt)],
+);
+
+export const editorialDrafts = pgTable(
+  "editorial_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    kind: text("kind").notNull().$type<"rating_top_5" | "artis_bio" | "tebak_drama">(),
+    status: text("status").notNull().default("previewed").$type<"previewed" | "publishing" | "submitted" | "published" | "outcome_unknown" | "failed" | "expired">(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    resultId: uuid("result_id"),
+    errorMessage: text("error_message"),
+    previewedAt: timestamp("previewed_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("editorial_drafts_status_expiry_idx").on(table.status, table.expiresAt),
+    index("editorial_drafts_created_idx").on(table.createdAt),
+  ],
 );
 
 export const reelStatus = pgEnum("reel_status", ["rendering", "published", "failed"]);
@@ -133,6 +164,9 @@ export const reels = pgTable(
     facebookVideoId: text("facebook_video_id"),
     /** Instagram Reels media id when the video was mirrored to @popbeez.hive. */
     instagramMediaId: text("instagram_media_id"),
+    segment: text("segment").$type<ContentSegment>().notNull().default("reel"),
+    contentFormat: text("content_format").$type<ContentFormat>().notNull().default("video"),
+    pillar: text("pillar").$type<Pillar>(),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -184,6 +218,8 @@ export const facebookPostInsights = pgTable(
     comments: integer("comments").notNull().default(0),
     shares: integer("shares").notNull().default(0),
     videoViews: integer("video_views").notNull().default(0),
+    /** Exact fields returned by Graph; zero is not treated as an available metric unless Meta returned it. */
+    availableMetrics: jsonb("available_metrics").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     interactionsAvailable: boolean("interactions_available").notNull().default(false),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -231,6 +267,7 @@ export type RssSource = typeof rssSources.$inferSelect;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
 export type QuizEdition = typeof quizEditions.$inferSelect;
+export type EditorialDraft = typeof editorialDrafts.$inferSelect;
 export type Reel = typeof reels.$inferSelect;
 export type AutomationLog = typeof automationLogs.$inferSelect;
 export type ContentManagerConfigRow = typeof contentManagerConfig.$inferSelect;

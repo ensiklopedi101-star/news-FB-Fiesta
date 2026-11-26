@@ -6,6 +6,7 @@ import { renderOgCard } from "@/lib/og-card";
 import { imageForCarouselSlide } from "@/lib/carousel-image";
 import { selectedRoundupImage } from "@/lib/roundup";
 import { manualImageReferer, parseManualReview } from "@/lib/manual-review";
+import { parseArtistBio } from "@/lib/artist-bio";
 import { isKnownAggregatorBrandImage } from "@/lib/safe-url";
 
 export const runtime = "nodejs";
@@ -49,18 +50,24 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   ).slice(0, 40);
   const category = cardArticle.category.toUpperCase().replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24);
   const manualReview = roundupIds ? null : parseManualReview(cardArticle.rawText);
+  const artistBio = roundupIds ? null : parseArtistBio(cardArticle.rawText);
   const requestedSlide = Number.parseInt(searchParams.get("slide") ?? "1", 10);
-  const slideTotal = roundupIds?.length ?? (manualReview ? 6 : 4);
+  const slideTotal = roundupIds?.length ?? (manualReview ? 6 : artistBio ? 4 : 4);
   if (!Number.isInteger(requestedSlide) || requestedSlide < 1 || requestedSlide > slideTotal) {
     return new Response("Invalid carousel slide", { status: 400 });
   }
   const carouselLabels = ["FAKTA UTAMA", "RINCIAN BERITA", "IKUT BERBAGI PENDAPAT"];
   // New image fields from the feed occasionally carry the rss.app placeholder again,
   // so stored rows are re-checked at render time instead of trusting the database.
-  const isFollowCtaSlide = !roundupIds && !manualReview && isEntertainment && requestedSlide === 4;
+  const isFollowCtaSlide = !roundupIds && !manualReview && !artistBio && isEntertainment && requestedSlide === 4;
   // Roundup slides show only the catchy localized headline in cover typography,
   // never a combined "headline — summary" paragraph on top of the photo.
-  const slide = roundupIds ? {
+  const slide = artistBio ? {
+    number: requestedSlide,
+    total: 4,
+    label: `FAKTA ${requestedSlide}`,
+    text: `${artistBio.name}\n${artistBio.facts[requestedSlide - 1]?.fact ?? "Fakta tidak tersedia."}`,
+  } : roundupIds ? {
     number: requestedSlide,
     total: roundupIds.length,
     label: `BERITA ${requestedSlide}`,
@@ -86,13 +93,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       ? null
       : manualReview
         ? manualReview.items[requestedSlide - 2]?.imageUrl ?? cardArticle.imageUrl
-        : roundupIds
-          ? selectedRoundupImage(cardArticle)
-          : cardArticle.postFormat === "carousel"
-            ? imageForCarouselSlide(cardArticle.imageUrls, cardArticle.imageUrl, requestedSlide)
-            : cardArticle.imageUrl;
+        : artistBio
+          ? artistBio.facts[requestedSlide - 1]?.imageUrl ?? cardArticle.imageUrl
+          : roundupIds
+            ? selectedRoundupImage(cardArticle)
+            : cardArticle.postFormat === "carousel"
+              ? imageForCarouselSlide(cardArticle.imageUrls, cardArticle.imageUrl, requestedSlide)
+              : cardArticle.imageUrl;
     const safeRequestedImage = isKnownAggregatorBrandImage(requestedImage) ? null : requestedImage;
-    const imageReferer = manualReview && safeRequestedImage ? manualImageReferer(safeRequestedImage) : cardArticle.sourceUrl;
+    const imageReferer = (manualReview || artistBio) && safeRequestedImage ? manualImageReferer(safeRequestedImage) : cardArticle.sourceUrl;
     let imageFailure = "";
     const reportImageFailure = (reason: string) => {
       imageFailure = reason;
@@ -102,14 +111,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       ? null
       : await fetchOgImageJpeg(safeRequestedImage, imageReferer, fetch, reportImageFailure);
     // Some publishers reject every cross-origin Referer; retry anonymously before giving up on a manual image.
-    if (!photoJpeg && manualReview && safeRequestedImage) {
+    if (!photoJpeg && (manualReview || artistBio) && safeRequestedImage) {
       photoJpeg = await fetchOgImageJpeg(safeRequestedImage, "", fetch, (reason) => {
         imageFailure = reason;
         console.warn(`[og-image] Manual image rejected without Referer for ${article.id}: ${reason}.`);
       });
     }
     let photoJpegSecondary: Uint8Array | null = null;
-    if (!manualReview && article.postFormat === "single" && article.manualImageUrls.length === 2 && requestedImage === article.manualImageUrls[0]) {
+    if (!manualReview && !artistBio && article.postFormat === "single" && article.manualImageUrls.length === 2 && requestedImage === article.manualImageUrls[0]) {
       photoJpegSecondary = await fetchOgImageJpeg(article.manualImageUrls[1], article.sourceUrl, fetch, (reason) => {
         console.warn(`[og-image] Secondary manual image rejected for ${article.id}: ${reason}.`);
       });

@@ -1,12 +1,13 @@
 import "server-only";
 import { and, asc, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articles, contentManagerConfig, contentManagerDecisions, facebookInsightsSyncState, facebookPostInsights, shortLinks } from "@/lib/schema";
+import { articles, contentManagerConfig, contentManagerDecisions, facebookInsightsSyncState, facebookPostInsights, quizEditions, reels, shortLinks } from "@/lib/schema";
 import { classifyPillar, PILLARS, type Pillar } from "@/lib/pillars";
+import { ratingSegmentForMediaType } from "@/lib/content-taxonomy";
 import { EDITORIAL_VOICES, type EditorialVoiceId } from "@/lib/editorial-voices";
 import { POPBEEZ_ROUNDUP_MIN, selectedRoundupImage } from "@/lib/roundup";
 import { formatMinutes, loadSlotConfig, slotStateAt, witaMinutes } from "@/lib/publish-slots";
-import { buildFacebookInsightsSummary, type FacebookInsightsPostInput, type FacebookInsightsSummary } from "@/lib/facebook-insights-core";
+import { buildFacebookInsightsSummary, normalizeAvailableMetrics, type FacebookInsightsPostInput, type FacebookInsightsSummary } from "@/lib/facebook-insights-core";
 import { ensureFacebookInsightsTables, getFacebookInsightsReadiness } from "@/lib/facebook-insights";
 import { hasAnyAiProviderConfigured, runStructuredAiTask, type AiProviderAttempt } from "@/lib/ai";
 import {
@@ -213,25 +214,76 @@ async function getFacebookInsightsPerformance(since30d: Date): Promise<FacebookI
     const pageId = process.env.FB_ENTERTAINMENT_PAGE_ID?.trim();
     if (!pageId) return summarizeEmpty();
     const db = getDb();
-    const articleRows = await db.select({
-      id: articles.id,
-      title: articles.title,
-      category: articles.category,
-      pillar: articles.pillar,
-      caption: articles.caption,
-      facebookPostId: articles.facebookPostId,
-      publishedAt: articles.publishedAt,
-    }).from(articles)
-      .where(and(
-        eq(articles.status, "published"),
-        eq(articles.pageKey, "entertainment"),
-        gte(articles.publishedAt, since30d),
-        isNotNull(articles.facebookPostId),
-      ))
-      .orderBy(desc(articles.publishedAt))
-      .limit(240);
-    const rowsByPost = new Map<string, typeof articleRows>();
-    for (const row of articleRows) {
+    const [articleRows, quizRows, reelRows, syncRows] = await Promise.all([
+      db.select({
+        title: articles.title,
+        category: articles.category,
+        sourceName: articles.sourceName,
+        pillar: articles.pillar,
+        segment: articles.segment,
+        contentFormat: articles.contentFormat,
+        postFormat: articles.postFormat,
+        caption: articles.caption,
+        facebookPostId: articles.facebookPostId,
+        publishedAt: articles.publishedAt,
+      }).from(articles)
+        .where(and(
+          eq(articles.status, "published"),
+          eq(articles.pageKey, "entertainment"),
+          gte(articles.publishedAt, since30d),
+          isNotNull(articles.facebookPostId),
+        ))
+        .orderBy(desc(articles.publishedAt)).limit(240),
+      db.select({
+        title: sql<string>`'Tebak Drama'`,
+        category: sql<string>`'KUIS'`,
+        sourceName: sql<string>`'PopBeez'`,
+        pillar: quizEditions.pillar,
+        segment: quizEditions.segment,
+        contentFormat: quizEditions.contentFormat,
+        caption: quizEditions.caption,
+        facebookPostId: quizEditions.facebookPostId,
+        publishedAt: quizEditions.postedAt,
+      }).from(quizEditions)
+        .where(and(gte(quizEditions.postedAt, since30d), isNotNull(quizEditions.facebookPostId)))
+        .orderBy(desc(quizEditions.postedAt)).limit(240),
+      db.select({
+        title: articles.title,
+        category: articles.category,
+        sourceName: articles.sourceName,
+        pillar: reels.pillar,
+        articlePillar: articles.pillar,
+        segment: reels.segment,
+        contentFormat: reels.contentFormat,
+        caption: articles.caption,
+        facebookPostId: reels.facebookVideoId,
+        publishedAt: reels.updatedAt,
+      }).from(reels)
+        .innerJoin(articles, eq(reels.articleId, articles.id))
+        .where(and(eq(reels.status, "published"), gte(reels.updatedAt, since30d), isNotNull(reels.facebookVideoId)))
+        .orderBy(desc(reels.updatedAt)).limit(240),
+      db.select().from(facebookInsightsSyncState).where(eq(facebookInsightsSyncState.id, 1)).limit(1),
+    ]);
+
+    type PublicationRow = {
+      title: string;
+      category: string;
+      sourceName: string;
+      pillar: string | null;
+      segment: string | null;
+      contentFormat: string | null;
+      postFormat?: "single" | "carousel";
+      caption: string | null;
+      facebookPostId: string | null;
+      publishedAt: Date | null;
+    };
+    const rows: PublicationRow[] = [
+      ...articleRows,
+      ...quizRows,
+      ...reelRows.map((row) => ({ ...row, pillar: row.pillar ?? row.articlePillar })),
+    ];
+    const rowsByPost = new Map<string, PublicationRow[]>();
+    for (const row of rows) {
       const postId = row.facebookPostId?.trim();
       if (!postId || postId.startsWith("buffer:") || postId.includes(":pending:") || postId.startsWith("facebook:")) continue;
       const group = rowsByPost.get(postId) ?? [];
@@ -239,13 +291,10 @@ async function getFacebookInsightsPerformance(since30d: Date): Promise<FacebookI
       rowsByPost.set(postId, group);
     }
     const postIds = [...rowsByPost.keys()];
-    const [insightRows, syncRows] = await Promise.all([
-      postIds.length > 0
-        ? db.select().from(facebookPostInsights)
-            .where(and(eq(facebookPostInsights.pageId, pageId), inArray(facebookPostInsights.facebookPostId, postIds)))
-        : Promise.resolve([]),
-      db.select().from(facebookInsightsSyncState).where(eq(facebookInsightsSyncState.id, 1)).limit(1),
-    ]);
+    const insightRows = postIds.length > 0
+      ? await db.select().from(facebookPostInsights)
+          .where(and(eq(facebookPostInsights.pageId, pageId), inArray(facebookPostInsights.facebookPostId, postIds)))
+      : [];
     const metricsByPost = new Map(insightRows.map((row) => [row.facebookPostId, row]));
     const posts: FacebookInsightsPostInput[] = [];
     for (const [facebookPostId, group] of rowsByPost) {
@@ -255,10 +304,16 @@ async function getFacebookInsightsPerformance(since30d: Date): Promise<FacebookI
       const pillar = primary.pillar && Object.hasOwn(PILLARS, primary.pillar)
         ? primary.pillar as Pillar
         : classifyPillar({ title: primary.title, category: primary.category });
+      const segment = primary.segment
+        ?? (primary.sourceName.toLocaleLowerCase("id-ID").includes("artis bio") ? "artis_bio"
+          : primary.sourceName.toLocaleLowerCase("id-ID").includes("review manual") ? ratingSegmentForMediaType(primary.category) : "roundup");
+      const contentFormat = primary.contentFormat ?? (primary.postFormat === "carousel" ? "carousel" : "single_image");
       posts.push({
         facebookPostId,
         title: primary.title,
         pillar,
+        segment,
+        contentFormat,
         slotLabel: nearestConfiguredWitaSlot(primary.publishedAt),
         publishedAt: primary.publishedAt?.toISOString() ?? null,
         mediaViews: metrics.mediaViews,
@@ -268,6 +323,7 @@ async function getFacebookInsightsPerformance(since30d: Date): Promise<FacebookI
         comments: metrics.comments,
         shares: metrics.shares,
         videoViews: metrics.videoViews,
+        availableMetrics: normalizeAvailableMetrics(metrics.availableMetrics),
         interactionsAvailable: metrics.interactionsAvailable,
         syncedAt: metrics.syncedAt.toISOString(),
       });

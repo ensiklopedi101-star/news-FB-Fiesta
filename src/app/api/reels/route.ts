@@ -12,6 +12,8 @@ import { ReelEncoderMissingError, renderReelLocally, renderReelRemotely, type Re
 import { publishFacebookReel } from "@/lib/reel-facebook";
 import { isInstagramPublishingEnabled, publishInstagramReel } from "@/lib/instagram";
 import { PILLARS, classifyPillar } from "@/lib/pillars";
+import { buildManualReviewSourceList, parseManualReview } from "@/lib/manual-review";
+import { buildArtistBioSourceList, parseArtistBio } from "@/lib/artist-bio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,8 +71,12 @@ async function handle(request: NextRequest, force: boolean) {
     category: articles.category,
     narration: articles.narrationScript,
     question: articles.caption,
+    sourceUrl: articles.sourceUrl,
+    rawText: articles.rawText,
     publishedAt: articles.publishedAt,
     sourceName: articles.sourceName,
+    pillar: articles.pillar,
+    segment: articles.segment,
   }).from(articles)
     .where(and(
       eq(articles.pageKey, "entertainment"),
@@ -81,8 +87,17 @@ async function handle(request: NextRequest, force: boolean) {
     .limit(20);
 
   const ranked = candidates
-    .map((row) => ({ row, pillar: classifyPillar({ title: row.title, category: row.category }) }))
-    .sort((a, b) => (PILLARS[b.pillar].reelsBoost - PILLARS[a.pillar].reelsBoost));
+    .map((row) => ({
+      row,
+      pillar: row.pillar && Object.hasOwn(PILLARS, row.pillar)
+        ? row.pillar as keyof typeof PILLARS
+        : classifyPillar({ title: row.title, category: row.category }),
+      segment: row.segment,
+    }))
+    .sort((a, b) => {
+      const sourceBoost = (segment: string | null) => segment === "rating_drama_top_5" || segment === "artis_bio" ? 4 : 0;
+      return (PILLARS[b.pillar].reelsBoost + sourceBoost(b.segment)) - (PILLARS[a.pillar].reelsBoost + sourceBoost(a.segment));
+    });
   if (!ranked.length) {
     return NextResponse.json({ result: "idle", detail: "Belum ada artikel terbit dengan naskah narasi." });
   }
@@ -114,6 +129,9 @@ async function handle(request: NextRequest, force: boolean) {
     articleId: candidate.id,
     narration: candidate.narration,
     voiceLabel,
+    segment: "reel",
+    contentFormat: "video",
+    pillar: chosen.pillar,
     frameCount: scenes.length,
     durationSeconds: Math.round(totalSeconds(scenes)),
   }).returning({ id: reels.id }))[0]?.id;
@@ -127,7 +145,14 @@ async function handle(request: NextRequest, force: boolean) {
   };
 
   try {
-    await db.update(reels).set({ status: "rendering", errorMessage: null, updatedAt: new Date() }).where(eq(reels.id, reelId));
+    await db.update(reels).set({
+      status: "rendering",
+      segment: "reel",
+      contentFormat: "video",
+      pillar: chosen.pillar,
+      errorMessage: null,
+      updatedAt: new Date(),
+    }).where(eq(reels.id, reelId));
 
     const frames = await Promise.all(scenes.map((scene, index) => renderReelFrame(scene, {
       brand: entertainmentBrand(),
@@ -180,10 +205,20 @@ async function handle(request: NextRequest, force: boolean) {
       }
     }
 
+    const manualReview = parseManualReview(candidate.rawText ?? "");
+    const artistBio = parseArtistBio(candidate.rawText ?? "");
+    const sourceAttribution = manualReview
+      ? buildManualReviewSourceList(manualReview)
+      : artistBio
+        ? buildArtistBioSourceList(artistBio)
+        : candidate.sourceUrl?.startsWith("https://")
+          ? `Sumber artikel: ${candidate.sourceUrl}`
+          : undefined;
     const caption = buildReelCaption({
       headline: candidate.title,
       question: firstQuestion(candidate.question) ?? "Menurut kamu, bagaimana?",
       sourceName: candidate.sourceName,
+      sourceAttribution,
     });
     const published = await publishFacebookReel({ pageKey: "entertainment", video, description: caption });
 

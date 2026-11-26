@@ -1,9 +1,9 @@
 import { witaDayNumber, witaMinutes, witaWeekday } from "./publish-slots";
 
 /**
- * "Tebak Drama" runs every two weeks: five posters taken from the manual reviews
- * already published for PopBeez, because those posters are the dramas/films the
- * audience already recognises. There is no answer key by design.
+ * "Tebak Drama" runs every two weeks: five posters taken from manual drama
+ * reviews already published for PopBeez, because those posters are the dramas the
+ * audience already recognises. Each edition keeps a private editorial answer key.
  */
 export const QUIZ_TILES = 5;
 export const QUIZ_LABEL = "TEBAK DRAMA";
@@ -33,7 +33,15 @@ export type QuizPoster = {
   reviewCreatedAt: Date;
   title: string;
   imageUrl: string;
+  /** Original editorial source for the answer; null on legacy reviews without attribution. */
+  sourceUrl: string | null;
 };
+
+export type QuizAnswer = { title: string; sourceUrl: string | null; reviewId: string };
+
+export function quizAnswerKey(posters: readonly QuizPoster[]): QuizAnswer[] {
+  return posters.map(({ title, sourceUrl, reviewId }) => ({ title, sourceUrl, reviewId }));
+}
 
 /** Stable key for a poster: used to mark which dramas already appeared in past quizzes. */
 export function posterKey(imageUrl: string): string {
@@ -48,7 +56,7 @@ export function posterTitleKey(title: string): string {
 export type QuizReview = {
   id: string;
   createdAt: Date;
-  items: Array<{ title: string; imageUrl: string }>;
+  items: Array<{ title: string; imageUrl: string; sourceUrl?: string | null }>;
 };
 
 /**
@@ -68,7 +76,13 @@ export function quizPostersFromReviews(reviews: readonly QuizReview[]): QuizPost
       if (!titleKey || seenTitles.has(titleKey) || seenImages.has(imageKey)) continue;
       seenTitles.add(titleKey);
       seenImages.add(imageKey);
-      posters.push({ reviewId: review.id, reviewCreatedAt: review.createdAt, title: item.title.trim(), imageUrl: item.imageUrl });
+      posters.push({
+        reviewId: review.id,
+        reviewCreatedAt: review.createdAt,
+        title: item.title.trim(),
+        imageUrl: item.imageUrl,
+        sourceUrl: item.sourceUrl ?? null,
+      });
     }
   }
   return posters;
@@ -79,6 +93,11 @@ export function quizPostersFromReviews(reviews: readonly QuizReview[]): QuizPost
  * the poster keys it used, so the history itself is the "sudah dipakai" marker.
  * A poster listed twice inside one edition still counts once.
  */
+/** A post ID without a posted timestamp means Facebook may have accepted the quiz but tracking needs review. */
+export function quizEditionNeedsOutcomeReview(edition: { postedAt: Date | null; facebookPostId: string | null }): boolean {
+  return !edition.postedAt && Boolean(edition.facebookPostId);
+}
+
 export function quizPosterUsage(
   editions: ReadonlyArray<{ posterKeys?: readonly string[] | null }>,
 ): Record<string, number> {
@@ -123,12 +142,12 @@ export function selectQuizPosters(
   return pool.slice(0, count).sort((a, b) => b.reviewCreatedAt.getTime() - a.reviewCreatedAt.getTime());
 }
 
-/** Caption stays link-free so Facebook keeps its organic reach; the quiz needs no answer key. */
+/** Caption stays link-free; answer keys and source URLs are kept in the private edition record. */
 export function buildQuizCaption(): string {
   return [
     `${QUIZ_LABEL} 🕵️`,
     "",
-    "Tebak judul drama/film. Berapa yang berhasil kamu tebak?",
+    "Tebak judul drama. Berapa yang berhasil kamu tebak?",
     "",
     "Ikuti PopBeez untuk Kuiz Berikutnya.",
     "Follow juga Instagram @popbeez.hive biar gak ketinggalan kuisnya. 🐝",
