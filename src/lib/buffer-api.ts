@@ -38,10 +38,15 @@ export class BufferEnqueueOutcomeUnknownError extends Error {
 
 type BufferPostResponse = {
   createPost?: {
+    __typename?: string;
     post?: { id?: string; status?: string; shareMode?: string; dueAt?: string | null };
     message?: string;
   };
 };
+
+export type BufferEnqueueResult = { postId: string; mediaFormat: "single" | "carousel" };
+
+class BufferAssetsRejectedError extends Error {}
 
 export function getBufferConfigurationGaps(pageKeys: PageKey[] = ["news", "entertainment"]): string[] {
   const missing: string[] = [];
@@ -142,34 +147,56 @@ export async function listBufferChannels(): Promise<BufferChannel[]> {
 export async function enqueueBufferFacebookPost(input: {
   pageKey: PageKey;
   imageUrl: string;
+  imageUrls?: string[];
   caption: string;
-}): Promise<string> {
+  /** Roundups must never silently degrade to one image while retaining a multi-story caption. */
+  strictCarousel?: boolean;
+}): Promise<BufferEnqueueResult> {
   const mutation = `mutation CreatePost($input: CreatePostInput!) {
     createPost(input: $input) {
-      ... on PostActionSuccess { post { id status shareMode dueAt } }
-      ... on InvalidInputError { message }
-      ... on UnauthorizedError { message }
-      ... on UnexpectedError { message }
-      ... on NotFoundError { message }
-      ... on LimitReachedError { message }
-      ... on RestProxyError { message code }
+      ... on PostActionSuccess { __typename post { id status shareMode dueAt } }
+      ... on InvalidInputError { __typename message }
+      ... on UnauthorizedError { __typename message }
+      ... on UnexpectedError { __typename message }
+      ... on NotFoundError { __typename message }
+      ... on LimitReachedError { __typename message }
+      ... on RestProxyError { __typename message code }
     }
   }`;
-  const data = await graphQL<BufferPostResponse>(mutation, {
-    input: {
-      channelId: getChannelId(input.pageKey),
-      mode: "addToQueue",
-      schedulingType: "automatic",
-      text: input.caption,
-      assets: [{ image: { url: input.imageUrl } }],
-      metadata: { facebook: { type: "post" } },
-    },
-  }, true);
-  const result = data.createPost;
-  if (result?.message) throw new Error(`Buffer API: ${safeMessage(result.message, getApiKey())}`);
-  const postId = result?.post?.id;
-  if (!postId) {
-    throw new BufferEnqueueOutcomeUnknownError("Buffer tidak mengembalikan ID post setelah enqueue; periksa antrean Buffer sebelum mencoba lagi.");
+  const requestedUrls = input.imageUrls?.length ? input.imageUrls : [input.imageUrl];
+  const submit = async (imageUrls: string[]): Promise<string> => {
+    const data = await graphQL<BufferPostResponse>(mutation, {
+      input: {
+        channelId: getChannelId(input.pageKey),
+        mode: "addToQueue",
+        schedulingType: "automatic",
+        text: input.caption,
+        assets: imageUrls.map((url) => ({ image: { url } })),
+        metadata: { facebook: { type: "post" } },
+      },
+    }, true);
+    const result = data.createPost;
+    if (result?.message) {
+      const message = safeMessage(result.message, getApiKey());
+      if (imageUrls.length > 1 && result.__typename === "InvalidInputError" && /asset|image|media|multiple|carousel/i.test(message)) {
+        throw new BufferAssetsRejectedError(message);
+      }
+      throw new Error(`Buffer API: ${message}`);
+    }
+    const postId = result?.post?.id;
+    if (!postId) {
+      throw new BufferEnqueueOutcomeUnknownError("Buffer tidak mengembalikan ID post setelah enqueue; periksa antrean Buffer sebelum mencoba lagi.");
+    }
+    return postId;
+  };
+
+  try {
+    const postId = await submit(requestedUrls);
+    return { postId, mediaFormat: requestedUrls.length > 1 ? "carousel" : "single" };
+  } catch (error) {
+    if (!(error instanceof BufferAssetsRejectedError) || input.strictCarousel) throw error;
+    console.warn(`[buffer] carousel ditolak untuk channel ${input.pageKey}; mencoba fallback satu gambar: ${safeMessage(error.message, getApiKey())}`);
+    const postId = await submit([input.imageUrl]);
+    return { postId, mediaFormat: "single" };
   }
-  return postId;
 }

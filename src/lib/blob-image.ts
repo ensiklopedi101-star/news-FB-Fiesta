@@ -19,9 +19,10 @@ export async function storeArticleImageInBlob(
     return null;
   }
 
-  const image = await fetchOgImage(imageUrl, sourceUrl, options.fetcher);
+  const image = await fetchOgImage(imageUrl, sourceUrl, options.fetcher, (reason) => {
+    console.warn(`[og-image] Image fetch rejected for article ${articleId}: ${reason}.`);
+  });
   if (!image) {
-    console.warn(`[og-image] Source image could not be fetched or was rejected for article ${articleId}.`);
     return null;
   }
 

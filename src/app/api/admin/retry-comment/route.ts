@@ -2,8 +2,10 @@ import { and, eq, like } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { addSourceComment } from "@/lib/facebook";
+import { addPageComment } from "@/lib/facebook";
 import { articles } from "@/lib/schema";
+import { shortenArticleUrl } from "@/lib/shortlink";
+import { indonesianTranslationUrl } from "@/lib/translation-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +34,9 @@ export async function POST(request: NextRequest) {
   if (!article?.postId) return NextResponse.json({ error: "Tidak ada komentar sumber yang gagal untuk artikel ini." }, { status: 404 });
 
   try {
-    await addSourceComment(article.pageKey, article.postId, article.sourceUrl);
+    const target = article.pageKey === "entertainment" ? indonesianTranslationUrl(article.sourceUrl) : article.sourceUrl;
+    const shareUrl = await shortenArticleUrl(target, article.id);
+    await addPageComment(article.pageKey, article.postId, `🔗 Sumber: ${shareUrl}`);
     await getDb().update(articles).set({ errorMessage: null, updatedAt: new Date() }).where(eq(articles.id, id));
     return NextResponse.json({ ok: true, id });
   } catch (error) {

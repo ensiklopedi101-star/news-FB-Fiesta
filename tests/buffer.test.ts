@@ -32,13 +32,14 @@ test("queues a Facebook Page image post in Buffer without sending a live request
       return new Response(JSON.stringify({ data: { createPost: { post: { id: "buffer-post-1" } } } }), { status: 200 });
     }) as typeof fetch;
 
-    const id = await enqueueBufferFacebookPost({
+    const result = await enqueueBufferFacebookPost({
       pageKey: "entertainment",
       imageUrl: "https://news.example.test/api/og/article-1",
       caption: "Caption berita\n\n🔗 Sumber: https://news.example.test/article-1",
     });
 
-    assert.equal(id, "buffer-post-1");
+    assert.equal(result.postId, "buffer-post-1");
+    assert.equal(result.mediaFormat, "single");
     assert.equal(authorization, "Bearer unit-test-buffer-key");
     assert.ok(requestBody);
     assert.deepEqual(requestBody.variables.input, {
@@ -49,6 +50,65 @@ test("queues a Facebook Page image post in Buffer without sending a live request
       assets: [{ image: { url: "https://news.example.test/api/og/article-1" } }],
       metadata: { facebook: { type: "post" } },
     });
+  });
+});
+
+test("sends a four-image carousel as a single Buffer Facebook post", async () => {
+  await withBufferEnvironment(async () => {
+    let requestInput: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { variables: { input: Record<string, unknown> } };
+      requestInput = body.variables.input;
+      return new Response(JSON.stringify({ data: { createPost: { post: { id: "buffer-carousel-1" } } } }), { status: 200 });
+    }) as typeof fetch;
+
+    const urls = [1, 2, 3, 4].map((slide) => `https://news.example.test/api/og/article-1?slide=${slide}`);
+    const result = await enqueueBufferFacebookPost({ pageKey: "news", imageUrl: urls[0]!, imageUrls: urls, caption: "Caption carousel" });
+
+    assert.equal(result.postId, "buffer-carousel-1");
+    assert.equal(result.mediaFormat, "carousel");
+    assert.ok(requestInput);
+    assert.deepEqual(requestInput.assets, urls.map((url) => ({ image: { url } })));
+    assert.equal(requestInput.text, "Caption carousel");
+  });
+});
+
+test("falls back to a single image only after Buffer definitively rejects multiple assets", async () => {
+  await withBufferEnvironment(async () => {
+    const assetCounts: number[] = [];
+    let call = 0;
+    globalThis.fetch = (async (_input, init) => {
+      call += 1;
+      const body = JSON.parse(String(init?.body)) as { variables: { input: { assets: unknown[] } } };
+      assetCounts.push(body.variables.input.assets.length);
+      const payload = call === 1
+        ? { data: { createPost: { __typename: "InvalidInputError", message: "Multiple images are not supported for this channel." } } }
+        : { data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-single-fallback" } } } };
+      return new Response(JSON.stringify(payload), { status: 200 });
+    }) as typeof fetch;
+
+    const urls = [1, 2, 3, 4].map((slide) => `https://news.example.test/api/og/article-1?slide=${slide}`);
+    const result = await enqueueBufferFacebookPost({ pageKey: "news", imageUrl: urls[0]!, imageUrls: urls, caption: "Caption" });
+
+    assert.deepEqual(assetCounts, [4, 1]);
+    assert.equal(result.postId, "buffer-single-fallback");
+    assert.equal(result.mediaFormat, "single");
+  });
+});
+
+test("strict roundup carousel never falls back to one image with a multi-story caption", async () => {
+  await withBufferEnvironment(async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ data: { createPost: { __typename: "InvalidInputError", message: "Multiple images are not supported for this channel." } } }), { status: 200 });
+    }) as typeof fetch;
+    const urls = [1, 2, 3, 4].map((slide) => `https://news.example.test/api/og/article-1?slide=${slide}`);
+    await assert.rejects(
+      enqueueBufferFacebookPost({ pageKey: "news", imageUrl: urls[0]!, imageUrls: urls, caption: "Roundup caption", strictCarousel: true }),
+      /Multiple images are not supported/,
+    );
+    assert.equal(calls, 1);
   });
 });
 

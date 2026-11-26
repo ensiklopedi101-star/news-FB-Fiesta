@@ -6,10 +6,27 @@ INSERT INTO public.rss_sources
   (name, category, page_key, feed_url, language, keywords, active)
 VALUES
   (
+    'Soompi All News', 'ENTERTAINMENT', 'entertainment',
+    'https://www.soompi.com/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
     'Soompi Drama', 'DRAMA', 'entertainment',
     'https://www.soompi.com/category/tvfilm/drama/feed', 'en',
     ARRAY['drama', 'k-drama', 'c-drama', 'actor', 'actress', 'cast', 'episode', 'teaser'],
     true
+  ),
+  (
+    'Soompi K-Pop', 'K-POP', 'entertainment',
+    'https://www.soompi.com/category/music/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'Yonhap Culture and K-Pop', 'K-POP', 'entertainment',
+    'https://en.yna.co.kr/RSS/culture.xml', 'en',
+    ARRAY['k-pop', 'kpop', 'idol', 'boy band', 'girl group', 'Korean pop', 'comeback', 'debut'], true
+  ),
+  (
+    'Seoulbeats', 'K-POP', 'entertainment',
+    'https://seoulbeats.com/feed/', 'en', ARRAY[]::text[], true
   ),
   (
     'Dramabeans', 'DRAMA', 'entertainment',
@@ -20,8 +37,20 @@ VALUES
     'https://dramapanda.com/feed/', 'en', ARRAY[]::text[], true
   ),
   (
+    'DramaPanda C-News', 'C-DRAMA', 'entertainment',
+    'https://dramapanda.com/category/c-news/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'Overseasidol C-Drama', 'C-DRAMA', 'entertainment',
+    'https://overseasidol.com/en/drama-movie/c-drama-en/feed/', 'en', ARRAY[]::text[], true
+  ),
+  (
     'Koala''s Playground', 'DRAMA', 'entertainment',
     'https://koalasplayground.com/feed/', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'MyDramaList News', 'DRAMA', 'entertainment',
+    'https://rss.app/feeds/ZOcW23h2FO2a0PI2.xml', 'en', ARRAY[]::text[], true
   ),
   (
     'HanCinema', 'DRAMA', 'entertainment',
@@ -36,6 +65,14 @@ VALUES
     'MyAnimeList News', 'DONGHUA', 'entertainment',
     'https://myanimelist.net/rss/news.xml', 'en',
     ARRAY['chinese', 'donghua', 'tencent', 'bilibili', 'youku', 'iqiyi'], true
+  ),
+  (
+    'Yu Alexius Chinese Anime', 'DONGHUA', 'entertainment',
+    'https://yualexius.com/category/chinese-anime/feed', 'en', ARRAY[]::text[], true
+  ),
+  (
+    'My Donghua Review', 'DONGHUA', 'entertainment',
+    'https://mydonghuareview.com/category/news/feed/', 'en', ARRAY[]::text[], true
   ),
   (
     'Anime News Network', 'MANGA', 'entertainment',

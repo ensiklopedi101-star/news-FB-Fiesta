@@ -7,3 +7,12 @@ out/
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Local scratch space (previews, one-off scripts)
+.arena/
+.scratch/
+
+# Preview renders and source posters used for design checks
+/image-search/
+/preview-quiz-*.jpg
+preview-reel-frame.png

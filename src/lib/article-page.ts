@@ -1,8 +1,8 @@
 import { lookup } from "node:dns/promises";
 import { load } from "cheerio";
-import { isSafePublicImageUrl } from "@/lib/safe-url";
+import { isKnownAggregatorBrandImage, isSafePublicImageUrl } from "@/lib/safe-url";
 
-const MAX_HTML_BYTES = 1_000_000;
+export const MAX_ARTICLE_PAGE_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 2;
 const ARTICLE_TIMEOUT_MS = 4_000;
 const ARTICLE_PAGE_BUDGET_MS = 6_000;
@@ -12,11 +12,14 @@ export const MAX_ARTICLE_SNIPPET_CHARS = 1_500;
 export type ArticlePageData = {
   text: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
 };
 
 function toSafeHttpsUrl(candidate: string, baseUrl?: string): string | null {
   try {
     const url = baseUrl ? new URL(candidate, baseUrl) : new URL(candidate);
+    // Some legacy RSS/page metadata still advertises http thumbnails; retry those over TLS.
+    if (url.protocol === "http:") url.protocol = "https:";
     return isSafePublicImageUrl(url.toString()) ? url.toString() : null;
   } catch {
     return null;
@@ -105,37 +108,111 @@ function extractSnippet($: ReturnType<typeof load>): string | null {
   return result || null;
 }
 
-function extractPageData(html: string, pageUrl: string): ArticlePageData {
-  const $ = load(html);
-  const rawImage = $("meta[property='og:image']").attr("content")
-    || $("meta[name='twitter:image']").attr("content")
-    || $("meta[property='og:image:secure_url']").attr("content");
-  const imageUrl = rawImage ? toSafeHttpsUrl(rawImage, pageUrl) : null;
-  const text = extractSnippet($);
-  return { text, imageUrl };
+const MAX_ARTICLE_IMAGES = 3;
+const DECORATIVE_IMAGE_WORDS = /(?:logo|avatar|author|profile|icon|sprite|advert|(?:^|[\\/_.-])ads?(?:[\\/_.-]|$)|banner|tracking|pixel|button|social|share|related)/i;
+
+function bestSrcsetUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  return raw.split(",").map((candidate) => {
+    const [url, descriptor = ""] = candidate.trim().split(/\s+/);
+    const amount = Number.parseFloat(descriptor);
+    const weight = descriptor.endsWith("w") ? amount : descriptor.endsWith("x") ? amount * 1_000 : 0;
+    return { url, weight };
+  }).filter((candidate) => candidate.url).sort((a, b) => b.weight - a.weight)[0]?.url;
 }
 
-async function readLimitedHtml(response: Response): Promise<string | null> {
-  const declaredLength = Number(response.headers.get("content-length") ?? 0);
-  if (declaredLength > MAX_HTML_BYTES || !response.body) {
-    await response.body?.cancel().catch(() => undefined);
-    return null;
+function jsonLdImageUrls(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(jsonLdImageUrls);
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const urls: string[] = [];
+  for (const key of ["image", "thumbnailUrl", "contentUrl"] as const) {
+    const candidate = record[key];
+    if (typeof candidate === "string") urls.push(candidate);
+    else if (Array.isArray(candidate)) urls.push(...candidate.flatMap(jsonLdImageUrls));
+    else if (candidate && typeof candidate === "object") {
+      const entry = candidate as Record<string, unknown>;
+      if (typeof entry.url === "string") urls.push(entry.url);
+      if (typeof entry.contentUrl === "string") urls.push(entry.contentUrl);
+    }
   }
+  // Article pages sometimes embed image objects below @graph or nested publisher metadata.
+  for (const [key, child] of Object.entries(record)) {
+    if (!["image", "thumbnailUrl", "contentUrl"].includes(key) && child && typeof child === "object") urls.push(...jsonLdImageUrls(child));
+  }
+  return urls;
+}
+
+function extractPageData(html: string, pageUrl: string): ArticlePageData {
+  const $ = load(html);
+  const imageUrls: string[] = [];
+  const addImage = (raw: string | undefined, label = "") => {
+    if (!raw || DECORATIVE_IMAGE_WORDS.test(label)) return;
+    const safe = toSafeHttpsUrl(raw, pageUrl);
+    if (safe && !isKnownAggregatorBrandImage(safe) && !DECORATIVE_IMAGE_WORDS.test(new URL(safe).pathname) && !imageUrls.includes(safe) && imageUrls.length < MAX_ARTICLE_IMAGES) imageUrls.push(safe);
+  };
+  // Prioritize publisher-declared hero images and structured metadata before in-article variants.
+  for (const selector of ["meta[property='og:image']", "meta[property='og:image:secure_url']", "meta[name='twitter:image']"]) {
+    addImage($(selector).first().attr("content"));
+  }
+  $("script[type='application/ld+json']").each((_, script) => {
+    try {
+      for (const imageUrl of jsonLdImageUrls(JSON.parse($(script).text()) as unknown)) addImage(imageUrl);
+    } catch {
+      // Ignore malformed third-party JSON-LD and continue with ordinary metadata.
+    }
+  });
+  const roots = $("article [itemprop='articleBody'], [itemprop='articleBody'], article, main, .article-content, .entry-content, .post-content");
+  roots.each((_, root) => {
+    if (imageUrls.length >= MAX_ARTICLE_IMAGES) return;
+    $(root).find("picture source, img").each((__, element) => {
+      const image = $(element);
+      const context = `${image.attr("alt") ?? ""} ${image.attr("class") ?? ""} ${image.parent().attr("class") ?? ""} ${image.parent().attr("id") ?? ""}`;
+      if (DECORATIVE_IMAGE_WORDS.test(context)) return;
+      if (image.is("img") && image.parent("picture").length) {
+        const hasUsableSource = image.parent("picture").find("source").toArray().some((source) => {
+          const sourceElement = $(source);
+          const sourceUrl = bestSrcsetUrl(sourceElement.attr("data-srcset") || sourceElement.attr("srcset"));
+          const safeSourceUrl = toSafeHttpsUrl(sourceUrl ?? "", pageUrl);
+          return Boolean(safeSourceUrl && !DECORATIVE_IMAGE_WORDS.test(new URL(safeSourceUrl).pathname));
+        });
+        if (hasUsableSource) return;
+      }
+      const width = Number(image.attr("width") ?? image.attr("data-width") ?? 0);
+      const height = Number(image.attr("height") ?? image.attr("data-height") ?? 0);
+      if ((width > 0 && width < 180) || (height > 0 && height < 120)) return;
+      const raw = bestSrcsetUrl(image.attr("data-srcset") || image.attr("data-lazy-srcset") || image.attr("srcset"))
+        || image.attr("data-src") || image.attr("data-lazy-src") || image.attr("data-original") || image.attr("src");
+      addImage(raw, context);
+      if (imageUrls.length >= MAX_ARTICLE_IMAGES) return false;
+    });
+  });
+  const imageUrl = imageUrls[0] ?? null;
+  const text = extractSnippet($);
+  return { text, imageUrl, imageUrls };
+}
+
+export async function readLimitedHtml(response: Response): Promise<string | null> {
+  if (!response.body) return null;
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
-    while (true) {
+    while (total < MAX_ARTICLE_PAGE_HTML_BYTES) {
       const { done, value } = await reader.read();
       if (done) break;
-      total += value.byteLength;
-      if (total > MAX_HTML_BYTES) {
-        await reader.cancel();
-        return null;
+      const available = MAX_ARTICLE_PAGE_HTML_BYTES - total;
+      if (value.byteLength > available) {
+        chunks.push(value.subarray(0, available));
+        total += available;
+        await reader.cancel().catch(() => undefined);
+        break;
       }
       chunks.push(value);
+      total += value.byteLength;
     }
+    if (total >= MAX_ARTICLE_PAGE_HTML_BYTES) await reader.cancel().catch(() => undefined);
   } finally {
     reader.releaseLock();
   }
@@ -199,8 +276,14 @@ export async function fetchArticlePage(rawUrl: string): Promise<ArticlePageData 
     const html = await readLimitedHtml(response);
     if (!html) return null;
     const page = extractPageData(html, currentUrl);
-    const imageBudget = deadline - Date.now();
-    if (page.imageUrl && (imageBudget <= 0 || !(await hasOnlyPublicAddresses(page.imageUrl, Math.min(DNS_TIMEOUT_MS, imageBudget))))) page.imageUrl = null;
+    const publicImages: string[] = [];
+    for (const imageUrl of page.imageUrls) {
+      const imageBudget = deadline - Date.now();
+      if (imageBudget <= 0) break;
+      if (await hasOnlyPublicAddresses(imageUrl, Math.min(DNS_TIMEOUT_MS, imageBudget))) publicImages.push(imageUrl);
+    }
+    page.imageUrls = publicImages;
+    page.imageUrl = publicImages[0] ?? null;
     return page;
   }
   return null;
