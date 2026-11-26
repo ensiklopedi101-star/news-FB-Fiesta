@@ -106,6 +106,7 @@ export const quizEditions = pgTable(
     status: text("status").notNull().default("draft"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     posterSources: jsonb("poster_sources").$type<Array<{ title: string; imageUrl: string; reviewId: string }>>().notNull().default(sql`'[]'::jsonb`),
+    difficulties: jsonb("difficulties").$type<import("./quiz-customization").QuizDifficulty[]>().notNull().default(sql`'[]'::jsonb`),
     posterKeys: jsonb("poster_keys").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     reviewIds: jsonb("review_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     imageUrl: text("image_url"),
@@ -240,3 +241,22 @@ export type ContentManagerConfigRow = typeof contentManagerConfig.$inferSelect;
 export type ContentManagerDecisionRow = typeof contentManagerDecisions.$inferSelect;
 export type FacebookPostInsightRow = typeof facebookPostInsights.$inferSelect;
 export type FacebookInsightsSyncStateRow = typeof facebookInsightsSyncState.$inferSelect;
+
+/** Human-reviewed artist programmes, kept outside the automated RSS queue. */
+export const artistContents = pgTable("artist_contents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  segment: text("segment").notNull(),
+  format: text("format").notNull().default("carousel_4"),
+  content: jsonb("content").$type<import("./artist-content").ArtistInput>().notNull(),
+  status: text("status").notNull().default("draft"),
+  revision: integer("revision").notNull().default(1),
+  previewRevision: integer("preview_revision"),
+  previewUrls: jsonb("preview_urls").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  facebookPostId: text("facebook_post_id"),
+  instagramMediaId: text("instagram_media_id"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("artist_contents_created_idx").on(table.createdAt)]);

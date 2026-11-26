@@ -350,3 +350,112 @@ jadwal **pembuatan preview**, bukan janji waktu tayang.
 Pengujian lokal: `npm run typecheck`, `npm run lint`, `npm test`.
 Pengujian Facebook/Blob nyata memerlukan konfigurasi deployment dan persetujuan
 admin; tes lokal tidak menerbitkan konten ke akun mana pun.
+
+## Konten Artis: Bio Artis dan Sorotan Artis/Idol
+
+Tab **Konten Artis** menyediakan satu modul dengan dua segmen:
+- **Bio Artis** (`artist_bio`): perkenalan, awal karier, karya penting, dan konteks editorial.
+- **Sorotan Artis/Idol** (`artist_spotlight`): satu tema dengan empat foto dan konteks masing-masing.
+
+### Setup dan penggunaan
+
+1. Jalankan `drizzle/0020_artist_content.sql` di Neon sebelum deploy. SQL ini juga
+   disertakan dalam `drizzle/schema.sql` untuk instalasi baru. Tidak ada migrasi
+   database otomatis saat membuka dashboard.
+2. Pastikan `BLOB_READ_WRITE_TOKEN` dan konfigurasi Facebook langsung Hiburan
+   (`FB_ENTERTAINMENT_PAGE_ID`, `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN`) tersedia.
+   Modul ini **tidak memakai Buffer**. Instagram opsional memakai konfigurasi lama.
+3. Buka tab Konten Artis, pilih segmen, isi nama, tema, sudut editorial, pertanyaan,
+   dan **tepat empat slide**. Setiap slide wajib memiliki judul, fakta/konteks,
+   sumber fakta HTTPS, URL langsung foto, halaman sumber foto, dan kredit.
+   Konfirmasikan hak penggunaan foto. Kredit bukan pengganti izin.
+4. **Simpan draf**. Caption kosong disusun deterministik dari bahan editor, termasuk
+   sumber dan kredit. Caption bisa ditulis manual. Bantuan AI bersifat opsional,
+   memakai failover provider yang sudah ada, dan hanya menerima fakta serta sudut
+   editorial yang diisi—tidak melakukan riset/scraping fakta. Periksa klaim hasil AI,
+   simpan hasilnya, dan sesuaikan caption bila fakta berubah.
+5. **Buat preview revisi tersimpan**. Foto diunduh lewat pengambil gambar aman yang
+   sudah ada, lalu dirender menjadi empat JPEG 1080×1080 dengan identitas PopBeez
+   dan kredit foto. Bila satu foto gagal, tidak ada preview lengkap yang bisa
+   diterbitkan. Preview diunggah ke Blob publik; jangan memakai materi rahasia.
+6. Periksa empat slide serta caption tersimpan, kemudian **Setujui & terbitkan**.
+   Yang dipublikasikan adalah empat file preview yang sama dalam urutan tersimpan,
+   bukan render ulang. Publikasi manual dilakukan saat disetujui, bukan slot cron.
+
+### Pengamanan alur
+
+- Konten disimpan pada tabel `artist_contents`, terpisah dari antrean RSS supaya
+  draft tidak dipanen, dikurasi, atau diterbitkan otomatis.
+- Mengedit draf/preview dan menyimpannya menaikkan `revision`, menghapus preview,
+  serta membatalkan kesiapan publikasi. Perubahan yang belum disimpan mematikan
+  tombol preview/publikasi di UI.
+- Satu preview dibuat per revisi. Untuk membuat ulang, simpan revisi baru terlebih
+  dahulu; ini juga mencegah persetujuan berlomba dengan regenerasi preview.
+- Klaim `draft → rendering` dan `preview → publishing` menggunakan pembaruan
+  bersyarat status/revisi. Edisi published/failed tidak bisa disetujui ulang.
+- Kegagalan mirror Instagram tidak membatalkan status published di Facebook.
+  Caption panjang dapat ditolak Instagram meskipun Facebook berhasil; detail
+  dicatat di edisi. Tidak ada retry publikasi otomatis.
+- Jika rendering/publishing tertahan (misalnya function timeout) atau Facebook
+  mengembalikan hasil tidak pasti, periksa log, database, dan halaman Facebook
+  sebelum pemulihan manual. UI sengaja tidak membuka kunci otomatis.
+- File preview `artist/` belum masuk penghapusan Blob otomatis. Pantau kuota dan
+  bersihkan render yang tidak dipakai secara manual; jangan hapus preview aktif.
+
+`artist_contents` mencatat `segment`, `format=carousel_4`, revisi, waktu persetujuan,
+waktu tayang, ID Facebook/Instagram, serta error. **Perbandingan Insights lintas
+segmen belum ditambahkan** pada panel analitik lama; modul ini menyediakan rekaman
+publikasinya terlebih dahulu. Daftar dashboard menampilkan 50 edisi terbaru.
+
+API admin: `GET /api/admin/artist-content` untuk daftar; `POST` dengan `action`
+`save`, `ai`, `preview`, atau `approve`. Semuanya memerlukan bearer `CRON_SECRET`.
+`save`/`ai` menerima `content`; pembaruan/publikasi menerima `id` dan `revision`.
+Tidak ada post baru yang dibuat hanya dengan menyimpan draf atau meminta AI.
+
+## Tebak Drama: tingkat kesulitan dan penggantian per nomor
+
+Jalankan **`drizzle/0021_quiz_difficulty.sql`** setelah migrasi `0019` sebelum
+mendeploy pembaruan ini. Kuis baru memakai **Sedang · mosaik warna** pada kelima
+nomor secara default, bukan foto tajam atau siluet.
+
+Pada preview berstatus `draft`, editor menyediakan pengaturan per nomor:
+- **Mudah**: crop berwarna dengan blur ringan.
+- **Sedang**: crop berwarna dengan mosaik 36×24, diperbesar nearest-neighbour.
+- **Sulit**: crop hitam-putih dengan mosaik 18×12.
+
+Efek hanya mengenai foto; nomor soal, logo, dan panel brand tetap tajam. Tidak
+ada penghapusan fitur wajah, deteksi wajah, skor, atau kunci jawaban. Tingkat
+kesulitan bersifat editorial: periksa hasil pada ukuran layar ponsel karena
+poster/pemain yang terkenal mungkin tetap mudah dikenali. Cropping dan efek
+ini bukan jaminan penghapusan seluruh teks judul.
+
+**Mengganti satu poster:** gunakan pilihan poster pada nomor yang bersangkutan.
+Empat nomor lain, urutan, dan tingkat kesulitannya tidak diacak. Pilihan berasal
+dari review manual, mengikuti batas pemakaian poster yang sudah ada, bukan URL
+bebas dari browser. Jika hanya ada lima poster, tambahkan review untuk memperluas
+pilihan. Server memeriksa lima poster/judul yang berbeda dan memuat ulang sumber
+metadata dari pool tepercaya. Penggantian tidak mengubah caption umum kuis.
+
+Klik **Buat preview perubahan**, periksa gambar baru, baru kemudian **Setujui &
+terbitkan preview**. Selama pengaturan lokal belum dirender, persetujuan di UI
+nonaktif. Preview baru selalu memakai URL Blob unik; persetujuan serta penolakan
+harus menyertakan URL preview yang diperiksa. Pembaruan status bersyarat
+mencegah klik ganda dan menolak tab lama setelah preview diganti. Perubahan
+menghapus persetujuan sebelumnya dan tidak mempublikasikan apa pun.
+
+Jika render/unduhan gagal, pilihan tersimpan dan preview lama dipertahankan;
+pengaturan gagal tidak disimpan setengah jalan. Jika function terhenti dan edisi
+tertahan pada `editing`, periksa log serta status database sebelum pemulihan
+manual. Tidak ada pembukaan kunci atau publikasi ulang otomatis.
+
+Edisi lama tidak diubah gambarnya otomatis. Bila menyunting edisi lama yang belum
+memiliki metadata efek, editor memulai dari Sedang untuk kelima nomor; buat preview
+baru untuk menerapkan efek tersebut. File preview lama tetap mengikuti retensi
+Blob kuis yang sudah ada.
+
+Endpoint admin terproteksi: `GET /api/admin/quiz-edit?id=<editionId>` mengambil
+pilihan dan pengaturan, `POST /api/admin/quiz-edit` menerima
+`{ editionId, previewUrl, tiles: [{ imageUrl, difficulty }, ...] }` dengan tepat
+lima tile. `POST /api/quiz` untuk `approve`/`reject` kini juga wajib menerima
+`previewUrl`; pemanggil lama perlu diperbarui. Jadwal cron tidak berubah dan
+tetap hanya menyiapkan draf.
