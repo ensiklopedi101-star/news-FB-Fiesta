@@ -8,6 +8,7 @@ import {
   QUIZ_CELL_WIDTH,
   QUIZ_POSTER_CELLS,
   renderQuizCard,
+  renderPosterClue,
 } from "../src/lib/quiz-card";
 
 async function tile(background: { r: number; g: number; b: number }) {
@@ -102,4 +103,46 @@ test("quiz card crops poster title and footer bands while retaining central artw
   const footerBand = await pixel(output, 15, QUIZ_CELL_HEIGHT - 15);
   assert.ok(topBand[2]! > topBand[0]!, `pita judul poster di bagian atas harus terpotong (${[...topBand]})`);
   assert.ok(footerBand[2]! > footerBand[1]!, `pita footer poster di bagian bawah harus terpotong (${[...footerBand]})`);
+});
+
+
+test("clue crop removes outer poster bands while preserving central colour", async () => {
+  const source = await sharp({ create: { width: 200, height: 400, channels: 3, background: "red" } })
+    .composite([{ input: await sharp({ create: { width: 200, height: 260, channels: 3, background: "#0088ff" } }).png().toBuffer(), top: 40, left: 0 }])
+    .png().toBuffer();
+  const output = await renderPosterClue(source);
+  const centre = await pixel(output, 270, 180);
+  assert.ok(centre[2]! > 200 && centre[0]! < 50);
+  const corner = await pixel(output, 5, 5);
+  assert.ok(corner[2]! > 200 && corner[0]! < 50);
+});
+
+test("invalid poster data fails closed rather than rendering a blank placeholder", async () => {
+  await assert.rejects(() => renderPosterClue(Buffer.from("invalid")));
+});
+
+test("easy/medium retain colour; hard removes colour; all retain the tile dimensions", async () => {
+  const photo = await tile({ r: 230, g: 55, b: 25 });
+  for (const level of ["easy", "medium", "hard"] as const) {
+    const output = await renderPosterClue(photo, level);
+    const metadata = await sharp(output).metadata();
+    assert.equal(metadata.width, QUIZ_CELL_WIDTH);
+    assert.equal(metadata.height, QUIZ_CELL_HEIGHT);
+    const sample = await sharp(output).ensureAlpha().raw().toBuffer();
+    if (level === "hard") assert.ok(Math.abs(sample[0]! - sample[1]!) <= 2 && Math.abs(sample[1]! - sample[2]!) <= 2);
+    else assert.ok(sample[0]! - sample[1]! > 100);
+  }
+});
+
+test("each cell applies its own effect without obscuring the number or brand cell", async () => {
+  const photo = await tile({ r: 230, g: 55, b: 25 });
+  const grid = await renderQuizCard({ tiles: Array(5).fill(photo), difficulties: ["hard", "easy", "medium", "easy", "hard"] });
+  const mono = await pixel(grid, 200, 100);
+  const colour = await pixel(grid, QUIZ_CELL_WIDTH + 200, 100);
+  assert.ok(Math.abs(mono[0]! - mono[1]!) < 4);
+  assert.ok(colour[0]! - colour[1]! > 100);
+  const badge = await pixel(grid, 502, 322);
+  assert.ok((badge[0]! + badge[1]! + badge[2]!) / 3 < 120);
+  const brand = await pixel(grid, QUIZ_CELL_WIDTH + 40, QUIZ_CELL_HEIGHT * 2 + 40);
+  assert.ok((brand[0]! + brand[1]! + brand[2]!) / 3 < 70);
 });

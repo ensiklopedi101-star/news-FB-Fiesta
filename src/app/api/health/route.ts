@@ -1,23 +1,33 @@
-import { count, eq, sql } from "drizzle-orm";
-import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { createHealthHandler } from "@/lib/health-api";
+import { readHealthSnapshot } from "@/lib/read-only-data";
 import { publisherState, rssSources } from "@/lib/schema";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
 import { ensureContentManagerTables } from "@/lib/content-manager";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function GET() {
-  let db: ReturnType<typeof getDb>;
-  try {
-    db = getDb();
-    await db.execute(sql`select 1`);
-  } catch (error) {
-    console.error("[health:database]", error instanceof Error ? error.message : error);
-    return NextResponse.json({ ok: false, database: "unavailable" }, { status: 503 });
-  }
+const handle = createHealthHandler({
+  loadSnapshot: async (signal) => readHealthSnapshot(getDb({ signal })),
+  getIntegrations: () => ({
+    gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_FALLBACK),
+    groq: Boolean(process.env.GROQ_API_KEY),
+    bufferApi: Boolean(process.env.BUFFER_API_KEY?.trim()),
+    bufferNews: Boolean(process.env.BUFFER_NEWS_CHANNEL_ID?.trim()),
+    bufferEntertainment: Boolean(process.env.BUFFER_ENTERTAINMENT_CHANNEL_ID?.trim()),
+    hivecompApi: Boolean(process.env.HIVECOMP_API_TOKEN?.trim()),
+  }),
+});
 
+export const GET = handle;
+export const HEAD = handle;
+export const POST = handle;
+export const PUT = handle;
+export const PATCH = handle;
+export const DELETE = handle;
+export const OPTIONS = handle;
   let schemaReady = true;
   let contentManagerSchemaReady = false;
   let activeFeeds = 0;

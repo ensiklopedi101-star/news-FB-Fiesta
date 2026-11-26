@@ -1,5 +1,7 @@
 "use client";
 
+import { QuizEditor } from "@/components/quiz-editor";
+import { ArtistContentPanel } from "@/components/artist-content";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
 import { PILLARS, classifyPillar } from "@/lib/pillars";
@@ -1648,6 +1650,8 @@ export default function Dashboard() {
         <p className="muted small-note">Tombol pratinjau tidak menerbitkan apa pun. Jadwal otomatis yang sudah ada tidak diubah; terbit manual hanya terjadi setelah tombol konfirmasi pada pratinjau.</p>
       </section>
       )}
+
+      {activeTab === "artist" && <ArtistContentPanel secret={secret} />}
 
       {activeTab === "manual" && (
       <section className="panel manual-review-panel">

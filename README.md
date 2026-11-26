@@ -51,22 +51,8 @@ Lalu di Vercel set `REELS_RENDER_URL=https://vps-kamu:8080`, `REELS_WORKER_TOKEN
 4. Jika tabel `articles` sudah ada dari skema versi sebelumnya, jalankan sekali file [`drizzle/0001_multi_page.sql`](./drizzle/0001_multi_page.sql) di Neon SQL Editor. Kolom baru `page_key` untuk artikel lama otomatis bernilai `news`.
 5. Jalankan file [`drizzle/0002_rss_sources.sql`](./drizzle/0002_rss_sources.sql) untuk membuat tabel feed RSS yang dikelola dari Dashboard. Jika database belum memiliki tabel `articles`, gunakan `drizzle/schema.sql` yang sudah mencakup kedua tabel.
 6. Jalankan [`drizzle/0003_scheduled_harvest.sql`](./drizzle/0003_scheduled_harvest.sql) untuk menambahkan filter kata kunci dan pengunci publisher.
-7. Jalankan [`drizzle/0004_fresh_queue.sql`](./drizzle/0004_fresh_queue.sql) untuk mencatat waktu terbit sumber, menandai berita kedaluwarsa, dan mengaktifkan status pengeluaran manual dari antrean.
-8. Jalankan [`drizzle/0005_carousel_experiment.sql`](./drizzle/0005_carousel_experiment.sql) untuk menyimpan varian format dan teks slide carousel.
-9. Jalankan [`drizzle/0006_article_image_gallery.sql`](./drizzle/0006_article_image_gallery.sql) untuk menyimpan hingga tiga foto artikel per berita; gambar utama yang sudah ada akan disalin sebagai fallback.
-10. Jalankan [`drizzle/0007_queue_priority.sql`](./drizzle/0007_queue_priority.sql) untuk menambahkan pengaturan prioritas antrean.
-11. Jalankan [`drizzle/0008_manual_images.sql`](./drizzle/0008_manual_images.sql) untuk mengaktifkan penggantian gambar manual pada artikel antrean.
-12. Jalankan [`drizzle/0009_short_links.sql`](./drizzle/0009_short_links.sql) untuk mengaktifkan short link domain sendiri (`/s/<slug>`) dan penghitungan klik.
-13. Jalankan [`drizzle/0010_quiz_editions.sql`](./drizzle/0010_quiz_editions.sql) untuk menyimpan edisi kuis Tebak Drama; kolom `poster_keys` dipakai menandai poster yang sudah dipakai beserta jumlah pemakaiannya (maksimal 3× per poster).
-14. Jalankan [`drizzle/0011_originality.sql`](./drizzle/0011_originality.sql) untuk menyimpan blok opini (`editorial_take`), skor orisinalitas, dan alasan penilaian tiap artikel. Tanpa file ini pipeline tetap jalan, tetapi skor tidak tersimpan dan panel **Penjaga orisinalitas** akan kosong.
-15. Jalankan [`drizzle/0012_reels_voices.sql`](./drizzle/0012_reels_voices.sql) untuk menyimpan sudut pandang redaksi (`editorial_voice`), naskah narasi (`narration_script`), dan tabel `reels` (status render, durasi, URL video, ID video Facebook). Tanpa file ini artikel tetap terbit; Reels dan panel Reels akan menampilkan peringatan.
-16. Jalankan [`drizzle/0013_instagram.sql`](./drizzle/0013_instagram.sql) untuk menyimpan ID media Instagram (`instagram_media_id`) setiap post yang berhasil dicerminkan ke @popbeez.hive. Tanpa kolom ini posting Instagram tetap jalan, tetapi tautan post IG tidak tercatat.
-17. Jalankan [`drizzle/0014_instagram_mirror.sql`](./drizzle/0014_instagram_mirror.sql) untuk menandai post lama yang boleh dicerminkan ulang ke Instagram tanpa memposting ulang ke Facebook.
-18. **Wajib sebelum deploy ritme baru**: jalankan [`drizzle/0015_content_pillars.sql`](./drizzle/0015_content_pillars.sql) untuk menambah kolom `articles.pillar`. Publisher menyimpan pilar pada baris yang sama dengan status `ready`; tanpa kolom ini update tersebut gagal dan artikel tidak akan pernah tayang. Kalau ragu, jalankan dulu file SQL-nya, baru merge/deploy.
-19. Opsional / otomatis sejak v2.0: [`drizzle/0016_automation_logs.sql`](./drizzle/0016_automation_logs.sql) menyimpan detak eksekusi `/api/cron`, `/api/harvest`, auto-harvest, serta riwayat error sistem (tabel ini juga dibuat otomatis saat runtime bila belum ada).
-20. Jalankan [`drizzle/0017_content_manager.sql`](./drizzle/0017_content_manager.sql) untuk menambahkan konfigurasi editorial dan shared memory keputusan Content Manager. Kedua tabel juga dicoba dibuat otomatis saat runtime; bila kredensial Neon hanya mengizinkan baca, sistem memakai konfigurasi default + kurator deterministik dan tetap menerbitkan.
-21. Jalankan [`drizzle/0018_facebook_insights.sql`](./drizzle/0018_facebook_insights.sql) untuk snapshot metrik Facebook di Neon; tabel juga dibuat otomatis saat runtime jika hak DDL mengizinkan.
-22. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
+7. Untuk database yang sudah ada, jalankan [`drizzle/0004_hivecomp_posts_index.sql`](./drizzle/0004_hivecomp_posts_index.sql) sekali saat deploy untuk indeks feed publik terbaru. Instalasi baru dengan `drizzle/schema.sql` sudah mencakupnya. Endpoint API tidak menjalankan migrasi.
+8. Pastikan `DATABASE_URL` yang sama tersedia di Vercel Production; Preview juga perlu jika kamu akan mengetes preview deployments.
 
 Jangan kirim connection string ke chat atau commit ke Git.
 
@@ -76,6 +62,7 @@ Salin `.env.example` ke `.env.local` untuk pengujian lokal. Tambahkan variabel y
 
 - `DATABASE_URL`: connection string pooled Neon.
 - `CRON_SECRET`: nilai acak panjang, minimal 32 karakter. Lindungi seperti password.
+- `HIVECOMP_API_TOKEN`: secret terpisah untuk API read-only landing HiveComp, minimal 32 karakter acak. Hanya dipasang di server backend dan server landing; tidak memakai prefix `NEXT_PUBLIC_`. Lihat [panduan HiveComp](./docs/hivecomp-api.md).
 - `GROQ_API_KEY`: opsional, penyedia AI pertama yang dicoba.
 - `GROQ_MODEL`: opsional, preferensi model Groq. Aplikasi memeriksa katalog model akun secara otomatis, mengutamakan model ekonomis seperti `llama-3.1-8b-instant`, dan beralih jika model tidak tersedia.
 - `GEMINI_API_KEY`: key Gemini utama, dicoba jika Groq gagal.
@@ -230,6 +217,12 @@ Dashboard di `/` meminta `CRON_SECRET` sebelum menampilkan data. Di dalamnya kam
 - `POST /api/admin/feeds/import-presets` — masukkan preset hiburan (wajib bearer secret).
 - `GET /api/admin/buffer/channels` — baca nama dan ID channel Buffer (wajib bearer secret; tidak membuat post).
 - `POST /api/admin/diagnostics/ai` — uji satu kali pembuatan teks melalui failover AI dengan prompt sintetis; memakai kuota provider, tidak menyimpan hasil, dan tidak mengirim ke Buffer (wajib bearer secret).
+- `POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
+- `GET /api/health` — pemeriksaan read-only koneksi/skema database dan status konfigurasi integrasi (boolean saja, bukan kredensial). Tidak memperbaiki atau menulis data; skema belum siap menghasilkan 503 JSON.
+- `GET /api/pages/{brand}/posts` — feed read-only HiveComp untuk `popbeez` (`entertainment`) atau `nusabeez` (`news`), wajib Bearer `HIVECOMP_API_TOKEN`. Maksimal 3 artikel dengan referensi Facebook dan waktu publikasi yang tersimpan, terbaru dahulu; antrean Buffer tidak dianggap terbit. `items` selalu array, cache sukses 5 menit. [Kontrak, env, curl, contoh error, keterbatasan data, dan panduan deploy](./docs/hivecomp-api.md).
+- `GET /api/cron` — proses satu artikel dan kirim ke antrean Buffer; mematuhi batas 2 pengiriman/jam dan jeda 15 menit. Wajib header `Authorization: Bearer <CRON_SECRET>`. Buffer mengatur waktu publikasi akhir.
+- `POST /api/admin/retry` — memasukkan kembali artikel berstatus `failed` ke antrean. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
+- `POST /api/admin/retry-comment` — mengulang komentar sumber untuk postingan yang sudah terbit. Wajib header bearer yang sama dan JSON `{"id":"<uuid artikel>"}`.
 - `GET/POST /api/admin/diagnostics/system` — baca laporan kesehatan otomasi, detak cron/harvest, daftar feed/artikel gagal, serta jalankan opsional `{ "runHarvest": true, "probeAi": true }` dari satu endpoint (wajib bearer secret).
 - `GET/POST /api/harvest` — ambil RSS dan isi antrean tanpa publikasi (wajib bearer secret).
 - `GET /api/health` — tes koneksi database dan melihat status integrasi (hanya status ada/tidak, bukan rahasia).
@@ -308,3 +301,154 @@ npm run build
 Artikel yang gagal tersimpan dengan status `failed`; setelah memperbaiki konfigurasi, masukkan ulang dengan endpoint retry. Setelah Buffer menerima post, artikel ditandai `ready` dengan referensi antrean Buffer supaya tidak dikirim ulang oleh siklus cron berikutnya. Dashboard membedakannya sebagai **Antrean Buffer**; status publikasi aktual dapat dilihat di Buffer.
 
 Ringkasan AI tidak menjamin kebenaran atau verifikasi fakta. Periksa kualitas feed dan hasil secara berkala. Gunakan hanya teks dan gambar yang penggunaannya diizinkan; **menaruh tautan sumber di komentar tidak otomatis menghapus kewajiban hak cipta atau kebijakan Meta**. Pertimbangkan review manual sebelum publikasi otomatis.
+
+## Pembaruan Tebak Drama: preview wajib sebelum publikasi
+
+Mekanisme siluet lama diganti **potongan poster berwarna**: warna, pakaian,
+pemain, dan suasana tetap menjadi petunjuk. Grid 2×3 (lima poster + brand) tetap
+dipakai; tidak ada skor, kunci jawaban, pilihan wajib, atau penilaian audiens.
+Cropping deterministik tidak memanggil AI dan **tidak menjamin seluruh tulisan
+judul hilang**. Admin wajib memeriksa petunjuk dan hak penggunaan materi sumber.
+
+**Sebelum deploy kode ini**, jalankan `drizzle/0019_quiz_preview.sql` pada database
+Neon yang sama dengan `DATABASE_URL` (setelah migrasi `0010`). Migrasi aman diulang;
+edisi lama tanpa publikasi diberi status `legacy`, bukan otomatis menjadi draf
+yang dapat disetujui. Skema instalasi baru juga ada di `drizzle/schema.sql`.
+
+Alur dashboard tab **Kuis**:
+1. **Buat preview kuis** (atau cron GET terjadwal) hanya merender dan menyimpan draf.
+2. Periksa gambar, caption, dan tautan sumber kelima poster.
+3. **Setujui & terbitkan preview** menerbitkan edisi yang diperiksa ke Facebook;
+   mirror Instagram tetap mengikuti konfigurasi lama.
+4. **Tolak preview** bila petunjuk membingungkan/terlalu mudah atau hak penggunaan
+   tidak jelas, kemudian buat edisi baru. Draf yang ditolak tidak menghabiskan
+   kuota pemakaian poster.
+
+API terproteksi `Authorization: Bearer <CRON_SECRET>`:
+- `GET /api/quiz` mengikuti jadwal lama, **tidak pernah mempublikasikan**.
+- `POST /api/quiz` dengan `{ "action": "create" }` membuat preview di luar jadwal.
+- `POST /api/quiz` dengan `{ "action": "approve", "editionId": "<id-draf>" }`
+  menyetujui sekaligus menerbitkan **draf tersimpan**, bukan regenerasi gambar.
+- `POST /api/quiz` dengan `{ "action": "reject", "editionId": "<id-draf>" }`
+  menolak draf.
+
+Klaim status `draft → publishing` dilakukan atomik untuk mencegah persetujuan
+ganda. Edisi `failed`, `legacy`, atau `publishing` tidak bisa disetujui ulang.
+Jika Facebook timeout atau status tertahan pada `publishing`, periksa halaman
+Facebook dan log sebelum tindakan manual; tidak ada retry otomatis yang berisiko
+duplikasi. Tidak ada fitur edit draf pada alur ini—perubahan berarti menolak dan
+membuat preview baru yang membutuhkan persetujuan baru. Jadwal cron kini adalah
+jadwal **pembuatan preview**, bukan janji waktu tayang.
+
+Pengujian lokal: `npm run typecheck`, `npm run lint`, `npm test`.
+Pengujian Facebook/Blob nyata memerlukan konfigurasi deployment dan persetujuan
+admin; tes lokal tidak menerbitkan konten ke akun mana pun.
+
+## Konten Artis: Bio Artis dan Sorotan Artis/Idol
+
+Tab **Konten Artis** menyediakan satu modul dengan dua segmen:
+- **Bio Artis** (`artist_bio`): perkenalan, awal karier, karya penting, dan konteks editorial.
+- **Sorotan Artis/Idol** (`artist_spotlight`): satu tema dengan empat foto dan konteks masing-masing.
+
+### Setup dan penggunaan
+
+1. Jalankan `drizzle/0020_artist_content.sql` di Neon sebelum deploy. SQL ini juga
+   disertakan dalam `drizzle/schema.sql` untuk instalasi baru. Tidak ada migrasi
+   database otomatis saat membuka dashboard.
+2. Pastikan `BLOB_READ_WRITE_TOKEN` dan konfigurasi Facebook langsung Hiburan
+   (`FB_ENTERTAINMENT_PAGE_ID`, `FB_ENTERTAINMENT_PAGE_ACCESS_TOKEN`) tersedia.
+   Modul ini **tidak memakai Buffer**. Instagram opsional memakai konfigurasi lama.
+3. Buka tab Konten Artis, pilih segmen, isi nama, tema, sudut editorial, pertanyaan,
+   dan **tepat empat slide**. Setiap slide wajib memiliki judul, fakta/konteks,
+   sumber fakta HTTPS, URL langsung foto, halaman sumber foto, dan kredit.
+   Konfirmasikan hak penggunaan foto. Kredit bukan pengganti izin.
+4. **Simpan draf**. Caption kosong disusun deterministik dari bahan editor, termasuk
+   sumber dan kredit. Caption bisa ditulis manual. Bantuan AI bersifat opsional,
+   memakai failover provider yang sudah ada, dan hanya menerima fakta serta sudut
+   editorial yang diisi—tidak melakukan riset/scraping fakta. Periksa klaim hasil AI,
+   simpan hasilnya, dan sesuaikan caption bila fakta berubah.
+5. **Buat preview revisi tersimpan**. Foto diunduh lewat pengambil gambar aman yang
+   sudah ada, lalu dirender menjadi empat JPEG 1080×1080 dengan identitas PopBeez
+   dan kredit foto. Bila satu foto gagal, tidak ada preview lengkap yang bisa
+   diterbitkan. Preview diunggah ke Blob publik; jangan memakai materi rahasia.
+6. Periksa empat slide serta caption tersimpan, kemudian **Setujui & terbitkan**.
+   Yang dipublikasikan adalah empat file preview yang sama dalam urutan tersimpan,
+   bukan render ulang. Publikasi manual dilakukan saat disetujui, bukan slot cron.
+
+### Pengamanan alur
+
+- Konten disimpan pada tabel `artist_contents`, terpisah dari antrean RSS supaya
+  draft tidak dipanen, dikurasi, atau diterbitkan otomatis.
+- Mengedit draf/preview dan menyimpannya menaikkan `revision`, menghapus preview,
+  serta membatalkan kesiapan publikasi. Perubahan yang belum disimpan mematikan
+  tombol preview/publikasi di UI.
+- Satu preview dibuat per revisi. Untuk membuat ulang, simpan revisi baru terlebih
+  dahulu; ini juga mencegah persetujuan berlomba dengan regenerasi preview.
+- Klaim `draft → rendering` dan `preview → publishing` menggunakan pembaruan
+  bersyarat status/revisi. Edisi published/failed tidak bisa disetujui ulang.
+- Kegagalan mirror Instagram tidak membatalkan status published di Facebook.
+  Caption panjang dapat ditolak Instagram meskipun Facebook berhasil; detail
+  dicatat di edisi. Tidak ada retry publikasi otomatis.
+- Jika rendering/publishing tertahan (misalnya function timeout) atau Facebook
+  mengembalikan hasil tidak pasti, periksa log, database, dan halaman Facebook
+  sebelum pemulihan manual. UI sengaja tidak membuka kunci otomatis.
+- File preview `artist/` belum masuk penghapusan Blob otomatis. Pantau kuota dan
+  bersihkan render yang tidak dipakai secara manual; jangan hapus preview aktif.
+
+`artist_contents` mencatat `segment`, `format=carousel_4`, revisi, waktu persetujuan,
+waktu tayang, ID Facebook/Instagram, serta error. **Perbandingan Insights lintas
+segmen belum ditambahkan** pada panel analitik lama; modul ini menyediakan rekaman
+publikasinya terlebih dahulu. Daftar dashboard menampilkan 50 edisi terbaru.
+
+API admin: `GET /api/admin/artist-content` untuk daftar; `POST` dengan `action`
+`save`, `ai`, `preview`, atau `approve`. Semuanya memerlukan bearer `CRON_SECRET`.
+`save`/`ai` menerima `content`; pembaruan/publikasi menerima `id` dan `revision`.
+Tidak ada post baru yang dibuat hanya dengan menyimpan draf atau meminta AI.
+
+## Tebak Drama: tingkat kesulitan dan penggantian per nomor
+
+Jalankan **`drizzle/0021_quiz_difficulty.sql`** setelah migrasi `0019` sebelum
+mendeploy pembaruan ini. Kuis baru memakai **Sedang · mosaik warna** pada kelima
+nomor secara default, bukan foto tajam atau siluet.
+
+Pada preview berstatus `draft`, editor menyediakan pengaturan per nomor:
+- **Mudah**: crop berwarna dengan blur ringan.
+- **Sedang**: crop berwarna dengan mosaik 36×24, diperbesar nearest-neighbour.
+- **Sulit**: crop hitam-putih dengan mosaik 18×12.
+
+Efek hanya mengenai foto; nomor soal, logo, dan panel brand tetap tajam. Tidak
+ada penghapusan fitur wajah, deteksi wajah, skor, atau kunci jawaban. Tingkat
+kesulitan bersifat editorial: periksa hasil pada ukuran layar ponsel karena
+poster/pemain yang terkenal mungkin tetap mudah dikenali. Cropping dan efek
+ini bukan jaminan penghapusan seluruh teks judul.
+
+**Mengganti satu poster:** gunakan pilihan poster pada nomor yang bersangkutan.
+Empat nomor lain, urutan, dan tingkat kesulitannya tidak diacak. Pilihan berasal
+dari review manual, mengikuti batas pemakaian poster yang sudah ada, bukan URL
+bebas dari browser. Jika hanya ada lima poster, tambahkan review untuk memperluas
+pilihan. Server memeriksa lima poster/judul yang berbeda dan memuat ulang sumber
+metadata dari pool tepercaya. Penggantian tidak mengubah caption umum kuis.
+
+Klik **Buat preview perubahan**, periksa gambar baru, baru kemudian **Setujui &
+terbitkan preview**. Selama pengaturan lokal belum dirender, persetujuan di UI
+nonaktif. Preview baru selalu memakai URL Blob unik; persetujuan serta penolakan
+harus menyertakan URL preview yang diperiksa. Pembaruan status bersyarat
+mencegah klik ganda dan menolak tab lama setelah preview diganti. Perubahan
+menghapus persetujuan sebelumnya dan tidak mempublikasikan apa pun.
+
+Jika render/unduhan gagal, pilihan tersimpan dan preview lama dipertahankan;
+pengaturan gagal tidak disimpan setengah jalan. Jika function terhenti dan edisi
+tertahan pada `editing`, periksa log serta status database sebelum pemulihan
+manual. Tidak ada pembukaan kunci atau publikasi ulang otomatis.
+
+Edisi lama tidak diubah gambarnya otomatis. Bila menyunting edisi lama yang belum
+memiliki metadata efek, editor memulai dari Sedang untuk kelima nomor; buat preview
+baru untuk menerapkan efek tersebut. File preview lama tetap mengikuti retensi
+Blob kuis yang sudah ada.
+
+Endpoint admin terproteksi: `GET /api/admin/quiz-edit?id=<editionId>` mengambil
+pilihan dan pengaturan, `POST /api/admin/quiz-edit` menerima
+`{ editionId, previewUrl, tiles: [{ imageUrl, difficulty }, ...] }` dengan tepat
+lima tile. `POST /api/quiz` untuk `approve`/`reject` kini juga wajib menerima
+`previewUrl`; pemanggil lama perlu diperbarui. Jadwal cron tidak berubah dan
+tetap hanya menyiapkan draf.

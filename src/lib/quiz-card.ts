@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
+import type { QuizDifficulty } from "./quiz-customization";
 import { circularLogoBuffer } from "@/lib/logo-circle";
 import { ensureBundledFonts } from "./og-card";
 
@@ -22,6 +23,7 @@ export const QUIZ_BRAND_CELL_INDEX = QUIZ_POSTER_CELLS;
 export type QuizCardOptions = {
   /** Exactly `QUIZ_POSTER_CELLS` JPEG/PNG payloads, row by row. */
   tiles: Array<Uint8Array | Buffer>;
+  difficulties?: QuizDifficulty[];
   label?: string;
   sublabel?: string;
   brand?: string;

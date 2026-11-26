@@ -102,7 +102,7 @@ test("selection is random across the eligible pool", () => {
   assert.notDeepEqual(low.map((poster) => poster.title), high.map((poster) => poster.title));
 });
 
-test("caption is link-free and follows the agreed three-line copy", () => {
+test("caption invites relevant discussion without scoring or forced follows", () => {
   const caption = buildQuizCaption();
   assert.equal(QUIZ_TILES, 5);
   assert.ok(caption.startsWith("TEBAK DRAMA"));

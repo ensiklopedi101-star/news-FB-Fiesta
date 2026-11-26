@@ -1,3 +1,4 @@
+import { quizDifficulties, isCurrentQuizDraft } from "@/lib/quiz-customization";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -5,7 +6,7 @@ import { put } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { articles, quizEditions } from "@/lib/schema";
+import { quizEditions } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderQuizCard } from "@/lib/quiz-card";
 import {
@@ -176,6 +177,7 @@ async function handleScheduled(request: NextRequest, forced: boolean) {
   const db = getDb();
   const editions = await db.select({
     id: quizEditions.id,
+    status: quizEditions.status,
     posterKeys: quizEditions.posterKeys,
     facebookPostId: quizEditions.facebookPostId,
     errorMessage: quizEditions.errorMessage,

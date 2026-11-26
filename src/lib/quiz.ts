@@ -149,8 +149,7 @@ export function buildQuizCaption(): string {
     "",
     "Tebak judul drama. Berapa yang berhasil kamu tebak?",
     "",
-    "Ikuti PopBeez untuk Kuiz Berikutnya.",
-    "Follow juga Instagram @popbeez.hive biar gak ketinggalan kuisnya. 🐝",
+    "Apa ciri yang bikin kalian ingat dramanya—pemain, pakaian, atau suasananya?",
     "",
     "#TebakDramanya #Drakor #Kdrama #FilmKorea #PopBeez",
   ].join("\n");
@@ -160,7 +159,7 @@ export type QuizDueState = { due: boolean; reason: string };
 
 /**
  * True only inside the Sunday 19:15 WITA window and when the previous edition is
- * at least `intervalDays` WITA days old, so a daily cron posts every second Sunday.
+ * at least `intervalDays` WITA days old, so a daily cron prepares a preview every second Sunday.
  */
 export function shouldPostQuiz(
   now: Date,
