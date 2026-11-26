@@ -223,7 +223,7 @@ type DashboardData = {
     renderMode: string;
     voices: Array<{ id: string; label: string; summary: string }>;
   };
-  quiz: { lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
+  quiz: { editionId: string | null; status: string | null; caption: string | null; posterSources: Array<{ title: string; imageUrl: string; reviewId: string }>; lastPostedAt: string | null; lastImageUrl: string | null; lastPostId: string | null; lastError: string | null; tiles: number; maxUses: number; intervalDays: number; schedule: string; schemaReady: boolean };
   stats: { articles: number; publishedToday: number; bufferQueuedToday: number; enabledFeeds: number; totalFeeds: number; queued: number; processing: number; ready: number; published: number; failed: number; expired: number; removed: number };
   feeds: Feed[];
   articles: Article[];
@@ -624,14 +624,14 @@ export default function Dashboard() {
     }
   }
 
-  async function createQuizEdition() {
-    if (!window.confirm("Kuis Tebak Drama akan langsung diposting ke halaman Facebook PopBeez. Lanjutkan?")) return;
+  async function createQuizEdition(action = "create") {
+    if (action === "approve" && !window.confirm("Saya sudah memeriksa kelima petunjuk, caption, dan hak penggunaan gambar. Terbitkan preview ini?")) return;
     setBusy(true);
     setMessage("");
     try {
-      const result = await api("/api/quiz", { method: "POST" });
+      const result = await api("/api/quiz", { method: "POST", body: JSON.stringify({ action, editionId: data?.quiz.editionId }) });
       setMessage(result.result === "posted"
-        ? `Kuis terbit dengan ${result.titles?.length ?? 12} poster.`
+        ? "Kuis terbit dengan 5 poster."
         : result.detail || "Kuis diproses.");
       await refresh();
     } catch (error) {
@@ -1450,20 +1450,26 @@ export default function Dashboard() {
 
       {activeTab === "quiz" && (
       <section className="panel quiz-panel">
-        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Tayang otomatis {data?.quiz.schedule} bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">KUIS INTERAKSI</p><h2>Tebak Drama</h2><p className="muted small-note">Grid 2×3: lima poster acak dari review manual PopBeez, sel pojok kanan bawah berisi logo dan tulisan “Tebak Drama”. Cron menyiapkan preview {data?.quiz.schedule}; publikasi hanya setelah persetujuan admin bila sudah {data?.quiz.intervalDays ?? 14} hari sejak edisi terakhir. Satu poster maksimal dipakai {data?.quiz.maxUses ?? 3}× kuis. Detail warna dipertahankan; tidak ada penilaian benar/salah.</p></div><span className="format-tag carousel">PopBeez · 5 poster</span></div>
         {data?.quiz.lastImageUrl ? <div className="quiz-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={data.quiz.lastImageUrl} alt="Edisi kuis terakhir" loading="lazy" />
           <div className="quiz-preview-meta">
-            <strong>Edisi terakhir · {data.quiz.tiles} poster</strong>
+            <strong>Edisi terakhir · {data.quiz.tiles} poster · {data.quiz.status}</strong>
+            <p style={{ whiteSpace: "pre-wrap" }}>{data.quiz.caption}</p>
+            {data.quiz.posterSources.map((source, index) => <a key={index} href={source.imageUrl} target="_blank" rel="noreferrer">Sumber {index + 1}: {source.title} ↗</a>)}
             <span>{formatDate(data.quiz.lastPostedAt)}</span>
             {facebookPostUrl(data.quiz.lastPostId) && <a className="article-source" href={facebookPostUrl(data.quiz.lastPostId)!} target="_blank" rel="noreferrer">Buka post kuis ↗</a>}
             {data.quiz.lastError && <p className="article-error">{data.quiz.lastError}</p>}
           </div>
         </div> : <div className="empty-state"><strong>Belum ada kuis.</strong><span>Butuh minimal lima poster dari review manual; satu review manual sudah berisi lima poster.</span></div>}
-        {!data?.quiz.schemaReady && <p className="muted small-note">Tabel <code>quiz_editions</code> belum ada. Jalankan <code>drizzle/0010_quiz_editions.sql</code> di Neon untuk mengaktifkan kuis.</p>}
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat & posting kuis sekarang"}</button>
-        <p className="muted small-note">Tombol ini melewati jadwal dan langsung menerbitkan ke halaman Facebook PopBeez. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
+        {!data?.quiz.schemaReady && <p className="muted small-note">Skema kuis belum siap. Jalankan <code>drizzle/0010_quiz_editions.sql</code> dan <code>drizzle/0019_quiz_preview.sql</code> di Neon untuk mengaktifkan kuis.</p>}
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition()}>{busy ? "Menyiapkan…" : "Buat preview kuis"}</button>
+        {data?.quiz.status === "draft" && <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void createQuizEdition("approve")}>Setujui & terbitkan preview</button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void createQuizEdition("reject")}>Tolak preview</button>
+        </div>}
+        <p className="muted small-note">Tombol pembuatan hanya menyiapkan preview, tidak menerbitkan. Periksa keterbacaan petunjuk dan hak penggunaan sumber; potongan poster tidak menjamin judul tersembunyi. Kuis tidak punya kunci jawaban; caption hanya mengajak menebak nomor poster. Poster dipilih acak dan setiap poster berhenti dipakai setelah {data?.quiz.maxUses ?? 3}× kuis.</p>
       </section>
       )}
 

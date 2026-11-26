@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import sharp from "sharp";
 import { circularLogoBuffer } from "@/lib/logo-circle";
 import { ensureBundledFonts } from "./og-card";
-import { renderSilhouette, silhouettePalette } from "./quiz-silhouette";
+
 
 /**
  * Square 2×3 quiz grid: five poster cells plus a branded cell in the bottom-right
@@ -30,8 +30,6 @@ export type QuizCardOptions = {
   handle?: string;
   /** Optional logo payload for the brand cell; the bundled PopBeez icon is used otherwise. */
   logo?: Uint8Array | Buffer | null;
-  /** Tiles that are already flat silhouette art (AI-drawn), so they must not be re-processed. */
-  prepared?: boolean[];
 };
 
 function escapeXml(value: string): string {
@@ -100,64 +98,15 @@ function buildBrandPanel(options: QuizCardOptions): Buffer {
   </svg>`);
 }
 
-/**
- * Posters are photographic and carry their own title, so each cell is redrawn as a
- * flat silhouette: no face, no lettering, just the shape of the drama on paper.
- */
-async function renderPosterCell(tile: Uint8Array | Buffer, index: number, prepared: boolean): Promise<Buffer> {
-  const palette = silhouettePalette(index);
-  const margin = 14;
-  const art = prepared
-    ? await preparedArt(tile, QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT)
-    : await renderSilhouette(tile, {
-        palette,
-        width: Math.round(QUIZ_CELL_WIDTH * 0.62),
-        height: QUIZ_CELL_HEIGHT - margin * 2,
-      });
-  if (prepared) return sharp(art).jpeg({ quality: 92 }).toBuffer();
-
-  const sheet = await sharp({
-    create: { width: QUIZ_CELL_WIDTH, height: QUIZ_CELL_HEIGHT, channels: 3, background: palette.paper },
-  }).png().toBuffer();
-  return sharp(sheet)
-    .composite([{
-      input: art,
-      left: Math.round((QUIZ_CELL_WIDTH - Math.round(QUIZ_CELL_WIDTH * 0.62)) / 2),
-      top: margin,
-    }])
-    .jpeg({ quality: 90 })
-    .toBuffer();
-}
-
-/**
- * Flat art that already carries its own paper colour is only fitted to the cell:
- * the artwork is centred on a sheet of its own background tone.
- */
-async function preparedArt(tile: Uint8Array | Buffer, width: number, height: number): Promise<Buffer> {
-  // Never crop hand-drawn silhouettes: fit the whole artwork on a sheet of its own paper tone.
-  const fitted = await sharp(Buffer.from(tile), { limitInputPixels: 40_000_000 })
-    .rotate()
-    .resize(width, height, { fit: "inside" })
-    .png()
-    .toBuffer();
-  const metadata = await sharp(fitted).metadata();
-  const artWidth = metadata.width ?? width;
-  const artHeight = metadata.height ?? height;
-  // The paper tone is whatever the artwork's top-left corner is; the ink shape is dominant.
-  const [paperRed = 247, paperGreen = 231, paperBlue = 207] = await sharp(fitted)
-    .extract({ left: 0, top: 0, width: 1, height: 1 })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-  const background = { r: paperRed, g: paperGreen, b: paperBlue };
-  return sharp({ create: { width, height, channels: 3, background } })
-    .composite([{
-      input: fitted,
-      left: Math.round((width - artWidth) / 2),
-      top: Math.round((height - artHeight) / 2),
-    }])
-    .png()
-    .toBuffer();
+/** Keep colour, clothes and scenery. A central crop is a clue, not a title-removal guarantee. */
+export async function renderPosterClue(tile: Uint8Array | Buffer): Promise<Buffer> {
+  const image = await sharp(Buffer.from(tile), { limitInputPixels: 40_000_000 }).rotate().png().toBuffer();
+  const { width = 1, height = 1 } = await sharp(image).metadata();
+  return sharp(image)
+    .extract({ left: Math.floor(width * 0.08), top: Math.floor(height * 0.10),
+      width: Math.max(1, Math.floor(width * 0.84)), height: Math.max(1, Math.floor(height * 0.65)) })
+    .resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { fit: "cover", position: "centre" })
+    .jpeg({ quality: 92 }).toBuffer();
 }
 
 export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> {
@@ -170,7 +119,7 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
   const layers: Array<{ input: Buffer; left: number; top: number }> = [];
   for (const [index, tile] of tiles.entries()) {
     layers.push({
-      input: await renderPosterCell(tile, index, options.prepared?.[index] ?? false),
+      input: await renderPosterClue(tile),
       left: (index % QUIZ_COLUMNS) * QUIZ_CELL_WIDTH,
       top: Math.floor(index / QUIZ_COLUMNS) * QUIZ_CELL_HEIGHT,
     });

@@ -7,7 +7,6 @@ import { getDb } from "@/lib/db";
 import { articles, quizEditions } from "@/lib/schema";
 import { fetchOgImageJpeg } from "@/lib/og-image";
 import { renderQuizCard } from "@/lib/quiz-card";
-import { renderAiSilhouette, silhouettePalette } from "@/lib/quiz-silhouette";
 import {
   buildQuizCaption,
   posterKey,
@@ -30,15 +29,24 @@ import { MANUAL_REVIEW_SOURCE_NAMES, manualImageReferer, parseManualReview, type
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Five image edits plus the render: the model can be slow, so allow the full function budget.
+// Budget for downloading five posters and rendering the preview.
 export const maxDuration = 300;
 
-/** Cron calls GET once a day; the dashboard button calls POST to force an edition. */
+/** GET/POST create previews only. Publishing requires the explicit approve action. */
 export async function GET(request: NextRequest) {
   return handle(request, request.nextUrl.searchParams.get("force") === "1");
 }
 
 export async function POST(request: NextRequest) {
+  const body = await request.json().catch(() => ({}));
+  if (body.action === "reject") {
+    if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (typeof body.editionId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.editionId)) return NextResponse.json({ error: "ID tidak valid." }, { status: 400 });
+    const rows = await getDb().update(quizEditions).set({ status: "rejected", updatedAt: new Date() })
+      .where(and(eq(quizEditions.id, body.editionId), eq(quizEditions.status, "draft"))).returning({ id: quizEditions.id });
+    return NextResponse.json({ ok: true, detail: rows.length ? "Preview ditolak. Silakan buat edisi baru." : "Edisi tidak dapat ditolak." });
+  }
+  if (body.action === "approve") return approveEdition(request, body.editionId);
   return handle(request, true);
 }
 
@@ -49,6 +57,7 @@ async function handle(request: NextRequest, forced: boolean) {
   // Every past edition is read, because each poster may only appear in three quizzes.
   const editions = await db.select({
     id: quizEditions.id,
+    status: quizEditions.status,
     posterKeys: quizEditions.posterKeys,
     postedAt: quizEditions.postedAt,
     createdAt: quizEditions.createdAt,
@@ -58,6 +67,9 @@ async function handle(request: NextRequest, forced: boolean) {
   const intervalDays = quizIntervalDays();
 
   // Two dashboard clicks in a row must not create two editions.
+  const [pending] = await db.select({ id: quizEditions.id }).from(quizEditions)
+    .where(inArray(quizEditions.status, ["draft", "publishing"])).limit(1);
+  if (pending) return NextResponse.json({ ok: true, result: "pending", detail: "Preview menunggu persetujuan atau publikasi sedang berjalan." });
   const newest = editions[0];
   if (newest && !newest.postedAt && Date.now() - newest.createdAt.getTime() < 120_000) {
     return NextResponse.json({ ok: true, result: "busy", detail: "Edisi kuis sebelumnya masih diproses." });
@@ -74,7 +86,7 @@ async function handle(request: NextRequest, forced: boolean) {
   const posters = quizPostersFromReviews(reviews);
 
   // Each poster may appear in at most three quizzes; the edition history marks the used ones.
-  const usage = quizPosterUsage(editions);
+  const usage = quizPosterUsage(editions.filter((edition) => edition.postedAt || ["draft", "publishing"].includes(edition.status)));
   const available = quizAvailablePosters(posters, { usage, maxUses: QUIZ_MAX_USES });
   if (available.length < QUIZ_TILES) {
     const exhausted = posters.length - available.length;
@@ -107,24 +119,10 @@ async function handle(request: NextRequest, forced: boolean) {
 
   const caption = buildQuizCaption();
 
-  // Flat silhouettes need an image model: no eye/nose/mouth and no printed title may survive.
-  // When the model is unavailable the local renderer still produces a flat paper-cut tile.
-  const useAi = process.env.QUIZ_SILHOUETTE_AI?.trim() !== "0";
-  const prepared: boolean[] = [];
-  const art = await Promise.all(tiles.map(async (tile, index) => {
-    if (!useAi) return tile.bytes;
-    const drawn = await renderAiSilhouette(tile.bytes, { palette: silhouettePalette(index) });
-    prepared[index] = drawn !== null;
-    return drawn ?? tile.bytes;
-  }));
-  const aiCount = prepared.filter(Boolean).length;
-  console.info(`[quiz] silhouette art: ${aiCount}/${tiles.length} dari model gambar`);
-
   let grid: Buffer;
   try {
     grid = await renderQuizCard({
-      tiles: art,
-      prepared,
+      tiles: tiles.map((tile) => tile.bytes),
       label: QUIZ_LABEL,
       sublabel: QUIZ_SUBLABEL,
       brand: process.env.PAGE_BRAND_ENTERTAINMENT?.trim() || "PopBeez",
@@ -135,19 +133,43 @@ async function handle(request: NextRequest, forced: boolean) {
   }
 
   const [edition] = await db.insert(quizEditions).values({
+    status: "generating",
     posterKeys: tiles.map((tile) => posterKey(tile.poster.imageUrl)),
     reviewIds,
+    posterSources: tiles.map(({ poster }) => ({ title: poster.title, imageUrl: poster.imageUrl, reviewId: poster.reviewId })),
     caption,
   }).returning({ id: quizEditions.id });
   if (!edition) return NextResponse.json({ error: "Gagal menyimpan edisi kuis." }, { status: 500 });
 
-  const blob = await put(`quiz/${edition.id}.jpg`, grid, {
-    access: "public",
-    addRandomSuffix: false,
-    contentType: "image/jpeg",
-    token,
-  });
+  try {
+    const blob = await put(`quiz/${edition.id}.jpg`, grid, {
+      access: "public", addRandomSuffix: false, contentType: "image/jpeg", token,
+    });
+    await db.update(quizEditions).set({ status: "draft", imageUrl: blob.url, updatedAt: new Date() }).where(eq(quizEditions.id, edition.id));
+    return NextResponse.json({ ok: true, result: "draft", editionId: edition.id, imageUrl: blob.url,
+      detail: "Preview siap. Periksa kelima gambar sebelum menyetujui publikasi." });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Upload preview gagal.";
+    await db.update(quizEditions).set({ status: "failed", errorMessage: message.slice(0, 1000), updatedAt: new Date() })
+      .where(eq(quizEditions.id, edition.id));
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+}
 
+/** The only publishing path: explicit human approval, with an atomic claim. */
+async function approveEdition(request: NextRequest, id: unknown) {
+  if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "ID tidak valid." }, { status: 400 });
+  const db = getDb();
+  const [edition] = await db.select().from(quizEditions).where(eq(quizEditions.id, id));
+  if (!edition?.imageUrl || !edition.caption || edition.status !== "draft") {
+    return NextResponse.json({ error: "Preview tidak siap atau sudah diproses." }, { status: 409 });
+  }
+  const [claimed] = await db.update(quizEditions).set({ status: "publishing", approvedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(quizEditions.id, id), eq(quizEditions.status, "draft"))).returning({ id: quizEditions.id });
+  if (!claimed) return NextResponse.json({ error: "Edisi sedang diproses." }, { status: 409 });
+  const blob = { url: edition.imageUrl };
+  const caption = edition.caption;
   try {
     const post = await publishFacebookPagePost({
       pageKey: "entertainment",
@@ -155,6 +177,7 @@ async function handle(request: NextRequest, forced: boolean) {
       caption,
     });
     await db.update(quizEditions).set({
+      status: "published",
       imageUrl: blob.url,
       facebookPostId: post.postId,
       postedAt: new Date(),
@@ -180,12 +203,12 @@ async function handle(request: NextRequest, forced: boolean) {
       editionId: edition.id,
       postId: post.postId,
       imageUrl: blob.url,
-      titles: tiles.map((tile) => tile.poster.title),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal memposting kuis ke Facebook.";
     await db.update(quizEditions).set({
       imageUrl: blob.url,
+      status: "failed",
       errorMessage: message.slice(0, 1_000),
       updatedAt: new Date(),
     }).where(eq(quizEditions.id, edition.id));
