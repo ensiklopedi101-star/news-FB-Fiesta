@@ -18,6 +18,9 @@ test("Groq default roundup max_tokens fits under 1000 OTPM and OTPM parser downs
     "Request too large for model `qwen/qwen3.8-27b` in organization `org_01m7hf6bgaedp8rve4xp16vvn3` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1600. The request's expected output tokens exceed the enforced limit";
   const safe = parseGroqOtpmSafeTokens(productionError);
   assert.equal(safe, 920);
+  const productionRateLimit =
+    "Rate limit reached on output tokens per minute (OTPM): Limit 1000, Used 244, Requested 850. Please try again in 5.64s.";
+  assert.equal(parseGroqOtpmSafeTokens(productionRateLimit), 676);
   assert.equal(parseGroqOtpmSafeTokens("Rate limit reached for RPM"), null);
 });
 
