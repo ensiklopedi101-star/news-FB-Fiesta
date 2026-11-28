@@ -63,6 +63,7 @@ test("guard judul roundup menolak judul RSS bahasa Inggris mentah dan menerima a
     assert.equal(isUntranslatedRoundupHeadline(original, original), true, original);
   }
   assert.equal(isUntranslatedRoundupHeadline("NCT DREAM Takes 3rd Win For “Boogie Woogie” On “Music Core”", originals[2]), true);
+  assert.equal(isUntranslatedRoundupHeadline("Chaeryeong ITZY Tunda Fan Signing Akibat Flu Tipe A"), false);
   assert.equal(isUntranslatedRoundupHeadline("The Blue Road Episode 1: Kesan Pertama Kasus Lintas Negara", originals[0]), false);
   assert.equal(isUntranslatedRoundupHeadline("Trailer Anime Bride of the Barrier Master Umumkan Tanggal Tayang dan Lagu Pembuka", originals[1]), false);
   assert.equal(isUntranslatedRoundupHeadline("NCT DREAM Raih Kemenangan Ketiga untuk “Boogie Woogie” di Music Core", originals[2]), false);
