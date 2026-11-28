@@ -7,7 +7,7 @@ import { PILLARS } from "@/lib/pillars";
 import { slotStateAt } from "@/lib/publish-slots";
 import { quizIntervalDays, QUIZ_MAX_USES, QUIZ_SCHEDULE_LABEL, QUIZ_TILES } from "@/lib/quiz";
 import { minimumOriginalityScore } from "@/lib/originality";
-import { articles, publisherState, quizEditions, reels, rssSources } from "@/lib/schema";
+import { articles, editorialDrafts, facebookPostInsights, publisherState, quizEditions, reels, rssSources } from "@/lib/schema";
 import { EDITORIAL_VOICES } from "@/lib/editorial-voices";
 import { getQueueExpiryCutoff, MAX_QUEUE_AGE_HOURS } from "@/lib/queue-policy";
 import { isFacebookPublishingEnabled } from "@/lib/facebook";
@@ -127,7 +127,7 @@ export async function GET(request: NextRequest) {
     ];
 
     // The quiz table arrives with drizzle/0010; the dashboard must keep working before that migration runs.
-    let lastQuiz: { id: string; status: string; caption: string | null; posterSources: Array<{ title: string; imageUrl: string; reviewId: string }>; postedAt: Date | null; imageUrl: string | null; facebookPostId: string | null; posterKeys: string[]; errorMessage: string | null } | null = null;
+    let lastQuiz: { postedAt: Date | null; imageUrl: string | null; facebookPostId: string | null; posterKeys: string[]; answerKey: Array<{ title: string; sourceUrl: string | null; reviewId: string }>; errorMessage: string | null } | null = null;
     let quizSchemaReady = true;
     try {
       const [row] = await db.select({
@@ -139,11 +139,26 @@ export async function GET(request: NextRequest) {
         imageUrl: quizEditions.imageUrl,
         facebookPostId: quizEditions.facebookPostId,
         posterKeys: quizEditions.posterKeys,
+        answerKey: quizEditions.answerKey,
         errorMessage: quizEditions.errorMessage,
       }).from(quizEditions).orderBy(desc(quizEditions.createdAt)).limit(1);
       lastQuiz = row ?? null;
     } catch {
       quizSchemaReady = false;
+    }
+
+    // Preview-before-publish flows and editorial attribution arrive in migration 0019.
+    let popbeezEditorialSchemaReady = true;
+    try {
+      await Promise.all([
+        db.select({ segment: articles.segment, contentFormat: articles.contentFormat }).from(articles).limit(1),
+        db.select({ answerKey: quizEditions.answerKey, segment: quizEditions.segment, contentFormat: quizEditions.contentFormat }).from(quizEditions).limit(1),
+        db.select({ segment: reels.segment, contentFormat: reels.contentFormat, pillar: reels.pillar }).from(reels).limit(1),
+        db.select({ id: editorialDrafts.id }).from(editorialDrafts).limit(1),
+        db.select({ availableMetrics: facebookPostInsights.availableMetrics }).from(facebookPostInsights).limit(1),
+      ]);
+    } catch {
+      popbeezEditorialSchemaReady = false;
     }
 
     // Originality guard summary: how much of the recent output clears the "substantial addition" bar.
@@ -247,6 +262,7 @@ export async function GET(request: NextRequest) {
       checkedAt: new Date().toISOString(),
       diagnostics,
       contentManager,
+      popbeezEditorialSchemaReady,
       integrations: integrationStatus,
       aiModels: {
         groq: process.env.GROQ_MODEL?.trim().slice(0, 100) || "otomatis (router v3 · batas OTPM aman)",
@@ -269,6 +285,7 @@ export async function GET(request: NextRequest) {
         lastPostId: lastQuiz?.facebookPostId ?? null,
         lastError: lastQuiz?.errorMessage ?? null,
         tiles: lastQuiz?.posterKeys.length ?? QUIZ_TILES,
+        answerKey: lastQuiz?.answerKey ?? [],
         maxUses: QUIZ_MAX_USES,
         intervalDays: quizIntervalDays(),
         schedule: QUIZ_SCHEDULE_LABEL,
@@ -289,7 +306,7 @@ export async function GET(request: NextRequest) {
     console.error("[dashboard]", error instanceof Error ? error.message : error);
     return NextResponse.json({
       ok: false,
-      error: "Skema database belum lengkap. Pastikan DATABASE_URL mengarah ke Neon yang benar, lalu jalankan migrasi yang belum diterapkan secara berurutan sampai drizzle/0008_manual_images.sql dan muat ulang dashboard.",
+      error: "Skema database belum lengkap. Pastikan DATABASE_URL mengarah ke Neon yang benar, lalu jalankan migrasi yang belum diterapkan berurutan, termasuk drizzle/0019_popbeez_segments_bio_drafts.sql, dan muat ulang dashboard.",
     }, { status: 503 });
   }
 }

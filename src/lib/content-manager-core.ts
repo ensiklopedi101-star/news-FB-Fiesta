@@ -226,9 +226,9 @@ export function buildDeterministicPlan(input: {
   }
   const facebookPillarBonus = new Map<Pillar, number>();
   const facebookInsights = input.performance?.facebookInsights;
-  if (facebookInsights && facebookInsights.interactionSamples >= 5) {
+  if (facebookInsights && facebookInsights.interactionRateSamples >= 5 && facebookInsights.averageInteractionRate !== null) {
     for (const row of facebookInsights.topPillars) {
-      if (row.posts < 3) continue;
+      if (row.rateSamples < 3 || row.interactionRate === null) continue;
       const lift = row.interactionRate - facebookInsights.averageInteractionRate;
       if (lift > 0) facebookPillarBonus.set(row.pillar, Math.min(12, Math.round(lift * 2)));
     }
@@ -372,18 +372,31 @@ export function buildContentManagerPrompt(input: {
         : ""
     }`
     : "Belum ada data klik shortlink 7 hari terakhir.";
+  const qualifiedPillars = facebookPerf?.topPillars.filter((row) => row.rateSamples >= 3 && row.interactionRate !== null) ?? [];
+  const qualifiedSegments = facebookPerf?.topSegments.filter((row) => row.rateSamples >= 3 && row.interactionRate !== null) ?? [];
+  const qualifiedFormats = facebookPerf?.topFormats.filter((row) => row.rateSamples >= 3 && row.interactionRate !== null) ?? [];
+  const qualifiedSlots = facebookPerf?.topSlots.filter((row) => row.rateSamples >= 3 && row.interactionRate !== null) ?? [];
+  const averageRate = facebookPerf?.averageInteractionRate;
   const facebookBlock = facebookPerf?.postsAnalyzed
-    ? `Facebook Insights untuk ${facebookPerf.postsAnalyzed} post yang terbit 30 hari terakhir (angka post bersifat lifetime saat sinkron): ${facebookPerf.totalMediaViews} media views, ${facebookPerf.totalUniqueViewers} unique viewers, ${facebookPerf.totalInteractions} interaksi terukur pada ${facebookPerf.interactionSamples} post dengan data reaksi+komentar+bagikan lengkap; rasio interaksi per unique viewer ${facebookPerf.averageInteractionRate.toFixed(1)}%. Klik Facebook (${facebookPerf.totalClicks}) bukan klik shortlink.${
-      facebookPerf.topPillars.some((p) => p.posts >= 3)
-        ? ` Pilar/hook Slide 1 dengan rasio interaksi tertinggi (n≥3): ${facebookPerf.topPillars.filter((p) => p.posts >= 3).slice(0, 3).map((p) => `${PILLARS[p.pillar].label} ${p.interactionRate.toFixed(1)}% (n=${p.posts})`).join(", ")}.`
-        : " Sampel tiap pilar belum cukup untuk membandingkan interaksi."
+    ? `Facebook Insights untuk ${facebookPerf.postsAnalyzed} post yang terbit 30 hari terakhir (angka post bersifat lifetime saat sinkron): ${facebookPerf.totalMediaViews} media views dari ${facebookPerf.mediaViewSamples} post yang menyediakan metrik itu, ${facebookPerf.totalUniqueViewers} unique viewers dari ${facebookPerf.uniqueViewerSamples} post, dan ${facebookPerf.totalInteractions} interaksi pada ${facebookPerf.interactionSamples} post dengan reaksi+komentar+bagikan lengkap; rasio interaksi/unique viewer ${averageRate === null || averageRate === undefined ? "belum tersedia" : `${averageRate.toFixed(1)}%`}. Klik Facebook (${facebookPerf.totalClicks}, ${facebookPerf.clickSamples} post) bukan klik shortlink.${
+      qualifiedPillars.length
+        ? ` Pilar dengan rasio interaksi yang cukup sampel: ${qualifiedPillars.slice(0, 3).map((row) => `${PILLARS[row.pillar].label} ${row.interactionRate!.toFixed(1)}% (n=${row.rateSamples} post dengan unique viewers)`).join(", ")}.`
+        : " Sampel pilar belum cukup untuk membandingkan rasio interaksi."
     }${
-      facebookPerf.topSlots.some((slot) => slot.posts >= 3)
-        ? ` Observasi slot WITA dengan minimal 3 sampel (tidak mengubah jadwal): ${facebookPerf.topSlots.filter((slot) => slot.posts >= 3).slice(0, 4).map((slot) => `${slot.slotLabel} ${slot.interactionRate.toFixed(1)}% (n=${slot.posts})`).join(", ")}.${facebookPerf.recommendedSlot ? ` Sinyal slot teratas: ${facebookPerf.recommendedSlot}.` : ""}`
-        : " Belum ada sampel minimal 3 post per slot; jangan menyimpulkan waktu unggah dari satu-dua post."
-    } Metrik carousel berlaku untuk keseluruhan post dan diatribusikan ke hook/Slide 1; jangan menganggapnya sebagai performa per-slide.`
+      qualifiedSegments.length
+        ? ` Segmen editorial: ${qualifiedSegments.slice(0, 5).map((row) => `${row.segment} ${row.interactionRate!.toFixed(1)}% (n=${row.rateSamples} post dengan unique viewers)`).join(", ")}.`
+        : " Sampel segmen belum cukup untuk membandingkan rasio interaksi."
+    }${
+      qualifiedFormats.length
+        ? ` Format: ${qualifiedFormats.slice(0, 4).map((row) => `${row.contentFormat} ${row.interactionRate!.toFixed(1)}% (n=${row.rateSamples} post dengan unique viewers)`).join(", ")}.`
+        : " Sampel format belum cukup untuk membandingkan rasio interaksi."
+    }${
+      qualifiedSlots.length
+        ? ` Observasi slot WITA (jadwal tidak diubah): ${qualifiedSlots.slice(0, 4).map((row) => `${row.slotLabel} ${row.interactionRate!.toFixed(1)}% (n=${row.rateSamples} post dengan unique viewers)`).join(", ")}.${facebookPerf.recommendedSlot ? ` Sinyal slot teratas: ${facebookPerf.recommendedSlot}.` : ""}`
+        : " Belum ada minimal 3 post per slot dengan metrik interaksi lengkap dan unique viewers; jangan menyimpulkan waktu unggah dari satu-dua post."
+    } Data carousel mengukur satu post, bukan performa per slide. Data payout/pendapatan tidak dibaca; jangan menyimpulkan penghasilan dari views atau interaksi.`
     : facebookPerf?.configured
-      ? "Facebook Insights aktif tetapi belum ada snapshot post yang berhasil disinkronkan; jangan mengarang performa Facebook."
+      ? "Facebook Insights aktif tetapi belum ada snapshot post dengan metrik yang tersedia; jangan mengarang performa Facebook."
       : "Facebook Insights belum terhubung; gunakan klik shortlink hanya sebagai sinyal minat keluar, bukan views/interaksi Facebook.";
   const perfBlock = `${facebookBlock}\n${shortlinkBlock}`;
 

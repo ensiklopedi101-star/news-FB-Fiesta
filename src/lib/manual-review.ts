@@ -17,6 +17,8 @@ export type ManualReviewItem = {
   reason: string;
   suitableFor: string;
   imageUrl: string;
+  /** Required for new drafts; optional only when reading pre-migration reviews. */
+  sourceUrl?: string;
 };
 
 export type ManualReview = {
@@ -37,6 +39,8 @@ export const manualReviewInputSchema = z.object({
     reason: z.string().trim().max(240).default(""),
     suitableFor: z.string().trim().max(160).default(""),
     imageUrl: imageUrlSchema,
+    // Optional only for reading reviews created before source attribution was added.
+    sourceUrl: z.string().url().refine(isSafePublicImageUrl, "Gunakan URL HTTPS publik yang aman.").optional(),
   })).length(5),
 });
 
@@ -48,6 +52,9 @@ export function sortManualReviewItems<T extends Pick<ManualReviewItem, "rating">
 
 export function createManualReview(value: unknown): ManualReview {
   const input = manualReviewInputSchema.parse(value);
+  if (input.items.some((item) => !item.sourceUrl)) {
+    throw new Error("Setiap pilihan membutuhkan tautan sumber rating/fakta agar bisa dicantumkan di komentar dan kunci kuis.");
+  }
   return {
     kind: MANUAL_REVIEW_MARKER,
     headline: input.headline,
@@ -82,11 +89,33 @@ export function manualImageReferer(imageUrl: string): string {
   return `${image.origin}/`;
 }
 
-export function buildManualReviewCaption(review: ManualReview): string {
+export function buildManualReviewSourceList(review: ManualReview): string {
+  const sources = review.items
+    .map((item, index) => item.sourceUrl ? `${index + 1}. ${item.title}: ${item.sourceUrl}` : null)
+    .filter((line): line is string => Boolean(line));
+  return sources.length ? `Sumber rating/fakta:\n${sources.join("\n")}` : "";
+}
+
+export function buildManualReviewSourceComment(review: ManualReview): string {
+  const sources = buildManualReviewSourceList(review);
+  return `${sources ? `${sources}\n\n` : ""}${MANUAL_REVIEW_FOLLOW_COMMENT}`;
+}
+
+/** A deterministic, source-backed Reel script; it only repeats fields entered by the editor. */
+export function buildManualReviewNarration(review: ManualReview): string {
+  const typeLabel = review.mediaType.toLocaleLowerCase("id-ID");
+  const winner = review.items[0];
+  if (!winner) return "";
+  return `Beezers, ini lima rekomendasi ${typeLabel} dari PopBeez. Pilihan nomor satu adalah ${winner.title}, rating ${winner.rating.toFixed(1)} dari sepuluh, dengan genre ${winner.genre}. Urutan berikutnya: ${review.items.slice(1).map((item, index) => `nomor ${index + 2}, ${item.title}, rating ${item.rating.toFixed(1)} dari sepuluh`).join("; ")}. Sumber rating dan fakta ada di komentar. Mana yang paling bikin penasaran?`;
+}
+
+export function buildManualReviewCaption(review: ManualReview, options: { includeSources?: boolean } = {}): string {
   const rows = review.items.map((item, index) => {
     return `${["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"][index]} ${index === 0 ? "JUARA MINGGU INI: " : ""}${item.title} — ⭐ ${item.rating.toFixed(1)}/10\n• Genre: ${item.genre}${item.reason ? `\n• Kenapa wajib nonton: ${item.reason}` : ""}${item.suitableFor ? `\n• Cocok untuk: ${item.suitableFor}` : ""}`;
   }).join("\n\n");
   const typeLabel = review.mediaType.toLocaleLowerCase("id-ID");
-  // No links in the caption: the follow link goes into the first comment instead.
-  return `🏆 ${review.headline}! 🎬✨\n\nBeezers, bingung mau pilih ${typeLabel} buat ditonton? Ini lima rekomendasi berdasarkan rating yang dicantumkan.\n\n${rows}\n\n💬 Beezers, mana yang paling bikin penasaran? Tulis nomornya di kolom komentar ya! 👇\n\n#Rekomendasi${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #Review${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #WatchlistMingguIni`;
+  // Direct Facebook publishing puts sources in the first comment; queued Buffer/Instagram copies can opt into a source block.
+  const caption = `🏆 ${review.headline}! 🎬✨\n\nBeezers, bingung mau pilih ${typeLabel} buat ditonton? Ini lima rekomendasi berdasarkan rating yang dicantumkan.\n\n${rows}\n\n💬 Beezers, mana yang paling bikin penasaran? Tulis nomornya di kolom komentar ya! 👇\n\n#Rekomendasi${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #Review${review.mediaType[0]}${review.mediaType.slice(1).toLowerCase()} #WatchlistMingguIni`;
+  const sources = options.includeSources ? buildManualReviewSourceList(review) : "";
+  return sources ? `${caption}\n\n${sources}` : caption;
 }

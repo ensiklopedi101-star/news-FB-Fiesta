@@ -20,7 +20,7 @@ async function pixel(output: Buffer, left: number, top: number) {
   return sharp(output).extract({ left, top, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
 }
 
-test("quiz card renders a 1080×1080 grid of five colour clues plus the brand cell", async () => {
+test("quiz card renders a 1080×1080 grid of recognizable poster crops plus the brand cell", async () => {
   const tiles = await Promise.all(Array.from({ length: QUIZ_POSTER_CELLS }, (_, index) =>
     tile(index === 0 ? { r: 240, g: 40, b: 40 } : { r: 18, g: 22, b: 30 })));
 
@@ -32,9 +32,9 @@ test("quiz card renders a 1080×1080 grid of five colour clues plus the brand ce
   assert.equal(QUIZ_POSTER_CELLS, 5);
   assert.equal(QUIZ_BRAND_CELL_INDEX, 5);
 
-  // Colour survives: red clothing/scenery must not turn into black silhouettes.
-  const paper = await pixel(output, 8, 8);
-  assert.ok(paper[0]! > 180 && paper[1]! < 100, `warna poster harus dipertahankan (${[...paper]})`);
+  // Recognizable poster color survives the crop and light vignette; it is no longer an abstract silhouette.
+  const clue = await pixel(output, 8, 8);
+  assert.ok(clue[0]! > 180 && clue[1]! < 90, `petunjuk poster asli harus tetap terlihat (${[...clue]})`);
 
   // The bottom-right cell is the brand panel: dark, never a poster.
   const brand = await pixel(output, QUIZ_CELL_WIDTH + 40, QUIZ_CELL_HEIGHT * 2 + 40);
@@ -87,16 +87,22 @@ test("quiz card numbers every poster cell so the caption can reference positions
   assert.ok(paper[0]! > 180, "kertas di sekitar badge tetap terang");
 });
 
-test("recognisable colour details survive the clue crop", async () => {
-  const art = await sharp({ create: { width: 200, height: 300, channels: 3, background: "#f7e7cf" } })
-    .composite([{ input: await sharp({ create: { width: 120, height: 120, channels: 3, background: "#ff0000" } }).png().toBuffer(), left: 40, top: 90 }])
+test("quiz card crops poster title and footer bands while retaining central artwork", async () => {
+  const poster = await sharp({ create: { width: 120, height: 180, channels: 3, background: "#2456c4" } })
+    .composite([
+      { input: await sharp({ create: { width: 120, height: 28, channels: 3, background: "#ed3434" } }).png().toBuffer(), left: 0, top: 0 },
+      { input: await sharp({ create: { width: 120, height: 36, channels: 3, background: "#24a45b" } }).png().toBuffer(), left: 0, top: 144 },
+    ])
     .png()
     .toBuffer();
+  const output = await renderQuizCard({ tiles: Array.from({ length: QUIZ_POSTER_CELLS }, () => poster) });
+  const centralArtwork = await pixel(output, Math.floor(QUIZ_CELL_WIDTH / 2), Math.floor(QUIZ_CELL_HEIGHT / 2));
+  assert.ok(centralArtwork[2]! > centralArtwork[0]!, `karya tengah poster harus dikenali (${[...centralArtwork]})`);
 
-  const output = await renderQuizCard({ tiles: Array.from({ length: QUIZ_POSTER_CELLS }, () => art) });
-  // The red block survives untouched in the middle of the first cell.
-  const middle = await pixel(output, QUIZ_CELL_WIDTH / 2, QUIZ_CELL_HEIGHT / 2);
-  assert.ok(middle[0]! > 150 && middle[1]! < 120, `art siap pakai tidak boleh diproses ulang (${[...middle]})`);
+  const topBand = await pixel(output, 15, 15);
+  const footerBand = await pixel(output, 15, QUIZ_CELL_HEIGHT - 15);
+  assert.ok(topBand[2]! > topBand[0]!, `pita judul poster di bagian atas harus terpotong (${[...topBand]})`);
+  assert.ok(footerBand[2]! > footerBand[1]!, `pita footer poster di bagian bawah harus terpotong (${[...footerBand]})`);
 });
 
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { summarizeFacebookInsights } from "../src/lib/facebook-insights-core";
+import { summarizeFacebookInsights, type FacebookInsightsPostInput } from "../src/lib/facebook-insights-core";
 import {
   buildContentManagerPrompt,
   buildDeterministicPlan,
@@ -305,9 +305,12 @@ test("Facebook Insights adds a sample-qualified pillar signal to deterministic c
       facebookPostId,
       title: "Kabar manga",
       pillar: "manga" as const,
+      segment: "roundup",
+      contentFormat: "carousel",
       slotLabel: "20:30",
       publishedAt: null,
       syncedAt: "2026-11-10T00:00:00.000Z",
+      availableMetrics: ["mediaViews", "uniqueViewers", "clicks", "reactions", "comments", "shares", "videoViews"] as FacebookInsightsPostInput["availableMetrics"],
       mediaViews: 120,
       uniqueViewers: 100,
       clicks: 0,
@@ -321,9 +324,12 @@ test("Facebook Insights adds a sample-qualified pillar signal to deterministic c
       facebookPostId,
       title: "Kabar analisis",
       pillar: "analysis" as const,
+      segment: "rating_drama_top_5",
+      contentFormat: "carousel",
       slotLabel: "12:00",
       publishedAt: null,
       syncedAt: "2026-11-10T00:00:00.000Z",
+      availableMetrics: ["mediaViews", "uniqueViewers", "clicks", "reactions", "comments", "shares", "videoViews"] as FacebookInsightsPostInput["availableMetrics"],
       mediaViews: 105,
       uniqueViewers: 100,
       clicks: 0,

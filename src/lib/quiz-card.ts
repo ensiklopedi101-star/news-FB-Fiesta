@@ -6,7 +6,6 @@ import type { QuizDifficulty } from "./quiz-customization";
 import { circularLogoBuffer } from "@/lib/logo-circle";
 import { ensureBundledFonts } from "./og-card";
 
-
 /**
  * Square 2×3 quiz grid: five poster cells plus a branded cell in the bottom-right
  * corner that carries the PopBeez logo and the "Tebak Drama" wording.
@@ -100,21 +99,27 @@ function buildBrandPanel(options: QuizCardOptions): Buffer {
   </svg>`);
 }
 
-/** Keep colour, clothes and scenery. A central crop is a clue, not a title-removal guarantee. */
-export async function renderPosterClue(tile: Uint8Array | Buffer, difficulty: QuizDifficulty = "medium"): Promise<Buffer> {
-  const image = await sharp(Buffer.from(tile), { limitInputPixels: 40_000_000 }).rotate().png().toBuffer();
-  const { width = 1, height = 1 } = await sharp(image).metadata();
-  const crop = await sharp(image)
-    .extract({ left: Math.floor(width * 0.08), top: Math.floor(height * 0.10),
-      width: Math.max(1, Math.floor(width * 0.84)), height: Math.max(1, Math.floor(height * 0.65)) })
-    .resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { fit: "cover", position: "centre" })
-    .png().toBuffer();
-  if (difficulty === "easy") return sharp(crop).blur(2).jpeg({ quality: 92 }).toBuffer();
-  const pixels = difficulty === "hard" ? 18 : 36;
-  let small = sharp(crop).resize(pixels, Math.round(pixels * QUIZ_CELL_HEIGHT / QUIZ_CELL_WIDTH), { fit: "fill" });
-  if (difficulty === "hard") small = small.grayscale();
-  const mosaic = await small.png().toBuffer();
-  return sharp(mosaic).resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { kernel: "nearest", fit: "fill" }).jpeg({ quality: 92 }).toBuffer();
+/**
+ * Keep the recognizable artwork as the clue. A centered crop removes much of the
+ * poster title/footer bands, while preserving the cast, palette, and composition
+ * that viewers can recognize; unlike the former silhouette treatment, it does
+ * not turn every drama into an abstract shape.
+ */
+async function renderPosterCell(tile: Uint8Array | Buffer): Promise<Buffer> {
+  const rotated = await sharp(Buffer.from(tile), { limitInputPixels: 40_000_000 }).rotate().toBuffer();
+  const metadata = await sharp(rotated).metadata();
+  const sourceWidth = metadata.width ?? 600;
+  const sourceHeight = metadata.height ?? 900;
+  const cropTop = Math.round(sourceHeight * 0.14);
+  const cropHeight = Math.max(1, Math.min(Math.round(sourceHeight * 0.72), sourceHeight - cropTop));
+  const crop = await sharp(rotated)
+    .extract({ left: 0, top: cropTop, width: sourceWidth, height: cropHeight })
+    .resize(QUIZ_CELL_WIDTH, QUIZ_CELL_HEIGHT, { fit: "cover", position: "attention" })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+  // A light vignette improves contrast with the number badge without hiding the clue.
+  const shade = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${QUIZ_CELL_WIDTH}" height="${QUIZ_CELL_HEIGHT}"><rect width="100%" height="100%" fill="#07070b" fill-opacity=".08"/><rect y="${QUIZ_CELL_HEIGHT - 54}" width="100%" height="54" fill="#07070b" fill-opacity=".12"/></svg>`);
+  return sharp(crop).composite([{ input: shade }]).jpeg({ quality: 90 }).toBuffer();
 }
 
 export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> {
@@ -127,7 +132,7 @@ export async function renderQuizCard(options: QuizCardOptions): Promise<Buffer> 
   const layers: Array<{ input: Buffer; left: number; top: number }> = [];
   for (const [index, tile] of tiles.entries()) {
     layers.push({
-      input: await renderPosterClue(tile, options.difficulties?.[index] ?? "medium"),
+      input: await renderPosterCell(tile),
       left: (index % QUIZ_COLUMNS) * QUIZ_CELL_WIDTH,
       top: Math.floor(index / QUIZ_COLUMNS) * QUIZ_CELL_HEIGHT,
     });

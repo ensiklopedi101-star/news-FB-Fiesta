@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
   addPageComment,
-  FacebookNetworkError,
+  FacebookPublishOutcomeUnknownError,
   getFacebookConfigurationGaps,
   publishFacebookPagePost,
   usesDirectFacebookPublishing,
@@ -99,7 +99,7 @@ test("reports missing entertainment Graph configuration instead of silently publ
   assert.equal(usesDirectFacebookPublishing("news"), false);
 });
 
-test("redacts the page token from Graph API errors and flags network failures", async () => {
+test("redacts the page token and marks ambiguous single-photo publish outcomes", async () => {
   configurePage();
   globalThis.fetch = (async () => Response.json({ error: { message: "Invalid token page-token-secret" } }, { status: 400 })) as typeof fetch;
   await assert.rejects(
@@ -110,7 +110,13 @@ test("redacts the page token from Graph API errors and flags network failures", 
   globalThis.fetch = (async () => { throw new Error("socket hang up"); }) as typeof fetch;
   await assert.rejects(
     () => publishFacebookPagePost({ pageKey: "entertainment", imageUrls: ["https://images.example/one.jpg"], caption: "x" }),
-    (error: Error) => error instanceof FacebookNetworkError,
+    (error: Error) => error instanceof FacebookPublishOutcomeUnknownError && error.message.includes("Post foto mungkin sudah terbit"),
+  );
+
+  globalThis.fetch = (async () => Response.json({})) as typeof fetch;
+  await assert.rejects(
+    () => publishFacebookPagePost({ pageKey: "entertainment", imageUrls: ["https://images.example/one.jpg"], caption: "x" }),
+    (error: Error) => error instanceof FacebookPublishOutcomeUnknownError && error.message.includes("tidak mengembalikan ID"),
   );
 });
 

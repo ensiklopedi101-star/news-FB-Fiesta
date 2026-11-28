@@ -108,14 +108,22 @@ export async function publishFacebookPagePost(input: {
   if (!imageUrls.length) throw new Error("Tidak ada gambar untuk diterbitkan ke Facebook.");
 
   if (imageUrls.length === 1) {
-    const result = await postForm(`${url}/photos`, {
-      url: imageUrls[0]!,
-      caption: input.caption,
-      published: "true",
-      access_token: token,
-    }, token);
+    let result: GraphResult;
+    try {
+      result = await postForm(`${url}/photos`, {
+        url: imageUrls[0]!,
+        caption: input.caption,
+        published: "true",
+        access_token: token,
+      }, token);
+    } catch (error) {
+      if (error instanceof FacebookNetworkError) {
+        throw new FacebookPublishOutcomeUnknownError(`${error.message} Post foto mungkin sudah terbit; periksa halaman Facebook sebelum mengirim ulang.`);
+      }
+      throw error;
+    }
     const postId = result.post_id || result.id;
-    if (!postId) throw new Error("Facebook tidak mengembalikan ID postingan.");
+    if (!postId) throw new FacebookPublishOutcomeUnknownError("Facebook tidak mengembalikan ID setelah permintaan post foto berhasil; periksa halaman Facebook sebelum mengirim ulang.");
     return { postId, mediaFormat: "single" };
   }
 

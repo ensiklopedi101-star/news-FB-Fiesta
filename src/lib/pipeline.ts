@@ -501,25 +501,51 @@ export async function runNewsPipeline(options?: {
       updatedAt: new Date(),
       errorMessage: null,
     };
+    const attribution = {
+      segment: isRoundup ? "roundup" as const : null,
+      contentFormat: postFormat === "carousel" ? "carousel" as const : "single_image" as const,
+    };
     try {
       await db.update(articles)
-        .set({ ...readyRow, pillar })
+        .set({ ...readyRow, ...attribution, pillar })
         .where(eq(articles.id, article.id));
     } catch (error) {
-      if (!isMissingColumnError(error, "pillar")) throw error;
-      logStage("pillar-column-missing: jalankan drizzle/0015_content_pillars.sql");
-      await db.update(articles)
-        .set(readyRow)
-        .where(eq(articles.id, article.id));
+      const missingPillar = isMissingColumnError(error, "pillar");
+      const missingAttribution = isMissingColumnError(error, "segment") || isMissingColumnError(error, "content_format");
+      if (!missingPillar && !missingAttribution) throw error;
+      if (missingAttribution) logStage("attribution-columns-missing: jalankan drizzle/0019_popbeez_segments_bio_drafts.sql");
+      if (missingPillar) logStage("pillar-column-missing: jalankan drizzle/0015_content_pillars.sql");
+      const fallback = { ...readyRow, ...(missingAttribution ? {} : attribution), ...(missingPillar ? {} : { pillar }) };
+      try {
+        await db.update(articles).set(fallback).where(eq(articles.id, article.id));
+      } catch (fallbackError) {
+        const fallbackMissingPillar = isMissingColumnError(fallbackError, "pillar");
+        const fallbackMissingAttribution = isMissingColumnError(fallbackError, "segment") || isMissingColumnError(fallbackError, "content_format");
+        if (!fallbackMissingPillar && !fallbackMissingAttribution) throw fallbackError;
+        if (fallbackMissingPillar) logStage("pillar-column-missing: jalankan drizzle/0015_content_pillars.sql");
+        if (fallbackMissingAttribution) logStage("attribution-columns-missing: jalankan drizzle/0019_popbeez_segments_bio_drafts.sql");
+        await db.update(articles).set({
+          ...readyRow,
+          ...(!missingPillar && !fallbackMissingPillar ? { pillar } : {}),
+        }).where(eq(articles.id, article.id));
+      }
     }
     if (articleIds.length > 1) {
-      await Promise.all(articleIds.map((storyId, index) => db.update(articles).set({
-        ...(index > 0 && copy.roundupTitles?.[index] ? { title: copy.roundupTitles[index] } : {}),
-        status: "ready",
-        postFormat,
-        facebookPostId: `${pendingPrefix}:${article.id}`,
-        updatedAt: new Date(),
-      }).where(eq(articles.id, storyId))));
+      await Promise.all(articleIds.map(async (storyId, index) => {
+        const companion = {
+          ...(index > 0 && copy.roundupTitles?.[index] ? { title: copy.roundupTitles[index] } : {}),
+          status: "ready" as const,
+          postFormat,
+          facebookPostId: `${pendingPrefix}:${article.id}`,
+          updatedAt: new Date(),
+        };
+        try {
+          await db.update(articles).set({ ...companion, ...attribution }).where(eq(articles.id, storyId));
+        } catch (error) {
+          if (!isMissingColumnError(error, "segment") && !isMissingColumnError(error, "content_format")) throw error;
+          await db.update(articles).set(companion).where(eq(articles.id, storyId));
+        }
+      }));
     }
     await recordOriginality(article.id, { take: copy.take, voiceId: copy.voiceId, narration: copy.narration }, originality);
 
@@ -544,16 +570,24 @@ export async function runNewsPipeline(options?: {
 
     if (result.provider === "facebook") {
       // Direct Graph publishing is public immediately; there is no Buffer schedule slot.
-      await db.update(articles)
-        .set({
-          status: "published",
-          postFormat: result.mediaFormat,
-          facebookPostId: result.postId,
-          publishedAt: new Date(),
-          updatedAt: new Date(),
-          errorMessage: null,
-        })
-        .where(inArray(articles.id, articleIds));
+      const publishedRow = {
+        status: "published" as const,
+        postFormat: result.mediaFormat,
+        facebookPostId: result.postId,
+        publishedAt: new Date(),
+        updatedAt: new Date(),
+        errorMessage: null,
+      };
+      try {
+        await db.update(articles).set({
+          ...publishedRow,
+          contentFormat: result.mediaFormat === "carousel" ? "carousel" : "single_image",
+        }).where(inArray(articles.id, articleIds));
+      } catch (error) {
+        if (!isMissingColumnError(error, "content_format")) throw error;
+        logStage("content-format-column-missing: jalankan drizzle/0019_popbeez_segments_bio_drafts.sql");
+        await db.update(articles).set(publishedRow).where(inArray(articles.id, articleIds));
+      }
       if (isRoundup) await db.update(articles).set({ carouselSlides }).where(eq(articles.id, article.id));
       logStage("facebook-published");
 
@@ -614,9 +648,16 @@ export async function runNewsPipeline(options?: {
 
     // Buffer menerima konten ke antreannya; Facebook akan menerbitkannya pada slot jadwal Buffer.
     // Gunakan prefix untuk membedakan ID Buffer dari ID posting Facebook lama tanpa migrasi schema.
-    await db.update(articles)
-      .set({ status: "ready", postFormat: result.mediaFormat, facebookPostId: `buffer:${result.postId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null })
-      .where(inArray(articles.id, articleIds));
+    const bufferQueuedRow = { status: "ready" as const, postFormat: result.mediaFormat, facebookPostId: `buffer:${result.postId}`, publishedAt: null, updatedAt: new Date(), errorMessage: null };
+    try {
+      await db.update(articles).set({
+        ...bufferQueuedRow,
+        contentFormat: result.mediaFormat === "carousel" ? "carousel" : "single_image",
+      }).where(inArray(articles.id, articleIds));
+    } catch (error) {
+      if (!isMissingColumnError(error, "content_format")) throw error;
+      await db.update(articles).set(bufferQueuedRow).where(inArray(articles.id, articleIds));
+    }
     if (isRoundup) await db.update(articles).set({ carouselSlides }).where(eq(articles.id, article.id));
     else await db.update(articles).set({ carouselSlides: result.mediaFormat === "carousel" ? carouselSlides : null }).where(eq(articles.id, article.id));
     logStage("tracking-saved");
