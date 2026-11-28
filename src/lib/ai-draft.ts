@@ -126,10 +126,30 @@ export function rankOpenRouterFreeModels(availableIds: string[], preferred?: str
 
 /**
  * Parses Groq OTPM rate-limit errors such as:
- * `on output tokens per minute (OTPM): Limit 1000, Requested 1600`
- * and returns a safe `max_tokens` value below the organization's enforced ceiling.
+ * `Limit 1000, Requested 1600` and rate-limit errors containing `Used 244, Requested 850`,
+ * returning a safe `max_tokens` value below the currently available OTPM capacity.
  */
 export function parseGroqOtpmSafeTokens(errorMessage: string): number | null {
+  const usageMatch = errorMessage.match(/Limit\s+(\d+)\s*,\s*Used\s+(\d+)\s*,\s*Requested\s+(\d+)/i);
+  if (usageMatch) {
+    const limit = Number(usageMatch[1]);
+    const used = Number(usageMatch[2]);
+    const requested = Number(usageMatch[3]);
+    const safeRemaining = limit - used - 80;
+    if (
+      !Number.isFinite(limit)
+      || !Number.isFinite(used)
+      || !Number.isFinite(requested)
+      || limit < 350
+      || used < 0
+      || requested < 1
+      || safeRemaining < 350
+    ) {
+      return null;
+    }
+    return Math.min(limit - 80, safeRemaining);
+  }
+
   const match = errorMessage.match(/output tokens per minute\s*\(OTPM\)\s*:\s*Limit\s+(\d+)\s*,\s*Requested\s+(\d+)/i)
     ?? errorMessage.match(/Limit\s+(\d+)\s*,\s*Requested\s+(\d+)/i);
   if (!match) return null;
