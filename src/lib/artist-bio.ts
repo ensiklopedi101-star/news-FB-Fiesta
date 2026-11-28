@@ -2,10 +2,12 @@ import { z } from "zod";
 import { isSafePublicImageUrl } from "@/lib/safe-url";
 import { INSTAGRAM_HANDLE } from "@/lib/brand";
 import { MANUAL_REVIEW_FOLLOW_COMMENT } from "@/lib/manual-review";
+import { ARTIST_BIO_MAX_FACTS, ARTIST_BIO_MIN_FACTS } from "@/lib/artist-bio-constants";
+
+export { ARTIST_BIO_MAX_FACTS, ARTIST_BIO_MIN_FACTS } from "@/lib/artist-bio-constants";
 
 export const ARTIST_BIO_MARKER = "popbeez-artist-bio-v1";
 export const ARTIST_BIO_SOURCE_NAME = "Artis Bio PopBeez";
-export const ARTIST_BIO_PHOTOS = 4;
 
 export type ArtistBioFact = {
   fact: string;
@@ -26,7 +28,7 @@ export const artistBioInputSchema = z.object({
     fact: z.string().trim().min(12).max(140),
     sourceUrl: safeUrl,
     imageUrl: safeUrl,
-  })).length(ARTIST_BIO_PHOTOS),
+  })).min(ARTIST_BIO_MIN_FACTS).max(ARTIST_BIO_MAX_FACTS),
 }).strict();
 
 export function createArtistBio(value: unknown): ArtistBio {
@@ -57,7 +59,9 @@ export function buildArtistBioCaption(bio: ArtistBio, options: { includeSources?
   const caption = [
     `ARTIS BIO: ${bio.name}`,
     "",
-    "Beezers, geser untuk empat fakta yang sudah dilengkapi sumber. Mana yang baru kamu tahu?",
+    bio.facts.length === 1
+      ? "Beezers, kenalan singkat dengan satu fakta yang sudah dilengkapi sumber. Mana yang baru kamu tahu?"
+      : `Beezers, geser untuk ${bio.facts.length} fakta yang sudah dilengkapi sumber. Mana yang baru kamu tahu?`,
     "",
     `#ArtisBio #PopBeez #${INSTAGRAM_HANDLE.replace(/^@/, "")}`,
   ].join("\n");
@@ -73,12 +77,14 @@ export function buildArtistBioSourceComment(bio: ArtistBio): string {
   return `${buildArtistBioSourceList(bio)}\n\n${MANUAL_REVIEW_FOLLOW_COMMENT}`;
 }
 
-/** Deterministic voiceover: the only biographical claims are the four redaction-supplied facts. */
+/** Deterministic voiceover: the only biographical claims are the source-backed facts supplied by the editors. */
 export function buildArtistBioNarration(bio: ArtistBio): string {
   return [
     `Beezers, kenalan dengan ${bio.name}.`,
     ...bio.facts.map((item) => item.fact),
-    "Semua fakta bersumber dari tautan yang dicantumkan redaksi.",
+    bio.facts.length === 1
+      ? "Fakta ini bersumber dari tautan yang dicantumkan redaksi."
+      : "Semua fakta bersumber dari tautan yang dicantumkan redaksi.",
     "Fakta mana yang paling baru buat kamu?",
   ].join(" ");
 }

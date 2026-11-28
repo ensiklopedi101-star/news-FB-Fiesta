@@ -6,6 +6,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { facebookPostUrl, isLivePost, splitArticleSections } from "@/lib/article-sections";
 import { PILLARS, classifyPillar } from "@/lib/pillars";
 import { contentFormatLabel, contentSegmentLabel } from "@/lib/content-taxonomy";
+import { ARTIST_BIO_MAX_FACTS } from "@/lib/artist-bio-constants";
 import type { FacebookInsightsSummary } from "@/lib/facebook-insights-core";
 
 type Feed = {
@@ -338,7 +339,7 @@ const TAB_HINTS: Record<DashboardTab, string> = {
   published: "Post yang sudah keluar dari antrean: terbit, menunggu slot Buffer, atau gagal.",
   feeds: "Sumber RSS untuk halaman Berita dan Hiburan.",
   manual: "Kurasi Rating Drama Top 5 dengan fakta, sumber, dan pratinjau carousel sebelum terbit.",
-  artistBio: "Susun draf Artis Bio dari empat foto dan empat fakta bersumber; cek carousel sebelum terbit.",
+  artistBio: "Buat Artis Bio dari satu fakta, satu sumber, dan satu foto wajib; slide tambahan bersifat opsional.",
   quiz: "Kuis Tebak Drama dari poster crop yang lebih mudah dikenali; kunci jawaban dan sumber disimpan untuk redaksi.",
   reels: "Pilih artikel hiburan dan salin prompt untuk membuat video dengan AI lain; render otomatis tersedia jika encoder disetel.",
   originality: "Penjaga orisinalitas: skor, opini redaksi, dan post yang ditahan.",
@@ -374,7 +375,7 @@ export default function Dashboard() {
   const [reviewItems, setReviewItems] = useState<ReviewDraftItem[]>(() => Array.from({ length: 5 }, blankReviewItem));
   const [reviewPreview, setReviewPreview] = useState<EditorialPreview | null>(null);
   const [artistBioName, setArtistBioName] = useState("");
-  const [artistBioFacts, setArtistBioFacts] = useState<ArtistBioDraftFact[]>(() => Array.from({ length: 4 }, blankArtistBioFact));
+  const [artistBioFacts, setArtistBioFacts] = useState<ArtistBioDraftFact[]>(() => [blankArtistBioFact()]);
   const [artistBioPreview, setArtistBioPreview] = useState<EditorialPreview | null>(null);
   const [quizPreview, setQuizPreview] = useState<QuizPreview | null>(null);
 
@@ -584,7 +585,7 @@ export default function Dashboard() {
       });
       if (!result.draftId || !result.previewImages?.length) throw new Error("Pratinjau Artis Bio tidak lengkap.");
       setArtistBioPreview({ draftId: result.draftId, images: result.previewImages, expiresAt: result.expiresAt ?? "", fingerprint, title: result.title ?? `Kenalan dengan ${artistBioName}` });
-      setMessage("Pratinjau empat slide Artis Bio siap. Periksa setiap foto, fakta, dan sumber sebelum menerbitkan.");
+      setMessage(`Pratinjau ${result.previewImages.length} slide Artis Bio siap. Periksa setiap foto, fakta, dan sumber sebelum menerbitkan.`);
     } catch (error) {
       setArtistBioPreview(null);
       setMessage(error instanceof Error ? error.message : "Gagal membuat pratinjau Artis Bio.");
@@ -600,7 +601,7 @@ export default function Dashboard() {
       setMessage("Isi Artis Bio berubah setelah pratinjau. Buat pratinjau baru sebelum menerbitkan.");
       return;
     }
-    if (!window.confirm("Terbitkan persis empat slide Artis Bio yang sedang dipratinjau? Semua fakta harus sudah cocok dengan sumber.")) return;
+    if (!window.confirm(`Terbitkan persis ${artistBioPreview.images.length} slide Artis Bio yang sedang dipratinjau? Semua fakta harus sudah cocok dengan sumber.`)) return;
     setArtistBioPreview(null);
     setBusy(true);
     setMessage("");
@@ -617,8 +618,8 @@ export default function Dashboard() {
         setMessage(result.provider === "facebook"
           ? `Artis Bio “${result.title ?? artistBioName}” diterbitkan; sumber fakta dikirim ke komentar pertama.`
           : result.mediaFormat === "single"
-            ? "Artis Bio diterima Buffer, tetapi empat foto tidak masuk sebagai carousel; tautan sumber tetap ada di caption. Periksa dukungan carousel channel."
-            : `Artis Bio “${result.title ?? artistBioName}” masuk ke antrean Buffer sebagai carousel empat foto; tautan sumber ada di caption.`);
+            ? `Artis Bio “${result.title ?? artistBioName}” masuk ke antrean Buffer sebagai satu foto; tautan sumber ada di caption.`
+            : `Artis Bio “${result.title ?? artistBioName}” masuk ke antrean Buffer sebagai carousel ${artistBioPreview.images.length} foto; tautan sumber ada di caption.`);
         if (result.detail) setMessage((current) => `${current} Catatan: ${result.detail}`);
       }
       setArtistBioPreview(null);
@@ -1692,13 +1693,14 @@ export default function Dashboard() {
 
       {activeTab === "artistBio" && (
       <section className="panel manual-review-panel artist-bio-panel">
-        <div className="panel-heading"><div><p className="eyebrow">SEGMEN · ARTIS BIO</p><h2>Kenalan lewat empat fakta</h2><p className="muted small-note">Satu foto, satu fakta, dan satu sumber untuk tiap slide. Tidak ada biodata otomatis yang dikarang; AI tidak menambahkan klaim. Facebook langsung mendapat sumber di komentar pertama; Buffer/Instagram mencantumkannya di caption.</p></div><span className="format-tag carousel">4 foto · Carousel</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">SEGMEN · ARTIS BIO</p><h2>Kenalan lewat fakta</h2><p className="muted small-note">Cukup isi nama artis dan satu fakta beserta sumber serta foto. Slide tambahan bisa ditambahkan bila ada; satu slide menjadi foto tunggal, beberapa slide menjadi carousel. Tidak ada biodata otomatis yang dikarang.</p></div><span className="format-tag carousel">1–4 foto</span></div>
         {!data?.popbeezEditorialSchemaReady && <p className="notice error-notice">Preview-then-publish belum siap. Jalankan migrasi <code>drizzle/0019_popbeez_segments_bio_drafts.sql</code> di Neon.</p>}
         <form className="manual-review-form" onSubmit={(event) => void previewArtistBio(event)}>
           <label className="full-field">Nama artis<input value={artistBioName} onChange={(event) => setArtistBioName(event.target.value)} required minLength={2} maxLength={50} placeholder="Nama sesuai sumber" /></label>
           <div className="manual-review-items artist-bio-facts">
             {artistBioFacts.map((item, index) => <fieldset className="manual-review-item" key={index}>
-              <legend>Foto &amp; fakta {index + 1}</legend>
+              <legend>Fakta &amp; foto {index + 1} · {index === 0 ? "wajib" : "opsional"}</legend>
+              {index > 0 && <button type="button" className="secondary-button artist-bio-remove" disabled={busy} onClick={() => setArtistBioFacts((current) => current.filter((_, factIndex) => factIndex !== index))}>Hapus slide opsional</button>}
               <div className="form-grid">
                 <label className="full-field">Fakta terverifikasi<input value={item.fact} onChange={(event) => setArtistBioFacts((current) => current.map((entry, factIndex) => factIndex === index ? { ...entry, fact: event.target.value } : entry))} required minLength={12} maxLength={140} placeholder="Satu fakta ringkas yang bisa dicek di tautan sumber" /></label>
                 <label className="full-field">Sumber fakta (HTTPS)<input type="url" value={item.sourceUrl} onChange={(event) => setArtistBioFacts((current) => current.map((entry, factIndex) => factIndex === index ? { ...entry, sourceUrl: event.target.value } : entry))} required placeholder="https://sumber-asli..." /></label>
@@ -1706,12 +1708,15 @@ export default function Dashboard() {
               </div>
             </fieldset>)}
           </div>
-          <button type="submit" className="secondary-button" disabled={busy || !data?.popbeezEditorialSchemaReady}>{busy ? "Menyusun pratinjau…" : "Pratinjau carousel empat foto"}</button>
-          <p className="muted small-note">Fakta ditulis redaksi dari sumber yang disertakan. Jika AI dipakai di luar aplikasi untuk merapikan kalimat, verifikasi kembali tiap kata; aplikasi ini tidak membuat biodata dari nama artis.</p>
+          <div className="artist-bio-actions">
+            {artistBioFacts.length < ARTIST_BIO_MAX_FACTS && <button type="button" className="secondary-button" disabled={busy} onClick={() => setArtistBioFacts((current) => current.length < ARTIST_BIO_MAX_FACTS ? [...current, blankArtistBioFact()] : current)}>+ Tambah fakta/foto opsional</button>}
+            <button type="submit" className="secondary-button" disabled={busy || !data?.popbeezEditorialSchemaReady}>{busy ? "Menyusun pratinjau…" : `Pratinjau ${artistBioFacts.length} slide`}</button>
+          </div>
+          <p className="muted small-note">Minimal satu fakta wajib lengkap dengan sumber dan foto. Slide 2–4 opsional; jika ditambahkan, lengkapi semua kolomnya. Fakta ditulis redaksi dari sumber yang disertakan dan harus diverifikasi sebelum terbit.</p>
         </form>
         {activeArtistBioPreview && <div className="editorial-preview-card">
-          <div className="form-title"><strong>{activeArtistBioPreview.title} · pratinjau carousel</strong><span>{activeArtistBioPreview.images.length} foto · berlaku sampai {formatDate(activeArtistBioPreview.expiresAt)}</span></div>
-          <div className="editorial-preview-grid four-slides">{activeArtistBioPreview.images.map((image, index) => <figure key={`${activeArtistBioPreview.draftId}-${index}`}>
+          <div className="form-title"><strong>{activeArtistBioPreview.title} · pratinjau {activeArtistBioPreview.images.length === 1 ? "foto" : "carousel"}</strong><span>{activeArtistBioPreview.images.length} foto · berlaku sampai {formatDate(activeArtistBioPreview.expiresAt)}</span></div>
+          <div className="editorial-preview-grid artist-bio-slides">{activeArtistBioPreview.images.map((image, index) => <figure key={`${activeArtistBioPreview.draftId}-${index}`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={image} alt={`Pratinjau Artis Bio foto ${index + 1}`} /><figcaption>Fakta {index + 1}</figcaption>
           </figure>)}</div>

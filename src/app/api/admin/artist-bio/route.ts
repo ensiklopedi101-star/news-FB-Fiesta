@@ -135,9 +135,9 @@ async function publishPreview(draftId: string) {
       narrationScript: buildArtistBioNarration(bio),
       pillar: "analysis",
       segment: "artis_bio",
-      contentFormat: "carousel",
+      contentFormat: imageUrls.length > 1 ? "carousel" : "single_image",
       status: "processing",
-      postFormat: "carousel",
+      postFormat: imageUrls.length > 1 ? "carousel" : "single",
       facebookPostId: `${directFacebook ? "facebook" : "buffer"}:pending:${id}`,
       updatedAt: new Date(),
     });
@@ -187,7 +187,9 @@ async function publishPreview(draftId: string) {
       contentFormat: result.mediaFormat === "carousel" ? "carousel" : "single_image",
       facebookPostId: `buffer:${result.postId}`,
       updatedAt: new Date(),
-      errorMessage: result.mediaFormat === "single" ? "Buffer hanya menerima cover; pratinjau empat foto tidak masuk sebagai carousel." : null,
+      errorMessage: result.mediaFormat === "single" && imageUrls.length > 1
+        ? `Buffer hanya menerima cover; pratinjau ${imageUrls.length} foto tidak masuk sebagai carousel.`
+        : null,
     }).where(eq(articles.id, id));
     await finishEditorialDraft({ id: draftId, status: "submitted", resultId: id });
     return NextResponse.json({ ok: true, id, title, provider: result.provider, mediaFormat: result.mediaFormat }, { status: 201 });

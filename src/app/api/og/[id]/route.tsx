@@ -52,7 +52,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const manualReview = roundupIds ? null : parseManualReview(cardArticle.rawText);
   const artistBio = roundupIds ? null : parseArtistBio(cardArticle.rawText);
   const requestedSlide = Number.parseInt(searchParams.get("slide") ?? "1", 10);
-  const slideTotal = roundupIds?.length ?? (manualReview ? 6 : artistBio ? 4 : 4);
+  const slideTotal = roundupIds?.length ?? (manualReview ? 6 : artistBio ? artistBio.facts.length : 4);
   if (!Number.isInteger(requestedSlide) || requestedSlide < 1 || requestedSlide > slideTotal) {
     return new Response("Invalid carousel slide", { status: 400 });
   }
@@ -64,7 +64,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // never a combined "headline — summary" paragraph on top of the photo.
   const slide = artistBio ? {
     number: requestedSlide,
-    total: 4,
+    total: artistBio.facts.length,
     label: `FAKTA ${requestedSlide}`,
     text: `${artistBio.name}\n${artistBio.facts[requestedSlide - 1]?.fact ?? "Fakta tidak tersedia."}`,
   } : roundupIds ? {
