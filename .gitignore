@@ -16,3 +16,6 @@ out/
 /image-search/
 /preview-quiz-*.jpg
 preview-reel-frame.png
+
+# Python virtualenv for local deck/data tooling
+.venv/
